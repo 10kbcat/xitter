@@ -1,0 +1,10 @@
+node_modules/
+.env
+# raw captures: live cookies and password inside
+har-raw/
+# cleaned samples still hold other people's posts
+samples/
+# proprietary client bundle, fetched by script
+client/
+server.log
+.probe/

@@ -1,0 +1,14 @@
+{
+	"name": "xitter",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "bun --watch src/server.ts",
+		"start": "bun src/server.ts",
+		"har:extract": "bun scripts/har-extract.ts",
+		"client:fetch": "bun scripts/fetch-client.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}
