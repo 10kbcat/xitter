@@ -5,6 +5,7 @@ import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { settings } from "./settings";
 import { TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
+import { POST_CONTEXT_CSS, POST_CONTEXT_SCRIPT } from "./post-context";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
@@ -99,8 +100,10 @@ const CLAIMED_FEATURES = Object.fromEntries(["subscriptions_feature_article_comp
 // lists that patch.ts has already rewritten, so the captured value would fail;
 // without the switch the client falls back to its (patched) default.
 const HOST_SWITCHES = ["responsive_web_media_upload_host"];
-const withoutHostSwitches = (config: Record<string, unknown>) =>
-	Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k)));
+const clientSwitches = (config: Record<string, unknown>) => ({
+	...Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k))),
+	responsive_web_birdwatch_note_writing_enabled: { value: true },
+});
 
 function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"]) {
 	return {
@@ -109,8 +112,8 @@ function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadB
 			users: user ? { entities: { [user.id]: legacyUser(user) }, errors: {}, fetchStatus: { [user.id]: "loaded" } } : { entities: {}, errors: {}, fetchStatus: {} },
 		},
 		featureSwitch: {
-			defaultConfig: withoutHostSwitches(fs.defaultConfig),
-			user: { config: withoutHostSwitches(fs.config), impression_pointers: {}, impressions: {}, keysRead: {}, settingsVersion: fs.settingsVersion },
+			defaultConfig: clientSwitches(fs.defaultConfig),
+			user: { config: clientSwitches(fs.config), impression_pointers: {}, impressions: {}, keysRead: {}, settingsVersion: fs.settingsVersion },
 			debug: {},
 			featureSetToken: fs.featureSetToken,
 			isLoaded: true,
@@ -199,12 +202,14 @@ export function shell(user: User | null, multi = false): string | undefined {
 <link rel="icon" type="image/png" href="/public/favicon.png" /><link rel="apple-touch-icon" href="/public/icon-light.png" />
 <style>html,body{height:100%}body{margin:0;background-color:#000;overflow-y:scroll}${LOGO_CSS}
 ${hideCss()}
-${FLAG_PICKER_CSS}</style>
+${FLAG_PICKER_CSS}
+${POST_CONTEXT_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
-${FLAG_PICKER_SCRIPT}</script>
+${FLAG_PICKER_SCRIPT}
+${POST_CONTEXT_SCRIPT}</script>
 <script id="nonce-csp"></script>
 <script>${runtimePatched}</script>
 ${scripts}

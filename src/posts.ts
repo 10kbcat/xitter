@@ -14,7 +14,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -34,6 +34,7 @@ function toRow(r: any): PostRow {
 	return {
 		id: r.id,
 		text: r.text,
+		source: r.source,
 		reply_to_id: r.reply_to_id,
 		conversation_id: r.conversation_id,
 		quote_id: r.quote_id,
@@ -58,6 +59,11 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	const media = await mediaForPosts(posts.map((p) => p.id));
 	for (const p of posts) p.media = media.get(p.id) ?? [];
 	if (posts.length) {
+		const notes = await sql`select n.id::text, n.post_id::text, n.text from community_notes n join users author on author.id = n.author_id and author.status <> 'suspended'
+			join community_note_ratings r on r.note_id = n.id join users voter on voter.id = r.user_id and voter.status = 'active'
+			where n.post_id = any(${sql.array(posts.map(p => p.id), "INT8")}) and n.classification = 'Misleading' and n.author_id not in ${blockedFor(viewerId)}
+			group by n.id having count(*) >= 3 and count(*) filter(where r.rating = 'Helpful') * 3 >= count(*) * 2 order by n.id desc`;
+		for (const p of posts) { const note = notes.find((n: any) => n.post_id === p.id); if (note) p.communityNote = { id: note.id, text: note.text }; }
 		const mentions = await sql`select m.post_id, u.id, u.screen_name, u.name from post_mentions m join users u on u.id = m.user_id
 			where m.post_id = any(${sql.array(posts.map((p) => p.id), "INT8")})`;
 		for (const p of posts) p.mentions = mentions.filter((m: any) => String(m.post_id) === p.id).map((m: any) => ({ id: String(m.id), screen_name: m.screen_name, name: m.name }));
@@ -193,7 +199,7 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 	return hydrate(viewerId, rows.map(toRow));
 }
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string } = {}): Promise<string> {
+export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string } = {}): Promise<string> {
 	const [author] = await sql`select status from users where id = ${userId}::bigint`;
 	if (author?.status === "restricted") throw new PostError("Your account can't post right now.", 326);
 	const id = newId();
@@ -209,8 +215,8 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
 	}
-	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id)
-		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint)`;
+	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source)
+		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"})`;
 	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
 	if (names.length)
 		await sql`insert into post_mentions (post_id, user_id)

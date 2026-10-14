@@ -138,6 +138,7 @@ const PAGES = {
 	posts: { icon: "article", title: "Posts" },
 	invites: { icon: "confirmation_number", title: "Invites" },
 	settings: { icon: "tune", title: "Settings" },
+	platforms: { icon: "devices", title: "Client platforms" },
 	audit: { icon: "history", title: "Audit log" },
 };
 
@@ -159,6 +160,19 @@ async function route() {
 }
 
 const RENDER = {
+	async platforms(main) {
+		const { platforms } = await api("platforms");
+		main.innerHTML = '<h1>Client platforms</h1><p class="dim">Bearer tokens identify the posting app. User sign-in and CSRF are still required.</p><form id="platform-form" class="box"><div class="field"><label for="platform-label">Post source label</label><input id="platform-label" maxlength="80" required placeholder="Xitter for UFO"></div><button class="primary" type="submit">Create bearer token</button><div id="platform-secret" aria-live="polite"></div></form>' +
+			platforms.map(p => '<div class="box row" style="margin-top:12px"><b>' + esc(p.label) + '</b><span class="dim">' + (p.revoked ? "Revoked" : "Active") + '</span>' + (!p.revoked ? '<button data-revoke="' + p.id + '">Revoke</button>' : '') + '</div>').join("");
+		$("#platform-form").onsubmit = async e => {
+			e.preventDefault(); const button = e.currentTarget.querySelector("button"); button.disabled = true;
+			try { const r = await api("createPlatform", { label: $("#platform-label").value });
+				await RENDER.platforms(main);
+				$("#platform-secret").innerHTML = '<div class="secret">Shown once. Save this token:<br><code>' + esc(r.token) + '</code></div>';
+			} catch(e) { notice(e.message, true); } finally { button.disabled = false; }
+		};
+		main.querySelectorAll("[data-revoke]").forEach(b => b.onclick = async () => { if(!confirm("Revoke this client token?")) return; await act(() => api("revokePlatform", { id: b.dataset.revoke }), "Token revoked"); route(); });
+	},
 	async overview(main) {
 		const s = await api("stats");
 		const mb = (Number(s.media_bytes) / 1048576).toFixed(1);
@@ -416,6 +430,7 @@ async function renderUser(main, id) {
 		'</div><p class="dim small">Restrict: can read, can\'t post. Limit: only followers see their posts. Suspend: signed out and hidden everywhere.</p></div>' +
 		// access
 		'<div class="box"><h2>Access</h2><div class="row"><button class="btn" id="reset">Reset password</button><button class="btn" id="signout">Sign out everywhere</button></div><div id="secret"></div>' +
+		'<label class="row" style="margin-top:14px"><input type="checkbox" id="notes-access"' + (u.notes_writer ? " checked" : "") + (can("admin") ? "" : " disabled") + '>Community Notes writing access</label>' +
 		(can("admin") ? '<div class="field" style="margin-top:14px"><label>Staff role</label><select id="role"><option value="">none</option>' + ["support", "moderator", "admin"].map((r) => '<option' + (u.role === r ? " selected" : "") + ">" + r + "</option>").join("") + "</select></div>" : "") +
 		(can("admin") && !self ? '<div class="field" style="margin-top:14px"><label>Delete account (type @' + esc(u.screen_name) + ' to confirm)</label><div class="row"><input id="confirm" placeholder="' + esc(u.screen_name) + '"><button class="btn danger" id="delete">Delete forever</button></div></div>' : "") +
 		"</div>" +
@@ -447,6 +462,7 @@ async function renderUser(main, id) {
 	};
 	$("#signout").onclick = () => act(() => api("signOut", { id }), "Signed out").then(again);
 	if ($("#role")) $("#role").onchange = () => act(() => api("setRole", { id, role: $("#role").value }), "Role set").then(again);
+	if (can("admin")) $("#notes-access").onchange = () => act(() => api("setNotesAccess", { id, enabled: $("#notes-access").checked }), "Notes access updated").then(again);
 	if ($("#delete")) $("#delete").onclick = () => act(async () => { await api("deleteUser", { id, confirm: $("#confirm").value }); go("users"); }, "Account deleted");
 	if ($("#addaff")) $("#addaff").onclick = () => act(() => api("addAffiliate", { orgId: id, screen_name: $("#aff").value }), "Affiliate added").then(again);
 	main.querySelectorAll("[data-unaff]").forEach((b) => b.onclick = () => act(() => api("removeAffiliate", { orgId: id, userId: b.dataset.unaff }), "Removed").then(again));

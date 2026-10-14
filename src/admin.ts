@@ -14,6 +14,7 @@ import { createInvite } from "./invites";
 import { REASONS } from "./reports";
 import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
+import { createPlatform } from "./platforms";
 
 type Role = "admin" | "moderator" | "support";
 const RANK: Record<Role, number> = { support: 1, moderator: 2, admin: 3 };
@@ -70,6 +71,29 @@ const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, 
 	(select count(*)::int from affiliations af where af.org_id = u.id) as affiliates`;
 
 const ACTIONS: Record<string, Action> = {
+	setNotesAccess: { role: "admin", run: async (a, b) => {
+		const id = idOf(b.id);
+		await guard(a, id);
+		if (typeof b.enabled !== "boolean") throw new AdminError("Provide a boolean access setting.");
+		await sql`update users set notes_writer = ${b.enabled} where id = ${id}::bigint`;
+		await audit(a, "set_notes_access", id, { enabled: b.enabled });
+		return {};
+	} },
+	platforms: { role: "admin", run: async () => ({ platforms: await sql`select id::text, label, revoked, created_at from client_platforms order by id desc` }) },
+	createPlatform: { role: "admin", run: async (a, b) => {
+		const label = typeof b.label === "string" ? b.label.trim() : "";
+		if (!label || [...label].length > 80 || /[\x00-\x1f\x7f]/.test(label)) throw new AdminError("Enter a platform label of 1–80 characters.");
+		const result = await createPlatform(label, a.id);
+		await audit(a, "create_platform", result.id, { label });
+		return result;
+	} },
+	revokePlatform: { role: "admin", run: async (a, b) => {
+		const id = idOf(b.id);
+		const rows = await sql`update client_platforms set revoked = true where id = ${id}::bigint returning id`;
+		if (!rows.length) throw new AdminError("No such platform.", 404);
+		await audit(a, "revoke_platform", id);
+		return {};
+	} },
 	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role }) },
 
 	stats: {
@@ -114,7 +138,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (_a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website,
+			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
 				from users u where u.id = ${id}::bigint`;

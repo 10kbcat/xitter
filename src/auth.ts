@@ -40,7 +40,7 @@ export type User = {
 	};
 };
 
-export type Viewer = User & { csrf: string; token: string };
+export type Viewer = User & { csrf: string; token: string; postSource?: string };
 
 export const SECURE = PUBLIC_ORIGIN.startsWith("https:") ? "; Secure" : "";
 const YEAR = 60 * 60 * 24 * 365;

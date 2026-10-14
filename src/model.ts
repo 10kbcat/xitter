@@ -164,6 +164,8 @@ export type PostRow = {
 	conversation_id: string;
 	quote_id: string | null;
 	created_at: Date;
+	source?: string;
+	communityNote?: { id: string; text: string };
 	reply_user_id: string | null;
 	reply_screen_name: string | null;
 	like_count: number;
@@ -220,6 +222,13 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
 		...(withTypename ? { __typename: "Tweet" } : {}),
+		...(p.communityNote ? { has_birdwatch_notes: true, birdwatch_pivot: {
+			title: "Readers added context they thought people might want to know", shorttitle: "Readers added context",
+			subtitle: { text: p.communityNote.text, entities: [] }, iconType: "BirdwatchLevelHigh", footerIconType: "BirdwatchLevelHigh", visualStyle: "Default",
+			destinationUrl: `/i/birdwatch/n/${p.communityNote.id}`, note: { rest_id: p.communityNote.id, language: "en", is_community_note_translatable: false, grok_translated_community_note_with_availability: { is_available: false } },
+			footer: { text: "Xitter: at least 3 ratings, with two thirds Helpful. This is a local rating rule.", entities: [] },
+			callToAction: { destinationUrl: `/i/birdwatch/n/${p.communityNote.id}`, prompt: "Is this note helpful?", title: "Rate it" },
+		} } : {}),
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
 		...(p.article ? { article: { article_results: { result: p.article } } } : {}),
 		cashtag_attachments: [],
@@ -250,6 +259,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 			favorite_count: p.like_count,
 			favorited: p.liked,
 			full_text: p.text,
+			source: (p.source ?? "Xitter for Web").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
 			id_str: p.id,
 			...(p.reply_to_id && p.reply_user_id
 				? {

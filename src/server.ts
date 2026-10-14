@@ -17,6 +17,7 @@ import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
 import { livePipeline, restRoute } from "./rest";
 import { shell } from "./shell";
+import { platformSource } from "./platforms";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -98,6 +99,9 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	// the client act as a guest and stop sending its csrf header.
 	if (!viewer && url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
 	if (!viewer) return apiError(401, 32, "Could not authenticate you.");
+	const source = await platformSource(req);
+	if (source === null) return apiError(401, 32, "Invalid or revoked client token.");
+	viewer = { ...viewer, postSource: source };
 	if (req.method !== "GET" && req.headers.get("x-csrf-token") !== viewer.csrf)
 		return apiError(403, 353, "This request requires a matching csrf cookie and header.");
 
@@ -114,6 +118,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (gql >= 0) {
 		const name = parts[parts.length - 1];
 		if (knownOperation(name)) {
+			if (/^Birdwatch(Create|Delete)/.test(name) && req.method !== "POST") return apiError(405, 144, "Use POST for note changes.");
 			let vars = req.method === "GET" ? parseJson(url.searchParams.get("variables")) : parseJson(await req.text()).variables;
 			// the chat app sends its variables as a JSON string
 			if (typeof vars === "string") vars = parseJson(vars);

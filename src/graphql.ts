@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { noteHandlers } from "./notes";
 import { sql } from "./db";
 import { blockedIds } from "./blocks";
 import { rankedFeed } from "./ranking";
@@ -167,7 +168,7 @@ const createTweet: Handler = async (viewer, vars) => {
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
 	// a quote arrives as a link to the quoted post
 	const quoteId = typeof vars.attachment_url === "string" ? /\/status(?:es)?\/(\d{1,19})/.exec(vars.attachment_url)?.[1] : undefined;
-	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId });
+	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource });
 	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
@@ -505,7 +506,7 @@ const articleHandlers: Record<string, Handler> = {
 	ArticleEntityPublish: async (v, vars) => {
 		const text = typeof vars.tweetText === "string" ? vars.tweetText : "";
 		if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
-		const result = await withPost(v.id, await articles.publish(v.id, articleId(vars), text, (t, id) => createPost(v.id, t, { articleId: id })));
+		const result = await withPost(v.id, await articles.publish(v.id, articleId(vars), text, (t, id) => createPost(v.id, t, { articleId: id, source: v.postSource })));
 		return { data: { articleentity_publish: { article_entity_results: { result } } } };
 	},
 	ArticleEntityUnpublish: async (v, vars) => ({
@@ -656,6 +657,7 @@ Object.assign(handlers, {
 
 // the chat app's operations
 Object.assign(handlers, chatHandlers);
+Object.assign(handlers, noteHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

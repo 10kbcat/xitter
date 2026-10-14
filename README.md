@@ -131,6 +131,35 @@ record stores: starting a server realm does not transfer local backups.
 
 ## Development
 
+### Client platforms and Community Notes
+
+Admins can create and revoke client bearer tokens under **Client platforms**.
+Choose a label such as `Xitter for Web`, `Xitter for Android`, or `Xitter for UFO`.
+The token is shown once; the database stores its SHA-256 hash. Send it as
+`Authorization: Bearer <token>` alongside the user's session cookies and CSRF
+header. It identifies the client, not the user, and grants no account access.
+The source is saved on new posts, replies, quotes and article posts. Revoking
+a token rejects subsequent API requests using it; historic labels stay intact.
+Requests from the pinned browser client default to `Xitter for Web`.
+
+Community Notes use the pinned client's native viewing, writing and rating
+screens. Admins grant or revoke **Community Notes writing access** under a
+user's Access section. Writing is denied by default and enforced server-side.
+Contributors have random aliases independent of their handles. Signed-in active
+users can request notes and rate other people's notes; authors cannot rate their
+own notes. Requests and ratings are deduplicated. Authors can delete their notes;
+admins and moderators can remove notes, with staff removals recorded in the audit
+log. Blocked accounts cannot interact through notes.
+
+The current local scoring rule needs at least three ratings, with two thirds
+Helpful, before a misleading-post note is displayed as native context. Ratings
+from suspended accounts are excluded. This is not X's matrix-factorization scoring
+system. Media-match notes, automated translation and appeals are not implemented.
+
+Run `bun scripts/test-notes.ts` against the development server with the existing
+`pozo`/`goldcorp` test accounts. It creates temporary posts, tokens and voters,
+restores writing access, and removes its fixtures.
+
 - `GET /_debug/unknown` lists the client calls no handler answers yet, most
   frequent first. Start there when a screen is empty.
 - `scripts/test-*.ts` check each feature end to end against a running server,

@@ -56,7 +56,7 @@ export function hideCss(): string {
 // what the script needs to know, as window.__XITTER__.tidy
 export function tidyData() {
 	const s = settings();
-	const menuItems = ["Embed post", "Request Community Note"];
+	const menuItems = ["Embed post"];
 	if (!feature("lists")) menuItems.push("Add/remove from Lists");
 	return {
 		menuItems,
@@ -121,6 +121,14 @@ export const TIDY_SCRIPT = `(function(){
 	}
 	window.addEventListener("resize",navWidth);
 	function tidy(){
+		if(location.pathname.indexOf("/i/birdwatch")===0||location.pathname.indexOf("/i/communitynotes")===0)document.querySelectorAll("span").forEach(function(n){
+			if(n.childElementCount)return;
+			var text=n.textContent;
+			if(text==="Note statuses aren’t defined by majority rule")n.textContent="Xitter uses a local rating rule";
+			else if(text&&text.indexOf("To identify notes that are helpful to a wide range of people, note statuses require agreement")===0)n.textContent="Notes appear on posts after at least three ratings, when two thirds rate them Helpful. Authors cannot rate their own notes.";
+			else if(text==="Shown on X")n.textContent="Shown on "+T.instance;
+			else if(text==="Not shown on X")n.textContent="Not shown on "+T.instance;
+		});
 		ownScreens();
 		footer();
 		navWidth();

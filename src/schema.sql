@@ -31,6 +31,49 @@ create table if not exists posts (
 create index if not exists posts_reply_to_idx on posts (reply_to_id);
 create index if not exists posts_user_idx on posts (user_id, id desc);
 
+alter table posts add column if not exists source text not null default 'Xitter for Web';
+alter table users add column if not exists notes_writer boolean not null default false;
+alter table users add column if not exists notes_alias text not null default ('Contributor-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12));
+create unique index if not exists users_notes_alias_key on users(notes_alias);
+create table if not exists client_platforms (
+	id bigint primary key,
+	label text not null check (char_length(label) between 1 and 80),
+	token_hash text not null unique,
+	creator_id bigint references users(id) on delete set null,
+	revoked boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create index if not exists client_platforms_creator_idx on client_platforms(creator_id);
+
+create table if not exists community_notes (
+	id bigint primary key,
+	post_id bigint not null references posts(id) on delete cascade,
+	author_id bigint not null references users(id) on delete cascade,
+	text text not null check (char_length(text) between 1 and 500),
+	classification text not null check (classification in ('Misleading', 'NotMisleading')),
+	created_at timestamptz not null default now(),
+	unique(post_id, author_id)
+);
+create index if not exists community_notes_author_idx on community_notes(author_id);
+alter table community_notes add column if not exists data_v1 jsonb not null default '{}';
+create table if not exists community_note_ratings (
+	note_id bigint not null references community_notes(id) on delete cascade,
+	user_id bigint not null references users(id) on delete cascade,
+	rating text not null check (rating in ('Helpful', 'SomewhatHelpful', 'NotHelpful')),
+	primary key(note_id, user_id)
+);
+create index if not exists community_note_ratings_user_idx on community_note_ratings(user_id);
+alter table community_note_ratings add column if not exists data_v2 jsonb not null default '{}';
+create table if not exists community_note_requests (
+	post_id bigint not null references posts(id) on delete cascade,
+	user_id bigint not null references users(id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key(post_id, user_id)
+);
+create index if not exists community_note_requests_user_idx on community_note_requests(user_id);
+alter table community_note_requests add column if not exists source_link text;
+alter table community_note_requests add column if not exists suggestion text;
+
 create table if not exists likes (
 	user_id bigint not null references users (id) on delete cascade,
 	post_id bigint not null references posts (id) on delete cascade,

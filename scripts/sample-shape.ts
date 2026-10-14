@@ -21,6 +21,13 @@ for (const f of readdirSync(dir).filter((f) => want.some((w) => f.includes(w))))
 	const j = JSON.parse(await Bun.file(`${dir}/${f}`).text());
 	let body: any = j.response;
 	try { body = JSON.parse(j.response); } catch {}
+	if (process.env.PICK) {
+		const matches: unknown[] = [];
+		const visit = (value: any) => { if (!value || typeof value !== "object") return; for (const [key, item] of Object.entries(value)) { if (key === process.env.PICK) matches.push(shape(item)); else visit(item); } };
+		visit(body);
+		console.log(f, JSON.stringify(matches.slice(0, 4), null, 1).slice(0, Number(process.env.MAX ?? 2500)));
+		continue;
+	}
 	console.log(`== ${f} ${j.status} vars:`, JSON.stringify(shape(Object.fromEntries(Object.entries(j.query ?? {}).map(([k, v]: any) => { try { return [k, JSON.parse(v)]; } catch { return [k, v]; } })))).slice(0, 600));
 	if (j.requestBody) console.log("request:", JSON.stringify(shape(j.requestBody), null, 1).slice(0, Number(process.env.MAX ?? 2500)));
 	console.log(JSON.stringify(shape(body), null, 1).slice(0, Number(process.env.MAX ?? 2500)));
