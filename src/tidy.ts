@@ -87,6 +87,15 @@ export const TIDY_SCRIPT = `(function(){
 		a.setAttribute("data-xitter-source","");
 		c.appendChild(a);
 	}
+	// the code boxes cut a paste to their length before dropping what isn't a
+	// digit, so "1234-5678" would lose its last digit: paste only the digits
+	document.addEventListener("paste",function(e){
+		var t=e.target;
+		if(!t||!t.classList||!t.classList.contains("jf-code-input-field"))return;
+		var text=(e.clipboardData||window.clipboardData).getData("text");
+		e.preventDefault();
+		document.execCommand("insertText",false,text.replace(/\\D/g,""));
+	},true);
 	var A=T.announcement,closed=false;
 	try{closed=!!A&&localStorage.getItem("xitter-announcement")===A.id}catch(e){}
 	function announce(){
