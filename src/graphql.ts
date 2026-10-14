@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { blockedIds } from "./blocks";
+import { rankedFeed } from "./ranking";
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
 import { notificationsTimeline, unreadCount } from "./notifications";
@@ -49,7 +50,38 @@ function pageOf(vars: Vars) {
 	return { count, at, newer: cursor[0] === "t" && !!at };
 }
 
-// "For you" shows everyone; "Following" shows the viewer and the accounts they follow
+const homeResponse = (entries: unknown[]) => ({
+	data: {
+		home: {
+			home_timeline_urt: {
+				instructions: [{ type: "TimelineAddEntries", entries }],
+				metadata: { scribeConfig: { page: "following" } },
+			},
+		},
+	},
+});
+
+// "For you" is ranked (ranking.ts) and takes in everyone; "Following" is the
+// viewer and the accounts they follow, newest first.
+// A ranked page's bottom cursor is "r<offset>.<asOf>", where asOf is the item id
+// the ranking was made at. Its top cursor is "t<asOf>": the client's poll for
+// newer posts gets what arrived since, newest first, above the ranked entries.
+const forYou: Handler = async (viewer, vars) => {
+	const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
+	const ranked = /^r(\d+)\.(\d{1,19})$/.exec(cursor);
+	if (cursor && !ranked) return home(false)(viewer, vars);
+	const count = Math.min(Math.max(Number(vars.count) || 20, 1), 100);
+	const asOf = ranked ? ranked[2] : newId();
+	const offset = ranked ? Number(ranked[1]) : 0;
+	const page = await rankedFeed(viewer.id, { asOf, offset, limit: count });
+	// sort indexes run down from asOf in ranked order, below anything newer
+	const base = BigInt(asOf);
+	const entries: unknown[] = page.items.map((item, i) => feedEntry(item, (base - BigInt(offset + i) - 1n).toString()));
+	if (!ranked) entries.unshift(cursorEntry("Top", `t${asOf}`, inc(asOf)));
+	if (page.next !== undefined) entries.push(cursorEntry("Bottom", `r${page.next}.${asOf}`, (base - BigInt(page.next) - 1n).toString()));
+	return homeResponse(entries);
+};
+
 const home =
 	(following: boolean): Handler =>
 	async (viewer, vars) => {
@@ -243,7 +275,7 @@ const relationList =
 const viewerUser = (fields: object) => ({ data: { viewer: { user_results: { result: { __typename: "User", ...fields } } } } });
 
 const handlers: Record<string, Handler> = {
-	HomeTimeline: home(false),
+	HomeTimeline: forYou,
 	HomeLatestTimeline: home(true),
 	TweetDetail: tweetDetail,
 	Bookmarks: bookmarks,

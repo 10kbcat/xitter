@@ -105,6 +105,16 @@ export type FeedQuery = {
 	after?: string;
 };
 
+// Conditions on feed_items rows (aliased f). Blocked accounts never show, either
+// as author or reposter; muted ones and muted words only leave the home feeds.
+// A profile stays readable to the one who blocked it ("View posts"), never to the blocked.
+const originalAuthor = () => sql`(select x.user_id from posts x where x.id = f.post_id)`;
+export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blockedFor(viewerId)} and ${originalAuthor()} not in ${blockedFor(viewerId)}
+	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
+	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}`;
+const blockedBy = (viewerId: string) => sql`(select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
+const profileHidden = (viewerId: string) => sql`f.author_id not in ${blockedBy(viewerId)} and ${originalAuthor()} not in ${blockedBy(viewerId)}`;
+
 export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	const authorFilter =
 		"user" in q.authors
@@ -122,13 +132,8 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 			: q.media === "video"
 				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
-	// blocked accounts never show; muted ones and muted words only leave the home feeds
-	// a profile stays readable to the one who blocked it ("View posts"), never to the blocked
 	const home = !("user" in q.authors);
-	const blocked = home ? blockedFor(q.viewerId) : sql`(select blocker_id from blocks where blocked_id = ${q.viewerId}::bigint)`;
-	const hidden = sql`f.author_id not in ${blocked} and (select x.user_id from posts x where x.id = f.post_id) not in ${blocked}
-		${home ? sql`and f.author_id not in ${mutedFor(q.viewerId)} and (select x.user_id from posts x where x.id = f.post_id) not in ${mutedFor(q.viewerId)}
-			and not ${hasMutedWord(q.viewerId, "home_timeline", sql`f.post_id`)}` : sql``}`;
+	const hidden = home ? homeHidden(q.viewerId) : profileHidden(q.viewerId);
 	const rows = q.after
 		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
@@ -136,8 +141,13 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 			order by f.item_id desc limit ${q.limit}`;
 	if (q.after) rows.reverse();
 
-	const posts = await postsByIds(q.viewerId, [...new Set(rows.map((r: any) => r.post_id as string))] as string[]);
-	const reposters = await usersByIds(q.viewerId, [...new Set(rows.filter((r: any) => r.reposter_id).map((r: any) => r.reposter_id as string))] as string[]);
+	return itemsFromRows(q.viewerId, rows);
+}
+
+// feed_items rows (aliased f) as feed entries, in the order given
+export async function itemsFromRows(viewerId: string, rows: any[]): Promise<FeedItem[]> {
+	const posts = await postsByIds(viewerId, [...new Set(rows.map((r: any) => r.post_id as string))] as string[]);
+	const reposters = await usersByIds(viewerId, [...new Set(rows.filter((r: any) => r.reposter_id).map((r: any) => r.reposter_id as string))] as string[]);
 	const items: FeedItem[] = [];
 	for (const r of rows) {
 		const post = posts.get(r.post_id);

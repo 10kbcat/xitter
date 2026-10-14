@@ -17,3 +17,6 @@ export function newId(): string {
 }
 
 export const isId = (v: unknown): v is string => typeof v === "string" && /^\d{1,19}$/.test(v);
+
+// when an id was made
+export const idTime = (id: string) => new Date(Number((BigInt(id) >> 22n) + EPOCH));
