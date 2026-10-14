@@ -139,7 +139,8 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (_a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer, u.custom_badge_id::text, u.org_badge_id::text, u.status_until,
+			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer, u.org_badge_id::text, u.status_until,
+				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
 				from users u where u.id = ${id}::bigint`;

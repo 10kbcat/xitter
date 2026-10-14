@@ -603,10 +603,17 @@ async function renderUser(main, id) {
 		// badges
 		'<div class="box"><h2>Badge and flag</h2><div class="field"><label>Verification badge</label><select id="badge"' + (can("admin") ? "" : " disabled") + ">" +
 		[["", "none"], ["blue", "blue"], ["business", "gold (organisation)"], ["government", "grey (government)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.verified_type ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
-		'</select></div><div class="field"><label>Pride flag' + (u.org ? " (hidden while they show their organisation's badge)" : "") + '</label><div class="flags" id="flags">' +
+		'</select></div><div class="field"><label>Pride flag</label><div class="flags" id="flags">' +
 		[{ id: "", name: "none" }].concat(flags).map((f) => '<button type="button" title="' + esc(f.name) + '" data-flag="' + esc(f.id) + '" class="' + ((u.flag ?? "") === f.id ? "on" : "") + '"' + (can("admin") ? "" : " disabled") + ">" +
 			(f.id ? '<img alt="" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div></div>" +
-		'<div class="field"><label>Custom badge (<a href="#badges">make one</a>)</label><select id="custom"' + (can("admin") ? "" : " disabled") + ">" + badgeOptions(u.custom_badge_id, "none") + "</select></div>" +
+		'<div class="field"><label>Custom badges, in the order they show (<a href="#badges">make one</a>)</label>' +
+		(u.badge_ids.length ? '<div class="list">' + u.badge_ids.map((bid, i) => {
+			const b = badges.find((x) => x.id === bid);
+			return '<div class="row" style="margin-bottom:6px"><img alt="" src="/public/badge-' + esc(bid) + '.png" width="20" height="20" style="border-radius:3px"><span style="flex:1">' + esc(b?.name ?? "?") + "</span>" +
+				(can("admin") ? (i ? '<button class="btn" data-up="' + i + '" title="Show earlier"><span class="icon">arrow_upward</span></button>' : "") + '<button class="btn" data-drop="' + i + '" title="Remove"><span class="icon">close</span></button>' : "") + "</div>";
+		}).join("") + "</div>" : '<p class="dim small" style="margin:0">None.</p>') +
+		(can("admin") && badges.some((b) => !u.badge_ids.includes(b.id)) ? '<select id="addBadge"><option value="">Add a badge…</option>' + badges.filter((b) => !u.badge_ids.includes(b.id)).map((b) => '<option value="' + esc(b.id) + '">' + esc(b.name) + "</option>").join("") + "</select>" : "") +
+		'<p class="dim small" style="margin:4px 0 0">The first one fills X\'s badge slot (after an organisation\'s badge, if any); the rest and the flag follow it.</p></div>' +
 		(isOrg ? '<div class="field"><label>Badge its affiliates wear</label><select id="orgBadge"' + (can("admin") ? "" : " disabled") + ">" + badgeOptions(u.org_badge_id, "its profile picture") + "</select></div>" : "") +
 		"</div>" +
 		// standing
@@ -633,9 +640,10 @@ async function renderUser(main, id) {
 		(notes.length ? '<div class="list" style="margin-bottom:12px">' + notes.map((n) => '<p style="white-space:pre-wrap">' + esc(n.body) + '<br><span class="dim small">@' + esc(n.actor ?? "?") + " · " + esc(when(n.created_at)) + "</span></p>").join("") + "</div>" : "") +
 		'<div class="field"><textarea id="noteBody" maxlength="2000" placeholder="Context for other staff"></textarea></div><button class="btn primary" id="addNote">Add note</button></div>' +
 		'<div class="box"><h2>Sessions</h2>' + (sessions === null ? '<p class="dim small">Hidden: this account is staff at your level or above.</p>'
-			: sessions.length ? '<div class="list">' + sessions.map((s) => "<p>" + esc(browser(s.user_agent)) + (s.current ? ' <span class="pill staff">you, now</span>' : "") +
+			: sessions.length ? '<div class="list">' + sessions.slice(0, 10).map((s) => "<p>" + esc(browser(s.user_agent)) + (s.current ? ' <span class="pill staff">you, now</span>' : "") +
 				'<br><span class="dim small">signed in ' + esc(when(s.created_at)) + " · last active " + esc(when(s.last_seen_at)) + "</span>" +
-				(s.current ? "" : ' <button class="btn" data-session="' + esc(s.id) + '">Sign out</button>') + "</p>").join("") + "</div>"
+				(s.current ? "" : ' <button class="btn" data-session="' + esc(s.id) + '">Sign out</button>') + "</p>").join("") +
+				(sessions.length > 10 ? '<p class="dim small">and ' + (sessions.length - 10) + ' older (Access → Sign out everywhere ends them all)</p>' : "") + "</div>"
 			: '<p class="dim small">Not signed in anywhere.</p>') + "</div>" +
 		"</div>" +
 		// organisation
@@ -671,7 +679,14 @@ async function renderUser(main, id) {
 	if (can("admin")) $("#notes-access").onchange = () => act(() => api("setNotesAccess", { id, enabled: $("#notes-access").checked }), "Notes access updated").then(again);
 	if ($("#delete")) $("#delete").onclick = () => act(async () => { await api("deleteUser", { id, confirm: $("#confirm").value }); go("users"); }, "Account deleted");
 	if ($("#addaff")) $("#addaff").onclick = () => act(() => api("addAffiliate", { orgId: id, screen_name: $("#aff").value }), "Affiliate added").then(again);
-	if ($("#custom")) $("#custom").onchange = () => act(() => api("setCustomBadge", { id, badgeId: $("#custom").value }), "Badge set").then(again);
+	const setBadges = (list) => act(() => api("setBadges", { id, badgeIds: list }), "Badges saved").then(again);
+	if ($("#addBadge")) $("#addBadge").onchange = () => $("#addBadge").value && setBadges([...u.badge_ids, $("#addBadge").value]);
+	main.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => {
+		const list = [...u.badge_ids], i = Number(b.dataset.up);
+		[list[i - 1], list[i]] = [list[i], list[i - 1]];
+		setBadges(list);
+	});
+	main.querySelectorAll("[data-drop]").forEach((b) => b.onclick = () => setBadges(u.badge_ids.filter((_, i) => i !== Number(b.dataset.drop))));
 	if ($("#orgBadge")) $("#orgBadge").onchange = () => act(() => api("setOrgBadge", { id, badgeId: $("#orgBadge").value }), "Badge set").then(again);
 	if ($("#send")) $("#send").onclick = () => {
 		if ($("#msgKind").value === "strike" && !confirm("Give @" + u.screen_name + " a strike?")) return;

@@ -15,7 +15,8 @@ export type User = {
 	pinned_post_id?: string | null;
 	verified_type: "blue" | "business" | "government" | null;
 	flag?: string | null;
-	customBadge?: { id: string; name: string } | null;
+	// custom badges in order (admin panel); see badgeList in model.ts
+	badges?: { id: string; name: string }[];
 	// see schema.sql: active, restricted, limited or suspended
 	status?: "active" | "restricted" | "limited" | "suspended";
 	// staff only: admin, moderator or support
@@ -90,7 +91,8 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	if (!token) return undefined;
 	const [row] = await sql`
 		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.created_at, s.csrf, s.token,
-		(select json_build_object('id',b.id::text,'name',b.name) from custom_badges b where b.id=u.custom_badge_id) as "customBadge"
+		(select coalesce(json_agg(json_build_object('id', b.id::text, 'name', b.name) order by ub.position, b.name), '[]')
+			from user_badges ub join custom_badges b on b.id = ub.badge_id where ub.user_id = u.id) as badges
 		from sessions s join users u on u.id = s.user_id
 		where s.token = ${token} and u.status <> 'suspended'`;
 	// for the admin panel's session list; written at most once a minute

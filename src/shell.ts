@@ -6,6 +6,7 @@ import { loadBuild } from "./build";
 import { settings } from "./settings";
 import { TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
+import { BADGES_SCRIPT } from "./badges";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
@@ -208,7 +209,8 @@ ${FLAG_PICKER_CSS}</style>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
-${POST_CONTEXT_SCRIPT}</script>
+${POST_CONTEXT_SCRIPT}
+${BADGES_SCRIPT}</script>
 <script id="nonce-csp"></script>
 <script>${runtimePatched}</script>
 ${scripts}

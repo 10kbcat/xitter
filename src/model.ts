@@ -44,23 +44,27 @@ function urlEntities(u: User) {
 
 // The badge after the name: an affiliate's organisation, which links to the
 // organisation, or else the account's pride flag. There is room for one.
+type Badge = { url: string; description: string; org?: string };
+
+// Everything an account wears after its name, in order: its organisation's
+// badge, its custom badges, its pride flag. X has one slot for it, which gets
+// the first; the page script (badges.ts) draws the others after that one.
+export function badgeList(u: User): Badge[] {
+	const out: Badge[] = [];
+	if (u.org) out.push({ url: absolute(u.org.avatar_url) ?? DEFAULT_AVATAR, description: u.org.name, org: u.org.screen_name });
+	for (const b of u.badges ?? []) out.push({ url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png`, description: b.name });
+	if (u.flag && FLAGS[u.flag]) out.push({ url: `${PUBLIC_ORIGIN}/public/flag-${u.flag}.svg`, description: `${FLAGS[u.flag].name} flag` });
+	return out;
+}
+
 function badgeLabel(u: User) {
-	if (u.org)
-		return {
-			label: {
-				badge: { url: absolute(u.org.avatar_url) ?? DEFAULT_AVATAR },
-				description: u.org.name,
-				url: { url: `twitter://user?screen_name=${u.org.screen_name}`, urlType: "DeepLink" },
-				userLabelType: "BusinessLabel",
-				userLabelDisplayType: "Badge",
-			},
-		};
-	if (u.customBadge) return { label: { badge: { url: `${PUBLIC_ORIGIN}/public/badge-${u.customBadge.id}.png` }, description: u.customBadge.name, userLabelType: "BusinessLabel", userLabelDisplayType: "Badge" } };
-	if (!u.flag || !FLAGS[u.flag]) return {};
+	const [first] = badgeList(u);
+	if (!first) return {};
 	return {
 		label: {
-			badge: { url: `${PUBLIC_ORIGIN}/public/flag-${u.flag}.svg` },
-			description: `${FLAGS[u.flag].name} flag`,
+			badge: { url: first.url },
+			description: first.description,
+			...(first.org ? { url: { url: `twitter://user?screen_name=${first.org}`, urlType: "DeepLink" } } : {}),
 			userLabelType: "BusinessLabel",
 			userLabelDisplayType: "Badge",
 		},

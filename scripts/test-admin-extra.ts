@@ -24,7 +24,11 @@ try{
 	check((await admin.admin('createBadge',{name:'Bad SVG',image:Buffer.from('<svg/>').toString('base64')})).status===400,'SVG rejected');
 	badge=(await admin.admin('createBadge',{name:'Test custom badge',image:Buffer.from(await Bun.file('public/favicon.png').arrayBuffer()).toString('base64')})).data.id;
 	check(!!badge,'badge created');
-	check((await admin.admin('setCustomBadge',{id:created[0],badgeId:badge})).status===200,'badge assigned');
+	const second=(await admin.admin('createBadge',{name:'Second test badge',image:Buffer.from(await Bun.file('public/favicon.png').arrayBuffer()).toString('base64')})).data.id;
+	check((await admin.admin('setBadges',{id:created[0],badgeIds:[badge,second]})).status===200,'badges assigned');
+	const extra=await(await fetch(origin+'/i/api/xitter/badges?names='+names[0],{headers:user.headers})).json() as any;
+	check(extra[names[0]]?.length===1&&extra[names[0]][0].description==='Second test badge','second badge drawn after the first');
+	await admin.admin('deleteBadge',{id:second});
 	const profile=(await user.gql('UserByScreenName',{screen_name:names[0]})).data.user.result;
 	check(profile.affiliates_highlighted_label.label.description==='Test custom badge','native badge description');
 	check((await fetch(origin+'/public/badge-'+badge+'.png')).headers.get('content-type')==='image/png','public raster badge');
@@ -74,7 +78,7 @@ try{
 		check(blockedPage.status===503&&(await blockedPage.text()).includes('Test maintenance'),'members see the maintenance page');
 	}finally{await admin.admin('saveOperations',{...operations,maintenance:false});}
 	await admin.admin('deleteBadge',{id:badge});badge=undefined;
-	const [target]=await sql`select custom_badge_id from users where id=${created[0]}::bigint`;check(target.custom_badge_id===null,'deleting badge clears assignment');
+	const left=await sql`select 1 from user_badges where user_id=${created[0]}::bigint`;check(left.length===0,'deleting badge clears assignment');
 	console.log(`all ${checks} expanded admin checks passed`);
 }finally{
 	if(badge)await sql`delete from custom_badges where id=${badge}::bigint`;

@@ -35,7 +35,7 @@ async function badgeExists(id: string | null) {
 export const toolActions: Record<string, Action> = {
 	// custom badges: an image shown in the badge slot after a name
 	badges: { role: "support", run: async () => ({ badges: await sql`select id::text, name, mime, created_at,
-		(select count(*)::int from users u where u.custom_badge_id = b.id or u.org_badge_id = b.id) as users
+		(select count(*)::int from users u where u.org_badge_id = b.id or exists (select 1 from user_badges ub where ub.user_id = u.id and ub.badge_id = b.id)) as users
 		from custom_badges b order by name` }) },
 	createBadge: {
 		role: "admin",
@@ -62,15 +62,21 @@ export const toolActions: Record<string, Action> = {
 			return {};
 		},
 	},
-	setCustomBadge: {
+	// an account's custom badges, in the order they show
+	setBadges: {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			await guard(a, id);
-			const badge = b.badgeId ? idOf(b.badgeId) : null;
-			await badgeExists(badge);
-			await sql`update users set custom_badge_id = ${badge}::bigint where id = ${id}::bigint`;
-			await audit(a, "set_custom_badge", id, { badge });
+			if (!Array.isArray(b.badgeIds) || b.badgeIds.length > 10) throw new AdminError("Choose up to 10 badges.");
+			const badges = [...new Set(b.badgeIds.map((x: unknown) => idOf(x, "badge")))] as string[];
+			for (const badge of badges) await badgeExists(badge);
+			await sql.begin(async (tx) => {
+				await tx`delete from user_badges where user_id = ${id}::bigint`;
+				for (const [position, badge] of badges.entries())
+					await tx`insert into user_badges (user_id, badge_id, position) values (${id}::bigint, ${badge}::bigint, ${position})`;
+			});
+			await audit(a, "set_badges", id, { badges });
 			return {};
 		},
 	},

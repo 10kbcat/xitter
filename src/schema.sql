@@ -35,8 +35,22 @@ create table if not exists custom_badges (
 	id bigint primary key, name text not null check(char_length(name) between 1 and 60),
 	image bytea not null, mime text not null, created_at timestamptz not null default now()
 );
-alter table users add column if not exists custom_badge_id bigint references custom_badges(id) on delete set null;
-create index if not exists users_custom_badge_idx on users(custom_badge_id);
+-- an account's custom badges in order: the first fills X's badge slot after
+-- the name (unless an organisation's does), the others are drawn after it
+create table if not exists user_badges (
+	user_id bigint not null references users(id) on delete cascade,
+	badge_id bigint not null references custom_badges(id) on delete cascade,
+	position integer not null default 0,
+	primary key (user_id, badge_id)
+);
+create index if not exists user_badges_badge_idx on user_badges(badge_id);
+-- accounts used to hold a single custom badge
+do $$ begin
+	if exists (select 1 from information_schema.columns where table_name = 'users' and column_name = 'custom_badge_id') then
+		insert into user_badges (user_id, badge_id) select id, custom_badge_id from users where custom_badge_id is not null on conflict do nothing;
+		alter table users drop column custom_badge_id;
+	end if;
+end $$;
 alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
