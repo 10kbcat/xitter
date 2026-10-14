@@ -3,7 +3,8 @@ import { getClientFile } from "./client-cache";
 import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
-import { handleLogin, loginPage } from "./login";
+import { handleLogin, handleSignup, loginPage, signupPage } from "./login";
+import { flagSvg } from "./flags";
 import { patchFile } from "./patch";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -32,6 +33,11 @@ const PAGE_CSP = "connect-src 'self' blob: data:";
 const PUBLIC_DIR = process.env.PUBLIC_DIR ?? "public";
 async function servePublic(p: string): Promise<Response> {
 	const name = p.slice("/public/".length);
+	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
+	if (flag) {
+		const svg = flagSvg(flag[1]);
+		return svg ? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } }) : new Response("not found", { status: 404 });
+	}
 	if (!/^[\w.-]+\.(png|svg|ico|webp)$/.test(name)) return new Response("not found", { status: 404 });
 	const file = Bun.file(`${PUBLIC_DIR}/${name}`);
 	if (!(await file.exists())) return new Response("not found", { status: 404 });
@@ -120,6 +126,7 @@ const server = Bun.serve({
 		if (p.startsWith("/abs/")) return serveClient(req, p);
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
+		if (p === "/signup") return req.method === "POST" ? handleSignup(req) : signupPage(url);
 		if (p.startsWith("/public/")) return servePublic(p);
 		if (p === "/favicon.ico") return servePublic("/public/favicon.png");
 		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });

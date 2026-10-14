@@ -4,6 +4,7 @@
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import type { ArticleEntity } from "./articles";
+import { FLAGS } from "./flags";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 
 const DEFAULT_AVATAR = `${PUBLIC_ORIGIN}/abs/sticky/default_profile_images/default_profile_normal.png`;
@@ -31,11 +32,24 @@ function urlEntities(u: User) {
 	return { url: { urls: [{ display_url: display, expanded_url: u.website, url: u.website, indices: [0, u.website.length] }] } };
 }
 
+// the badge after the name; X uses it for an affiliate's organisation
+function flagLabel(u: User) {
+	if (!u.flag || !FLAGS[u.flag]) return {};
+	return {
+		label: {
+			badge: { url: `${PUBLIC_ORIGIN}/public/flag-${u.flag}.svg` },
+			description: `${FLAGS[u.flag].name} flag`,
+			userLabelType: "BusinessLabel",
+			userLabelDisplayType: "Badge",
+		},
+	};
+}
+
 export function userResult(u: User) {
 	return {
 		__typename: "User",
 		action_counts: { favorites_count: u.stats?.likes ?? 0 },
-		affiliates_highlighted_label: {},
+		affiliates_highlighted_label: flagLabel(u),
 		avatar: { image_url: absolute(u.avatar_url) ?? DEFAULT_AVATAR },
 		...(u.banner_url ? { banner: { image_url: absolute(u.banner_url) } } : {}),
 		core: { created_at: apiDate(u.created_at), name: u.name, screen_name: u.screen_name },
@@ -111,6 +125,10 @@ export function legacyUser(u: User) {
 		profile_image_url_https: absolute(u.avatar_url) ?? DEFAULT_AVATAR,
 		...(u.banner_url ? { profile_banner_url: absolute(u.banner_url) } : {}),
 		can_media_tag: true,
+		// with a default avatar and no bio or banner the client offers its "Set up
+		// profile" onboarding flow, which we don't run; this keeps the Edit profile dialog
+		default_profile_image: false,
+		default_profile: false,
 		follow_request_sent: false,
 		description: u.bio,
 		blocked_by: u.stats?.blockedBy ?? false,

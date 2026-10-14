@@ -7,7 +7,7 @@ import { sql } from "./db";
 // same account never reaches the client in two different states.
 export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
-	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.created_at as a_created_at,
+	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.flag as a_flag, u.created_at as a_created_at,
 	(select count(*)::int from posts x where x.user_id = u.id) as a_posts,
 	(select count(distinct m.post_id)::int from media m join posts x on x.id = m.post_id where x.user_id = u.id) as a_media_posts,
 	(select count(*)::int from likes x where x.user_id = u.id) as a_likes,
@@ -32,6 +32,7 @@ export function toUser(r: any): User {
 		banner_url: r.a_banner_url,
 		pinned_post_id: r.a_pinned_post_id,
 		verified_type: r.a_verified_type,
+		flag: r.a_flag,
 		created_at: r.a_created_at,
 		stats: {
 			posts: r.a_posts,

@@ -155,3 +155,16 @@ create table if not exists muted_keywords (
 	created_at timestamptz not null default now()
 );
 create unique index if not exists muted_keywords_user_word_idx on muted_keywords (user_id, lower(keyword));
+
+-- sign-up is by invite; a code works until it runs out of uses or expires
+create table if not exists invites (
+	code text primary key,
+	created_by bigint references users (id) on delete set null,
+	max_uses integer not null default 1,
+	uses integer not null default 0,
+	expires_at timestamptz,
+	created_at timestamptz not null default now()
+);
+alter table users add column if not exists invite_code text references invites (code) on delete set null;
+-- a pride flag shown next to the name (see flags.ts), picked at sign-up
+alter table users add column if not exists flag text;
