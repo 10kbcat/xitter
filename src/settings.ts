@@ -1,24 +1,85 @@
-// Instance-wide settings, changed from the admin panel.
+// Instance-wide settings, changed from the admin panel. They are read on
+// nearly every page, so they are kept in memory: loaded once at start and
+// replaced whenever the panel saves one.
 
 import { sql } from "./db";
 
 export type SignupMode = "invite" | "open" | "closed";
 
-const DEFAULTS = { signup_mode: "invite" as SignupMode };
-type Key = keyof typeof DEFAULTS;
+// parts of the client this instance can switch off; true shows the feature
+export const FEATURES = {
+	communities: "Communities",
+	lists: "Lists",
+	gifs: "GIF search in the composer",
+	polls: "Polls in the composer",
+	location: "Location in the composer",
+	scheduling: "Scheduling in the composer",
+	grok: "Grok",
+	image_gen: "Grok image generation",
+	premium: "Premium and verification upsells",
+	calls: "Calls",
+	history: "History",
+	creator_studio: "Creator Studio and monetization",
+	spaces: "Spaces",
+	business: "Business sign-up",
+} as const;
+export type Feature = keyof typeof FEATURES;
 
-export async function getSetting<K extends Key>(key: K): Promise<(typeof DEFAULTS)[K]> {
-	const [row] = await sql`select value from settings where key = ${key}`;
-	return row ? row.value : DEFAULTS[key];
+const DEFAULTS = {
+	signup_mode: "invite" as SignupMode,
+	instance_name: "Xitter",
+	features: {
+		communities: true,
+		lists: false,
+		gifs: true,
+		polls: true,
+		location: true,
+		scheduling: true,
+		grok: false,
+		image_gen: false,
+		premium: false,
+		calls: false,
+		history: false,
+		creator_studio: false,
+		spaces: false,
+		business: false,
+	} as Record<Feature, boolean>,
+	limits: { image_mb: 5, video_mb: Number(process.env.MAX_VIDEO_MB ?? 200), video_seconds: Number(process.env.MAX_VIDEO_SECONDS ?? 600) },
+	// shown above every timeline until the viewer closes it; a new id shows it again
+	announcement: { id: "", text: "", link: "" },
+	// handles every new account follows
+	default_follows: [] as string[],
+	// the instance's rules, shown at /rules and linked from sign-up
+	rules: "",
+};
+export type Settings = typeof DEFAULTS;
+type Key = keyof Settings;
+
+let current: Settings = structuredClone(DEFAULTS);
+
+export async function loadSettings() {
+	const next = structuredClone(DEFAULTS) as any;
+	for (const r of await sql`select key, value from settings`) {
+		if (!(r.key in DEFAULTS)) continue;
+		const d = (DEFAULTS as any)[r.key];
+		// objects merge over their defaults, so new fields get a value
+		next[r.key] = d && typeof d === "object" && !Array.isArray(d) ? { ...d, ...r.value } : r.value;
+	}
+	current = next;
 }
 
-export async function setSetting<K extends Key>(key: K, value: (typeof DEFAULTS)[K]) {
+export const settings = (): Settings => current;
+export const feature = (f: Feature) => current.features[f] !== false;
+
+export async function setSetting<K extends Key>(key: K, value: Settings[K]) {
 	await sql`insert into settings (key, value) values (${key}, ${JSON.stringify(value)}::text::jsonb)
 		on conflict (key) do update set value = excluded.value`;
+	current = { ...current, [key]: value };
 }
 
-export async function allSettings() {
-	const out: Record<string, unknown> = { ...DEFAULTS };
-	for (const r of await sql`select key, value from settings`) out[r.key] = r.value;
-	return out;
+// kept for callers that read one value
+export async function getSetting<K extends Key>(key: K): Promise<Settings[K]> {
+	return current[key];
 }
+
+export const allSettings = async () => current;

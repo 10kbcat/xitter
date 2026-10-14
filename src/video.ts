@@ -3,12 +3,14 @@
 // Files that already are such an MP4 are only remuxed. One job runs at a time;
 // the client polls the upload STATUS command meanwhile.
 
+import { settings } from "./settings";
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "./db";
 
-export const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_MB ?? 200) * 1024 * 1024;
-const MAX_SECONDS = Number(process.env.MAX_VIDEO_SECONDS ?? 600);
+// limits come from the admin panel's settings (defaults: MAX_VIDEO_MB, MAX_VIDEO_SECONDS)
+export const maxVideoBytes = () => settings().limits.video_mb * 1024 * 1024;
+const maxSeconds = () => settings().limits.video_seconds;
 const MAX_SIDE = 1280;
 const FFMPEG = process.env.FFMPEG ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE ?? "ffprobe";
@@ -80,7 +82,7 @@ async function convert(dir: string, id: string) {
 	try {
 		const info = await probe(src);
 		if (!info) return await fail("This file has no video we can read.");
-		if (info.seconds > MAX_SECONDS) return await fail(`Videos can be up to ${Math.floor(MAX_SECONDS / 60)} minutes long.`);
+		if (info.seconds > maxSeconds()) return await fail(`Videos can be up to ${Math.floor(maxSeconds() / 60)} minutes long.`);
 		const playable =
 			info.format.includes("mp4") && info.vcodec === "h264" && info.pix === "yuv420p" && (!info.acodec || info.acodec === "aac") && Math.max(info.width, info.height) <= 1920;
 		const video = playable

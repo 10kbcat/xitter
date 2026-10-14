@@ -3,8 +3,10 @@ import { getClientFile } from "./client-cache";
 import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
-import { handleLogin, handleSignup, loginPage, signupPage } from "./login";
+import { brandingFile } from "./branding";
+import { handleLogin, handleSignup, loginPage, rulesPage, signupPage } from "./login";
 import { adminApi } from "./admin";
+import { loadSettings } from "./settings";
 import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { patchFile } from "./patch";
@@ -41,9 +43,12 @@ async function servePublic(p: string): Promise<Response> {
 		return svg ? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } }) : new Response("not found", { status: 404 });
 	}
 	if (!/^[\w.-]+\.(png|svg|ico|webp)$/.test(name)) return new Response("not found", { status: 404 });
+	// a logo uploaded in the admin panel replaces the shipped one
+	const uploaded = brandingFile(name);
+	if (uploaded && (await uploaded.file.exists())) return new Response(uploaded.file, { headers: { "content-type": uploaded.type, "cache-control": "no-cache" } });
 	const file = Bun.file(`${PUBLIC_DIR}/${name}`);
 	if (!(await file.exists())) return new Response("not found", { status: 404 });
-	return new Response(file, { headers: { "cache-control": "public, max-age=3600" } });
+	return new Response(file, { headers: { "cache-control": "no-cache" } });
 }
 
 const API_PREFIX = /^\/(i\/api\/|i\/jfapi\/|i\/media\/|1\.1\/|2\/|graphql\/|fleets\/|live_pipeline\/)/;
@@ -118,6 +123,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 }
 
 await migrate();
+await loadSettings();
 await resumeVideos(MEDIA_DIR);
 
 const server = Bun.serve({
@@ -128,6 +134,7 @@ const server = Bun.serve({
 		if (p.startsWith("/abs/")) return serveClient(req, p);
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
+		if (p === "/rules") return rulesPage();
 		if (p === "/signup") return req.method === "POST" ? handleSignup(req) : signupPage(url);
 		if (p.startsWith("/public/")) return servePublic(p);
 		if (p === "/favicon.ico") return servePublic("/public/favicon.png");

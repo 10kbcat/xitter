@@ -122,6 +122,28 @@ check("closing moves it out of the open queue", !(await a.admin("reports")).repo
 await o.gql("DeleteTweet", { tweet_id: reported });
 await sql`delete from reports where id = ${report?.id ?? 0}::bigint`;
 
+// instance settings
+const before = (await a.admin("settings")).settings;
+await a.admin("saveSettings", { announcement: { text: "admin test announcement", link: "" }, features: { polls: false }, default_follows: [orgName], rules: "Be kind.\n\nNo spam." });
+const homeHtml = await (await t.page("/home")).text();
+check("the announcement reaches the page", homeHtml.includes("admin test announcement"));
+check("a switched-off feature is hidden", homeHtml.includes('[data-testid="createPollButton"]'));
+check("unknown default follows are refused", (await a.admin("saveSettings", { default_follows: ["nobody_here_x"] })).status === 400);
+const rules = await (await fetch(`${origin}/rules`)).text();
+check("the rules page shows the rules", rules.includes("Be kind.") && rules.includes("No spam."));
+const { codes: [followCode] } = await a.admin("createInvite", {});
+const followName = `fol${Date.now() % 1e8}`;
+await fetch(`${origin}/signup`, { method: "POST", body: new URLSearchParams({ code: followCode, username: followName, name: "F", password: "testpass123", confirm: "testpass123" }), redirect: "manual" });
+check("new accounts follow the default accounts", (await sql`select 1 from follows f join users u on u.id = f.follower_id join users o on o.id = f.followee_id where u.screen_name = ${followName} and o.id = ${org.id}::bigint`).length === 1);
+await sql`delete from users where screen_name = ${followName}`;
+await sql`delete from invites where code = ${followCode}`;
+const png = await Bun.file("public/favicon.png").bytes();
+const up = await fetch(`${origin}/admin/api/uploadBranding?slot=favicon`, { method: "POST", headers: a.headers, body: png });
+check("a logo upload is accepted", up.ok);
+check("an SVG upload is refused", !(await fetch(`${origin}/admin/api/uploadBranding?slot=favicon`, { method: "POST", headers: a.headers, body: "<svg/>" })).ok);
+await a.admin("resetBranding", { slot: "favicon" });
+await a.admin("saveSettings", { announcement: before.announcement, features: before.features, default_follows: before.default_follows, rules: before.rules });
+
 // posts, passwords, audit
 check("posts can be found", (await a.admin("posts", { author: targetName })).posts?.some((p: any) => p.id === post));
 await a.admin("deletePost", { id: post });

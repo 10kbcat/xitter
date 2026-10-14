@@ -12,7 +12,8 @@ import { isFlag } from "./flags";
 import { isId, newId } from "./ids";
 import { createInvite } from "./invites";
 import { REASONS } from "./reports";
-import { type SignupMode, allSettings, setSetting } from "./settings";
+import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
+import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 
 type Role = "admin" | "moderator" | "support";
 const RANK: Record<Role, number> = { support: 1, moderator: 2, admin: 3 };
@@ -409,7 +410,74 @@ const ACTIONS: Record<string, Action> = {
 		},
 	},
 
-	settings: { role: "support", run: async () => ({ settings: await allSettings() }) },
+	settings: {
+		role: "support",
+		run: async () => ({ settings: await allSettings(), features: FEATURES, branding: brandingState(), slots: SLOTS }),
+	},
+
+	saveSettings: {
+		role: "admin",
+		run: async (a, b) => {
+			const s = settings();
+			const changed: string[] = [];
+			if (typeof b.instance_name === "string") {
+				const name = b.instance_name.trim();
+				if (!name || [...name].length > 30) throw new AdminError("The name is 1 to 30 characters.");
+				await setSetting("instance_name", name);
+				changed.push("instance_name");
+			}
+			if (b.features && typeof b.features === "object") {
+				const next = { ...s.features };
+				for (const k of Object.keys(FEATURES) as Feature[]) if (typeof b.features[k] === "boolean") next[k] = b.features[k];
+				await setSetting("features", next);
+				changed.push("features");
+			}
+			if (b.limits && typeof b.limits === "object") {
+				const n = (v: unknown, lo: number, hi: number, what: string) => {
+					const x = Number(v);
+					if (!Number.isFinite(x) || x < lo || x > hi) throw new AdminError(`${what} must be between ${lo} and ${hi}.`);
+					return Math.round(x);
+				};
+				await setSetting("limits", {
+					image_mb: n(b.limits.image_mb, 1, 50, "Image size"),
+					video_mb: n(b.limits.video_mb, 1, 4096, "Video size"),
+					video_seconds: n(b.limits.video_seconds, 5, 7200, "Video length"),
+				});
+				changed.push("limits");
+			}
+			if (b.announcement && typeof b.announcement === "object") {
+				const text = String(b.announcement.text ?? "").trim().slice(0, 500);
+				const link = String(b.announcement.link ?? "").trim();
+				if (link && !/^https?:\/\/\S+$/.test(link)) throw new AdminError("The announcement link must be an http or https address.");
+				// a new id brings the banner back for people who closed the old one
+				await setSetting("announcement", { id: text ? newId() : "", text, link });
+				changed.push("announcement");
+			}
+			if (Array.isArray(b.default_follows)) {
+				const handles = [...new Set(b.default_follows.map((h: unknown) => String(h).trim().replace(/^@/, "")).filter(Boolean))] as string[];
+				const found = handles.length ? await sql`select screen_name from users where lower(screen_name) = any(${sql.array(handles.map((h) => h.toLowerCase()), "TEXT")})` : [];
+				const missing = handles.filter((h) => !found.some((f: any) => f.screen_name.toLowerCase() === h.toLowerCase()));
+				if (missing.length) throw new AdminError(`No account named ${missing.map((m) => `@${m}`).join(", ")}.`);
+				await setSetting("default_follows", found.map((f: any) => f.screen_name));
+				changed.push("default_follows");
+			}
+			if (typeof b.rules === "string") {
+				await setSetting("rules", b.rules.slice(0, 20000));
+				changed.push("rules");
+			}
+			await audit(a, "save_settings", null, { changed });
+			return {};
+		},
+	},
+
+	resetBranding: {
+		role: "admin",
+		run: async (a, b) => {
+			resetBranding(String(b.slot));
+			await audit(a, "reset_branding", null, { slot: b.slot });
+			return {};
+		},
+	},
 
 	setSignupMode: {
 		role: "admin",
@@ -439,6 +507,15 @@ export async function adminApi(req: Request, action: string, viewer: Viewer | un
 	if (!viewer?.role) return fail("Staff only.", 403);
 	if (req.method !== "POST") return fail("Use POST.", 405);
 	if (req.headers.get("x-csrf-token") !== viewer.csrf) return fail("Missing csrf token.", 403);
+	// a logo or icon upload: the image itself is the body
+	if (action === "uploadBranding") {
+		if (viewer.role !== "admin") return fail("Needs the admin role.", 403);
+		const slot = new URL(req.url).searchParams.get("slot") ?? "";
+		const error = await saveBranding(slot, new Uint8Array(await req.arrayBuffer()));
+		if (error) return fail(error, 400);
+		await audit(viewer, "upload_branding", null, { slot });
+		return Response.json({});
+	}
 	const a = ACTIONS[action];
 	if (!a) return fail("Unknown action.", 404);
 	if (RANK[viewer.role as Role] < RANK[a.role]) return fail(`Needs the ${a.role} role.`, 403);

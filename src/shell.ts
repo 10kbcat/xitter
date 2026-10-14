@@ -3,6 +3,8 @@
 
 import type { User } from "./auth";
 import { loadBuild } from "./build";
+import { settings } from "./settings";
+import { TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
@@ -72,73 +74,6 @@ ${LOGO}{background:url(/public/icon-light.png) center/36px no-repeat}
 ${DARK} ${LOGO}{background-image:url(/public/icon-dark.png)}
 @media (min-width:1265px){${LOGO}{width:150px;background-image:url(/public/logo-light.png);background-size:128px auto;background-position:10px center}
 ${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}}`;
-
-// Features this instance doesn't run (Grok, calls, Premium, ads, Spaces, ...)
-// and links to x.com pages, taken out of the client's menus and screens.
-const GONE_LINKS = [
-	"/i/calls",
-	"/i/grok",
-	"/i/history",
-	"/i/jf/creators/studio",
-	"/i/premium_sign_up",
-	"/i/verified-orgs-signup",
-	"/i/spaces/start",
-	"/i/monetization",
-	"/settings/monetization",
-	"/settings/premium",
-	"/i/premium",
-	"/jobs",
-];
-const GONE_TESTIDS = [
-	"GrokDrawer",
-	"grokImgGen",
-	"contentDisclosureButton",
-	"ProfessionalButton_Switch_To_Professional",
-	"premium-signup-tab",
-	"AppTabBar_Calls_Link",
-];
-const HIDE_CSS = [
-	...GONE_LINKS.map((h) => `a[href="${h}"],a[href^="${h}?"]`),
-	...GONE_TESTIDS.map((t) => `[data-testid="${t}"]`),
-	'a[href^="https://ads.x.com"]',
-	'a[href^="https://help.x.com"]',
-	'[role="menu"] a[href$="/lists"]',
-	'[data-testid="sidebarColumn"] div:has(> aside[aria-label="Subscribe to Premium"])',
-	'aside[aria-label="Subscribe to Premium"]',
-	'[role="dialog"] [aria-label="Edit with Imagine"]',
-	'[data-testid="sidebarColumn"] nav[aria-label="Footer"]',
-].join(",") + "{display:none!important}";
-
-// Upsell banners with nothing stable to select: the box around a Premium link,
-// up to just below whatever else shares its column.
-// Menu entries for missing features carry no link or id, only their text; so
-// does the Grok Imagine promo in the Edit profile dialog.
-const GONE_MENU_ITEMS = ["Add/remove from Lists", "Embed post", "Request Community Note"];
-const TIDY_SCRIPT = `var goneItems=${JSON.stringify(GONE_MENU_ITEMS)};
-// X's own sign-in and sign-up screens talk to its servers; ours are /login and /signup
-function ownScreens(){
-	var p=location.pathname;
-	if(p.indexOf("/i/jf/onboarding")===0||p.indexOf("/i/flow/login")===0)location.replace("/login");
-	else if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
-}
-ownScreens();
-new MutationObserver(function(){
-	ownScreens();
-	document.querySelectorAll('[role="dialog"] button').forEach(function(b){
-		if(b.innerText.trim()!=="Edit Photo")return;
-		var box=b;
-		while(box.parentElement&&box.parentElement.innerText.indexOf("Imagine")>=0&&!box.parentElement.querySelector("input"))box=box.parentElement;
-		box.style.display="none";
-	});
-	document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
-		if(goneItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
-	});
-	document.querySelectorAll('[data-testid="primaryColumn"] a[href="/i/premium_sign_up"]').forEach(function(a){
-		var box=a;
-		while(box.parentElement&&!box.parentElement.querySelector('[role="tablist"],[data-testid="UserName"],[data-testid="tweet"]'))box=box.parentElement;
-		box.style.display="none";
-	});
-}).observe(document.documentElement,{childList:true,subtree:true});`;
 
 // Paid features the client gates on a per-account claim. Nothing is paid for
 // here, so every account holds them.
@@ -220,6 +155,8 @@ function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>[
 	};
 }
 
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
 // JSON placed inside a <script> must not be able to close it
 const inline = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
@@ -236,15 +173,15 @@ export function shell(user: User): string | undefined {
 		.join("");
 	return `<!DOCTYPE html><html dir="ltr" lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0,viewport-fit=cover" />
-<meta name="theme-color" content="#000000" /><title>Xitter</title>
+<meta name="theme-color" content="#000000" /><title>${esc(settings().instance_name)}</title>
 <link rel="icon" type="image/png" href="/public/favicon.png" /><link rel="apple-touch-icon" href="/public/icon-light.png" />
 <style>html,body{height:100%}body{margin:0;background-color:#000;overflow-y:scroll}${LOGO_CSS}
-${HIDE_CSS}
+${hideCss()}
 ${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
-<script>${TIDY_SCRIPT}
-window.__XITTER__=${inline(flagPickerData(user.flag))};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user.flag), tidy: tidyData() })};
+${TIDY_SCRIPT}
 ${FLAG_PICKER_SCRIPT}</script>
 <script id="nonce-csp"></script>
 <script>${runtimePatched}</script>

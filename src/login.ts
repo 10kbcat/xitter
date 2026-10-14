@@ -5,7 +5,7 @@
 import { login, sessionCookies } from "./auth";
 import { FLAGS } from "./flags";
 import { SignupError, signUp } from "./invites";
-import { type SignupMode, getSetting } from "./settings";
+import { type SignupMode, getSetting, settings } from "./settings";
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -14,7 +14,7 @@ const layout = (title: string, body: string) => `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title} · Xitter</title>
+<title>${esc(title)} · ${esc(settings().instance_name)}</title>
 <link rel="icon" type="image/png" href="/public/favicon.png">
 <style>
 	.logo { width: 200px; margin: 0 0 16px; }
@@ -27,6 +27,8 @@ const layout = (title: string, body: string) => `<!doctype html>
 	.error { margin: 0; color: #f4212e; }
 	.alt { margin: 8px 0 0; color: #71767b; }
 	.hint { margin: -6px 0 0; color: #71767b; font-size: 13px; }
+	.rules { margin: 0 0 4px; white-space: pre-wrap; line-height: 1.45; }
+	form:has(.rules) { width: min(560px, calc(100vw - 32px)); }
 	a { color: #1d9bf0; text-decoration: none; }
 	fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 	legend { margin-bottom: 8px; color: #71767b; }
@@ -49,7 +51,7 @@ const signInPage = (message = "", name = "") =>
 	layout(
 		"Sign in",
 		`<form method="post" action="/login">
-	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
+	<img class="logo" src="/public/logo-dark.png" alt="${esc(settings().instance_name)}">
 	<h1>Sign in</h1>
 	${error(message)}
 	<input name="username" placeholder="Username" autocomplete="username" value="${esc(name)}" required autofocus>
@@ -77,7 +79,7 @@ const closedPage = () =>
 	layout(
 		"Sign-up closed",
 		`<form>
-	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
+	<img class="logo" src="/public/logo-dark.png" alt="${esc(settings().instance_name)}">
 	<h1>Sign-up is closed</h1>
 	<p class="alt">This instance isn't taking new accounts right now. <a href="/login">Sign in</a></p>
 </form>`,
@@ -87,7 +89,7 @@ const signUpPage = (message = "", f: SignupFields = {}, mode: SignupMode = "invi
 	layout(
 		"Create your account",
 		`<form method="post" action="/signup">
-	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
+	<img class="logo" src="/public/logo-dark.png" alt="${esc(settings().instance_name)}">
 	<h1>Create your account</h1>
 	${error(message)}
 	<input name="code" placeholder="Invite code${mode === "open" ? " (optional)" : ""}" value="${esc(f.code ?? "")}" autocomplete="off" ${mode === "open" ? "" : "required"} ${f.code ? "" : "autofocus"}>
@@ -97,6 +99,7 @@ const signUpPage = (message = "", f: SignupFields = {}, mode: SignupMode = "invi
 	<input name="password" type="password" placeholder="Password" autocomplete="new-password" required minlength="8">
 	<input name="confirm" type="password" placeholder="Repeat password" autocomplete="new-password" required minlength="8">
 	${flagPicker(f.flag)}
+	${settings().rules ? `<p class="hint">By creating an account you agree to the <a href="/rules" target="_blank">rules</a>.</p>` : ""}
 	<button>Create account</button>
 	<p class="alt">Already have one? <a href="/login">Sign in</a></p>
 </form>`,
@@ -147,4 +150,21 @@ export async function handleSignup(req: Request): Promise<Response> {
 	}
 	const session = await login((f.username ?? "").trim().replace(/^@/, ""), f.password ?? "");
 	return signedIn(session!);
+}
+
+// the instance's rules, as written in the admin panel: blank lines split paragraphs
+export function rulesPage(): Response {
+	const rules = settings().rules.trim();
+	const body = rules ? rules.split(/\n\s*\n/).map((p) => `<p class="rules">${esc(p)}</p>`).join("") : `<p class="alt">This instance hasn't written any rules yet.</p>`;
+	return html(
+		layout(
+			"Rules",
+			`<form>
+	<img class="logo" src="/public/logo-dark.png" alt="${esc(settings().instance_name)}">
+	<h1>Rules</h1>
+	${body}
+	<p class="alt"><a href="/login">Sign in</a> · <a href="/signup">Create an account</a></p>
+</form>`,
+		),
+	);
 }

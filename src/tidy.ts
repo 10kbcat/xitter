@@ -1,0 +1,113 @@
+// What the page changes in the client: features this instance switches off
+// (admin panel > Settings > Features), links to x.com pages, X's own sign-in
+// screens, and the announcement banner. CSS where an element has a stable link
+// or test id, a small script where only its text tells it apart.
+
+import { type Feature, feature, settings } from "./settings";
+
+const links = (...hrefs: string[]) => hrefs.map((h) => `a[href="${h}"],a[href^="${h}?"]`);
+const ids = (...testIds: string[]) => testIds.map((t) => `[data-testid="${t}"]`);
+
+const BY_FEATURE: Record<Feature, string[]> = {
+	communities: ['[role="menu"] a[href$="/communities"]'],
+	lists: ['[role="menu"] a[href$="/lists"]'],
+	gifs: ids("gifSearchButton"),
+	polls: ids("createPollButton"),
+	location: ids("geoButton"),
+	scheduling: ids("scheduleOption"),
+	grok: [...links("/i/grok"), ...ids("GrokDrawer")],
+	image_gen: [...ids("grokImgGen"), '[role="dialog"] [aria-label="Edit with Imagine"]'],
+	premium: [
+		...links("/i/premium_sign_up", "/settings/premium", "/i/premium"),
+		...ids("premium-signup-tab"),
+		// the sidebar's upsell boxes ("Subscribe to Premium", "Spend $1k, Get $1k", ...) are
+		// asides; the account suggestions are the asides worth keeping
+		'[data-testid="sidebarColumn"] div:has(> aside:not([aria-label="Who to follow"]):not([aria-label="Relevant people"]))',
+		'[data-testid="sidebarColumn"] aside:not([aria-label="Who to follow"]):not([aria-label="Relevant people"])',
+	],
+	calls: [...links("/i/calls"), ...ids("AppTabBar_Calls_Link")],
+	history: links("/i/history"),
+	creator_studio: links("/i/jf/creators/studio", "/i/monetization", "/settings/monetization"),
+	spaces: links("/i/spaces/start"),
+	business: links("/i/verified-orgs-signup"),
+};
+
+// never offered: ads, x.com's help and footer pages, paid partnerships, jobs
+const ALWAYS = [
+	...links("/jobs"),
+	...ids("contentDisclosureButton", "ProfessionalButton_Switch_To_Professional"),
+	'a[href^="https://ads.x.com"]',
+	'a[href^="https://help.x.com"]',
+	'[data-testid="sidebarColumn"] nav[aria-label="Footer"]',
+];
+
+export function hideCss(): string {
+	const off = (Object.keys(BY_FEATURE) as Feature[]).filter((f) => !feature(f)).flatMap((f) => BY_FEATURE[f]);
+	return `${[...ALWAYS, ...off].join(",")}{display:none!important}
+#xitter-announcement{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;background:rgb(29,155,240);color:#fff;font:15px TwitterChirp,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+#xitter-announcement a{color:#fff;text-decoration:underline}
+#xitter-announcement span{flex:1;white-space:pre-wrap}
+#xitter-announcement button{border:0;background:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 4px}`;
+}
+
+// what the script needs to know, as window.__XITTER__.tidy
+export function tidyData() {
+	const s = settings();
+	const menuItems = ["Embed post", "Request Community Note"];
+	if (!feature("lists")) menuItems.push("Add/remove from Lists");
+	return {
+		menuItems,
+		premium: feature("premium"),
+		imageGen: feature("image_gen"),
+		announcement: s.announcement.text ? s.announcement : null,
+	};
+}
+
+export const TIDY_SCRIPT = `(function(){
+	var T=(window.__XITTER__||{}).tidy||{menuItems:[]};
+	// X's own sign-in and sign-up screens talk to its servers; ours are /login and /signup
+	function ownScreens(){
+		var p=location.pathname;
+		if(p.indexOf("/i/jf/onboarding")===0||p.indexOf("/i/flow/login")===0)location.replace("/login");
+		else if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
+	}
+	var A=T.announcement,closed=false;
+	try{closed=!!A&&localStorage.getItem("xitter-announcement")===A.id}catch(e){}
+	function announce(){
+		if(!A||closed)return;
+		var col=document.querySelector('[data-testid="primaryColumn"]');
+		if(!col||col.querySelector("#xitter-announcement"))return;
+		var bar=document.createElement("div");
+		bar.id="xitter-announcement";
+		bar.setAttribute("role","status");
+		var text=document.createElement("span");
+		text.textContent=A.text+" ";
+		if(A.link){var a=document.createElement("a");a.href=A.link;a.target="_blank";a.rel="noopener";a.textContent="More";text.appendChild(a);}
+		var x=document.createElement("button");
+		x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";
+		x.onclick=function(){closed=true;try{localStorage.setItem("xitter-announcement",A.id)}catch(e){}bar.remove();};
+		bar.appendChild(text);bar.appendChild(x);
+		col.insertBefore(bar,col.firstChild);
+	}
+	function tidy(){
+		ownScreens();
+		announce();
+		if(!T.imageGen)document.querySelectorAll('[role="dialog"] button').forEach(function(b){
+			if(b.innerText.trim()!=="Edit Photo")return;
+			var box=b;
+			while(box.parentElement&&box.parentElement.innerText.indexOf("Imagine")>=0&&!box.parentElement.querySelector("input"))box=box.parentElement;
+			box.style.display="none";
+		});
+		document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
+			if(T.menuItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
+		});
+		// upsell banners: the box around a Premium link, up to whatever else shares its column
+		if(!T.premium)document.querySelectorAll('[data-testid="primaryColumn"] a[href="/i/premium_sign_up"]').forEach(function(a){
+			var box=a;
+			while(box.parentElement&&!box.parentElement.querySelector('[role="tablist"],[data-testid="UserName"],[data-testid="tweet"]'))box=box.parentElement;
+			box.style.display="none";
+		});
+	}
+	tidy();
+	new MutationObserver(tidy).observe(document.documentElement,{childList:true,subtree:true});
+})();`;

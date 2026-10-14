@@ -5,7 +5,7 @@
 import { sql } from "./db";
 import { isFlag } from "./flags";
 import { newId } from "./ids";
-import { getSetting } from "./settings";
+import { getSetting, settings } from "./settings";
 
 // no 0/O or 1/I/L, so a code read aloud or typed from a screenshot comes out right
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -60,6 +60,12 @@ export async function signUp(f: { code: string; screenName: string; name: string
 			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag})`;
 		// an organisation's invite makes the new account its affiliate
 		if (invite?.org_id) await tx`insert into affiliations (org_id, user_id) values (${invite.org_id}::bigint, ${id}::bigint)`;
+		// the accounts the admin panel says everyone starts out following
+		const follows = settings().default_follows.map((h) => h.toLowerCase());
+		if (follows.length)
+			await tx`insert into follows (follower_id, followee_id)
+				select ${id}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(follows, "TEXT")}) and u.status <> 'suspended'
+				on conflict do nothing`;
 	});
 	return id;
 }

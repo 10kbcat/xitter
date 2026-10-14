@@ -9,10 +9,11 @@ import type { Viewer } from "./auth";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
-import { MAX_VIDEO_BYTES, posterFile, progress, queueVideo, sourceFile, videoError, videoSupported } from "./video";
+import { settings } from "./settings";
+import { maxVideoBytes, posterFile, progress, queueVideo, sourceFile, videoError, videoSupported } from "./video";
 
 export const MEDIA_DIR = process.env.MEDIA_DIR ?? "media";
-const MAX_IMAGE = 5 * 1024 * 1024;
+const maxImage = () => settings().limits.image_mb * 1024 * 1024;
 const MAX_GIF = 15 * 1024 * 1024;
 const MAX_PENDING_MS = 60 * 60 * 1000;
 
@@ -105,7 +106,7 @@ async function finalize(id: string, p: Pending): Promise<Response> {
 	}
 	const image = sniffImage(data);
 	if (!image) return uploadError("Unsupported file. Images only: JPEG, PNG, GIF or WebP.");
-	if (data.length > (image.mime === "image/gif" ? MAX_GIF : MAX_IMAGE)) return uploadError("File is too large.");
+	if (data.length > (image.mime === "image/gif" ? MAX_GIF : maxImage())) return uploadError("File is too large.");
 	mkdirSync(MEDIA_DIR, { recursive: true });
 	writeFileSync(fileOf(id), data);
 	await sql`insert into media (id, user_id, kind, mime, size, width, height)
@@ -131,7 +132,7 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 			const video = /^video\//.test(fields.media_type ?? "") || /video/.test(fields.media_category ?? "");
 			if (video && !(await videoSupported())) return uploadError("Video uploads are not available on this server.");
 			if (!video && fields.media_type && !/^image\//.test(fields.media_type)) return uploadError("Only images and videos can be uploaded.");
-			if (!Number.isInteger(total) || total <= 0 || total > (video ? MAX_VIDEO_BYTES : MAX_GIF)) return uploadError("File is too large or empty.");
+			if (!Number.isInteger(total) || total <= 0 || total > (video ? maxVideoBytes() : MAX_GIF)) return uploadError("File is too large or empty.");
 			const newMedia = newId();
 			pending.set(newMedia, { userId: viewer.id, total, category: fields.media_category ?? "", video, chunks: new Map(), started: Date.now() });
 			return Response.json({ ...idFields(newMedia), expires_after_secs: 86400 }, { status: 202 });

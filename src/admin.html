@@ -60,6 +60,8 @@
 	.field { display: grid; gap: 4px; margin-bottom: 10px; }
 	.field label { color: var(--dim); font-size: 13px; }
 	.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+	label.row { flex-wrap: nowrap; align-items: flex-start; }
+	label.row input { margin-top: 3px; flex: none; }
 	.flags { display: flex; flex-wrap: wrap; gap: 6px; }
 	.flags button { width: 34px; height: 34px; padding: 0; border: 2px solid var(--line); border-radius: 6px; background: none; color: var(--dim); font-size: 11px; cursor: pointer; display: grid; place-items: center; }
 	.flags button img { width: 20px; height: 20px; border-radius: 3px; }
@@ -292,12 +294,67 @@ const RENDER = {
 	},
 
 	async settings(main) {
-		const { settings } = await api("settings");
+		const { settings: s, features, branding, slots } = await api("settings");
+		const admin = can("admin");
+		const dis = admin ? "" : " disabled";
 		const modes = { invite: "Invite only: a code is needed", open: "Open: anyone can sign up, codes optional", closed: "Closed: no new accounts" };
-		main.innerHTML = '<h1>Settings</h1><div class="box"><h2>Sign-up</h2>' +
-			Object.entries(modes).map(([k, v]) => '<label class="row" style="margin:6px 0"><input type="radio" name="mode" value="' + k + '"' + (settings.signup_mode === k ? " checked" : "") + (can("admin") ? "" : " disabled") + "> " + esc(v) + "</label>").join("") +
-			"</div>" + '<p class="dim small">More instance settings (name, logo, limits, feature switches, announcements) come in the next part of the panel.</p>';
+		main.innerHTML = "<h1>Settings</h1>" + '<div class="grid2">' +
+			'<div class="box"><h2>Sign-up</h2>' +
+			Object.entries(modes).map(([k, v]) => '<label class="row" style="margin:6px 0"><input type="radio" name="mode" value="' + k + '"' + (s.signup_mode === k ? " checked" : "") + dis + "> " + esc(v) + "</label>").join("") +
+			'<div class="field" style="margin-top:12px"><label>New accounts follow (handles, comma separated)</label><input id="follows" value="' + esc(s.default_follows.map((h) => "@" + h).join(", ")) + '"' + dis + "></div>" +
+			(admin ? '<button class="btn primary" id="saveFollows">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Name</h2><div class="field"><label>Instance name (page titles, sign-in page)</label><input id="name" maxlength="30" value="' + esc(s.instance_name) + '"' + dis + "></div>" +
+			(admin ? '<button class="btn primary" id="saveName">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Features</h2><p class="dim small">Switched-off features disappear from everyone\'s menus and composer.</p>' +
+			Object.entries(features).map(([k, label]) => '<label class="row" style="margin:6px 0"><input type="checkbox" data-feature="' + k + '"' + (s.features[k] ? " checked" : "") + dis + "> " + esc(label) + "</label>").join("") +
+			(admin ? '<button class="btn primary" id="saveFeatures" style="margin-top:8px">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Upload limits</h2>' +
+			[["image_mb", "Image size, MB"], ["video_mb", "Video size, MB"], ["video_seconds", "Video length, seconds"]]
+				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" data-limit="' + k + '" value="' + esc(s.limits[k]) + '"' + dis + "></div>").join("") +
+			(admin ? '<button class="btn primary" id="saveLimits">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Announcement</h2><p class="dim small">A banner above everyone\'s timeline until they close it. Saving new text shows it again to everyone.</p>' +
+			'<div class="field"><label>Text (empty removes the banner)</label><textarea id="annText" maxlength="500"' + dis + ">" + esc(s.announcement.text) + "</textarea></div>" +
+			'<div class="field"><label>Link (optional)</label><input id="annLink" value="' + esc(s.announcement.link) + '"' + dis + "></div>" +
+			(admin ? '<button class="btn primary" id="saveAnn">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Rules</h2><p class="dim small">Shown at <a href="/rules" target="_blank">/rules</a> and linked from sign-up. A blank line starts a new paragraph.</p>' +
+			'<textarea id="rules" style="min-height:160px"' + dis + ">" + esc(s.rules) + "</textarea>" +
+			(admin ? '<button class="btn primary" id="saveRules" style="margin-top:8px">Save</button>' : "") + "</div>" +
+			"</div>" +
+			"<h2>Logo and icons</h2><p class=\"dim small\">PNG, JPEG or WebP, up to 2 MB. Each replaces the shipped image of the same name.</p>" +
+			'<div class="grid2">' + Object.entries(slots).map(([slot, label]) =>
+				'<div class="box"><h2 class="small">' + esc(label) + '</h2><div style="background:' + (slot.endsWith("light") ? "#fff" : "#000") + ';border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;place-items:center;min-height:80px">' +
+				'<img alt="" style="max-width:100%;max-height:60px" src="/public/' + slot + ".png?t=" + Date.now() + '"></div>' +
+				'<div class="row" style="margin-top:10px">' + (admin ? '<label class="btn">Upload<input type="file" accept="image/png,image/jpeg,image/webp" data-slot="' + slot + '" hidden></label>' : "") +
+				(admin && branding[slot] ? '<button class="btn" data-reset="' + slot + '">Use the default</button>' : "") +
+				'<span class="dim small">' + (branding[slot] ? "uploaded" : "default") + "</span></div></div>").join("") + "</div>";
+
+		const save = (body, done) => act(() => api("saveSettings", body), done).then(route);
 		main.querySelectorAll("[name=mode]").forEach((r) => r.onchange = () => act(() => api("setSignupMode", { mode: r.value }), "Sign-up mode saved"));
+		if (!admin) return;
+		$("#saveFollows").onclick = () => save({ default_follows: $("#follows").value.split(",").map((x) => x.trim()).filter(Boolean) }, "Saved");
+		$("#saveName").onclick = () => save({ instance_name: $("#name").value }, "Name saved");
+		$("#saveFeatures").onclick = () => {
+			const f = {};
+			main.querySelectorAll("[data-feature]").forEach((c) => f[c.dataset.feature] = c.checked);
+			save({ features: f }, "Features saved; pages pick them up on their next load");
+		};
+		$("#saveLimits").onclick = () => {
+			const l = {};
+			main.querySelectorAll("[data-limit]").forEach((i) => l[i.dataset.limit] = i.value);
+			save({ limits: l }, "Limits saved");
+		};
+		$("#saveAnn").onclick = () => save({ announcement: { text: $("#annText").value, link: $("#annLink").value } }, "Announcement saved");
+		$("#saveRules").onclick = () => save({ rules: $("#rules").value }, "Rules saved");
+		main.querySelectorAll("[data-slot]").forEach((input) => input.onchange = () => {
+			const file = input.files[0];
+			if (!file) return;
+			act(async () => {
+				const r = await fetch("/admin/api/uploadBranding?slot=" + input.dataset.slot, { method: "POST", headers: { "x-csrf-token": csrf }, body: file });
+				const data = await r.json().catch(() => ({}));
+				if (!r.ok) throw new Error(data.error || "Upload failed");
+			}, "Uploaded").then(route);
+		});
+		main.querySelectorAll("[data-reset]").forEach((b) => b.onclick = () => act(() => api("resetBranding", { slot: b.dataset.reset }), "Back to the default").then(route));
 	},
 
 	async audit(main) {
