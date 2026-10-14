@@ -9,6 +9,7 @@ import { adminApi } from "./admin";
 import { loadSettings } from "./settings";
 import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
+import { onboarding } from "./onboarding";
 import { patchFile } from "./patch";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -135,6 +136,12 @@ const server = Bun.serve({
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
 		if (p === "/rules") return rulesPage();
+		// X's sign-in screens (jf.x.com), answered here
+		// inside the signed-in client the same screens come through /i/jfapi
+		if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
+			const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));
+			if (screen) return screen;
+		}
 		if (p === "/signup") return req.method === "POST" ? handleSignup(req) : signupPage(url);
 		if (p.startsWith("/public/")) return servePublic(p);
 		if (p === "/favicon.ico") return servePublic("/public/favicon.png");

@@ -11,5 +11,8 @@
 	},
 	"devDependencies": {
 		"@types/bun": "latest"
+	},
+	"dependencies": {
+		"emusks": "^2.3.19"
 	}
 }

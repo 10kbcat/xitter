@@ -65,11 +65,10 @@ export function tidyData() {
 
 export const TIDY_SCRIPT = `(function(){
 	var T=(window.__XITTER__||{}).tidy||{menuItems:[]};
-	// X's own sign-in and sign-up screens talk to its servers; ours are /login and /signup
+	// X's sign-up screens talk to its servers; ours is /signup (sign-in is served in onboarding.ts)
 	function ownScreens(){
 		var p=location.pathname;
-		if(p.indexOf("/i/jf/onboarding")===0||p.indexOf("/i/flow/login")===0)location.replace("/login");
-		else if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
+		if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
 	}
 	var A=T.announcement,closed=false;
 	try{closed=!!A&&localStorage.getItem("xitter-announcement")===A.id}catch(e){}
