@@ -13,7 +13,7 @@
 
 import { login, sessionCookies } from "./auth";
 import { sql } from "./db";
-import { type Message, encode, mapStrings } from "./jetfuel";
+import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
 import { CODE_DIGITS, SignupError, normalizeCode, signUp } from "./invites";
 import { settings } from "./settings";
@@ -78,6 +78,8 @@ const templates = {
 	password: without(await load("password"), ["Forgot password?"], 7140),
 	// no phone numbers, Google or Apple accounts here
 	landing: without(await load("landing"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
+	// the same, inline on the signed-out home page
+	page: without(await load("page"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	// sign-up: X's emailed-code screen asks for the invite code instead
 	code: codeLength(without(await load("code"), ["Send again"], 7140), INVITE_LENGTH),
 	setup: withoutUsernameCheck(await load("setup")),
@@ -113,16 +115,6 @@ function fill(messages: Message[], values: Record<string, string>): Message[] {
 	});
 }
 
-// the form's field errors: the property that describes a form (type 30) holds
-// [url, fields, errors, ...]; an error keyed by field name shows under it
-function withError(messages: Message[], field: string, text: string): Message[] {
-	for (const [tag, m] of messages) {
-		if (tag !== 0) continue;
-		for (const p of m.props) if (p[0] === 30) p[1][2] = new Map([[field, text]]);
-	}
-	return messages;
-}
-
 const respond = (messages: Message[], page = false, headers: Headers = new Headers()) => {
 	headers.set("content-type", "text/plain");
 	headers.set("x-jf-tag", "AgE");
@@ -138,11 +130,16 @@ async function form(req: Request): Promise<Record<string, string>> {
 	return out;
 }
 
-// sign-ups in progress, between their screens
-const signups = new Map<string, { username: string; code: string; at: number }>();
-setInterval(() => {
-	for (const [k, v] of signups) if (Date.now() - v.at > 30 * 60 * 1000) signups.delete(k);
-}, 60_000).unref?.();
+// Sign-ups in progress, between their screens. In the database, so a restart
+// in between doesn't lose them; they last half an hour.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function pending(token: string): Promise<{ username: string; code: string } | undefined> {
+	if (!UUID.test(token)) return undefined;
+	await sql`delete from signup_sessions where created_at < now() - interval '30 minutes'`;
+	const [s] = await sql`select username, code from signup_sessions where token = ${token}::uuid`;
+	return s;
+}
+const STALE = "That took too long. Go back and start again.";
 
 // "Set up your account" with the username they typed already in place
 function setupScreen(token: string, username: string): Message[] {
@@ -154,10 +151,30 @@ function setupScreen(token: string, username: string): Message[] {
 	return messages;
 }
 
+// Errors without a new screen: an ActionResponder root whose "errors" (field
+// name to text) the client puts under those fields of the screen it shows.
+// (Sending the screen again with the error in its form works for steps, but
+// not for the first screen, which came as a page.)
+function fieldError(field: string, text: string): Message[] {
+	const el = { type: nameId("ActionResponder"), props: new Map([[nameId("errors"), 0], [nameId("expected"), 1]]), children: [], id: null, extend: null };
+	return [
+		[0, { els: [el], props: [[17, new Map([[field, text]])], [6, true]], ts: Math.floor(Date.now() / 1000) }],
+		[1, { ref: 0, t: null }],
+	];
+}
+
+// the code, normalised, if it can still be used
+async function validCode(raw: string): Promise<string | undefined> {
+	const code = normalizeCode(raw);
+	const [ok] = await sql`select 1 from invites where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now())`;
+	return ok ? code : undefined;
+}
+
 const signInScreen = (username = "") => fill(templates.password, { username, session_token: crypto.randomUUID() });
 
 export async function onboarding(req: Request, path: string): Promise<Response | undefined> {
-	if (path === "/onboarding/web" || path === "/onboarding/web/landing") return respond(fill(templates.landing, {}), true);
+	if (path === "/onboarding/web") return respond(fill(templates.landing, {}), true);
+	if (path === "/onboarding/web/landing") return respond(fill(templates.page, {}), true);
 	if (path === "/onboarding/web/remotes/passkey_one_fa") return respond(templates.passkey, true);
 	// "Username is available": the setup screen asks while typing
 	if (path.startsWith("/onboarding/web/remotes/suggest_username")) return respond(templates.passkey, true);
@@ -172,46 +189,49 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		if (user) return respond(signInScreen(user.screen_name));
 		const mode = settings().signup_mode;
 		if (mode === "closed" || !/^[A-Za-z0-9_]{1,15}$/.test(name))
-			return respond(withError(fill(templates.landing, {}), "username_or_email", mode === "closed" ? "No account goes by that name." : "Usernames are letters, digits and underscores."), true);
+			return respond(fieldError("username_or_email", mode === "closed" ? "No account goes by that name." : "Usernames are letters, digits and underscores."));
 		const token = crypto.randomUUID();
-		signups.set(token, { username: name, code: "", at: Date.now() });
-		return respond(mode === "open" ? setupScreen(token, name) : fill(templates.code, { session_token: token }));
+		// came by an invite link (server.ts keeps its code in a cookie)
+		const linked = /(?:^|;\s*)xitter_invite=([^;]+)/.exec(req.headers.get("cookie") ?? "")?.[1];
+		const code = linked && (await validCode(decodeURIComponent(linked)));
+		await sql`insert into signup_sessions (token, username, code) values (${token}::uuid, ${name}, ${code || ""})`;
+		return respond(mode === "open" || code ? setupScreen(token, name) : fill(templates.code, { session_token: token }));
 	}
 	// the invite code, checked here and spent when the account is made
 	if (path === "/onboarding/web/actions/finish_verification") {
 		const f = await form(req);
 		const token = String(f.session_token ?? "");
-		const s = signups.get(token);
-		if (!s) return respond(withError(fill(templates.landing, {}), "username_or_email", "That took too long. Please start again."), true);
-		const code = normalizeCode(String(f.code ?? ""));
-		const [ok] = await sql`select 1 from invites where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now())`;
-		if (!ok) return respond(withError(fill(templates.code, { session_token: token }), "code", "That invite code is not valid or has been used up."));
-		s.code = code;
+		const s = await pending(token);
+		if (!s) return respond(fieldError("code", STALE));
+		const code = await validCode(String(f.code ?? ""));
+		if (!code) return respond(fieldError("code", "That invite code is not valid or has been used up."));
+		await sql`update signup_sessions set code = ${code} where token = ${token}::uuid`;
 		return respond(setupScreen(token, s.username));
 	}
 	if (path === "/onboarding/web/actions/verify_signup" || path === "/onboarding/web/actions/signup") {
 		const f = await form(req);
 		const token = String(f.session_token ?? "");
-		const s = signups.get(token);
-		if (!s) return respond(withError(fill(templates.landing, {}), "username_or_email", "That took too long. Please start again."), true);
+		const s = await pending(token);
+		if (!s) return respond(fieldError("username", STALE));
 		try {
 			await signUp({ code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? "") });
 		} catch (e) {
 			if (!(e instanceof SignupError)) throw e;
 			const field = /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : "username";
-			return respond(withError(setupScreen(token, String(f.username ?? s.username)), field, e.message));
+			return respond(fieldError(field, e.message));
 		}
-		signups.delete(token);
+		await sql`delete from signup_sessions where token = ${token}::uuid`;
 		const session = await login(String(f.username ?? s.username), String(f.password ?? ""));
 		const headers = new Headers();
 		for (const c of sessionCookies(session!)) headers.append("set-cookie", c);
+		headers.append("set-cookie", "xitter_invite=; Path=/; Max-Age=0");
 		return respond(fill(templates.success, { user_id: session!.userId, username: String(f.username ?? s.username) }), false, headers);
 	}
 	if (path === "/onboarding/web/actions/login_enter_password") {
 		const f = await form(req);
 		const username = String(f.username ?? "").trim().replace(/^@/, "");
 		const session = username && f.password ? await login(username, f.password) : undefined;
-		if (!session) return respond(withError(signInScreen(username), "password", "Wrong username or password."));
+		if (!session) return respond(fieldError("password", "Wrong username or password."));
 		const [user] = await sql`select screen_name from users where id = ${session.userId}::bigint`;
 		const headers = new Headers();
 		for (const c of sessionCookies(session)) headers.append("set-cookie", c);

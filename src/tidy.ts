@@ -39,6 +39,9 @@ const ALWAYS = [
 	'a[href^="https://ads.x.com"]',
 	'a[href^="https://help.x.com"]',
 	'[data-testid="sidebarColumn"] nav[aria-label="Footer"]',
+	// the signed-out home page's footer keeps Terms and Privacy (our rules page)
+	'nav[aria-label="Footer"] > div:has(> a[href^="http"]:not([href$="/tos"]):not([href$="/privacy"]))',
+	'nav[aria-label="Footer"] > div:has(> a[href^="/i/jf/stories"])',
 ];
 
 export function hideCss(): string {
@@ -60,15 +63,29 @@ export function tidyData() {
 		premium: feature("premium"),
 		imageGen: feature("image_gen"),
 		announcement: s.announcement.text ? s.announcement : null,
+		instance: s.instance_name,
+		source: s.source_url,
 	};
 }
 
 export const TIDY_SCRIPT = `(function(){
 	var T=(window.__XITTER__||{}).tidy||{menuItems:[]};
-	// X's sign-up screens talk to its servers; ours is /signup (sign-in is served in onboarding.ts)
+	// X's old sign-up flow talks to its servers; ours is in the dialog on the signed-out home page
 	function ownScreens(){
 		var p=location.pathname;
-		if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
+		if(p.indexOf("/i/flow/signup")===0)location.replace("/");
+	}
+	// the signed-out footer ends with X's copyright: the instance's name and source instead
+	function footer(){
+		var nav=document.querySelector('nav[aria-label="Footer"]');
+		if(!nav||nav.querySelector("[data-xitter-source]"))return;
+		var c=[].find.call(nav.querySelectorAll("span"),function(s){return /X Corp/.test(s.textContent)});
+		if(!c)return;
+		c.textContent=T.instance+" · ";
+		var a=document.createElement("a");
+		a.href=T.source;a.target="_blank";a.rel="noopener";a.textContent="source code";a.style.color="inherit";
+		a.setAttribute("data-xitter-source","");
+		c.appendChild(a);
 	}
 	var A=T.announcement,closed=false;
 	try{closed=!!A&&localStorage.getItem("xitter-announcement")===A.id}catch(e){}
@@ -96,6 +113,7 @@ export const TIDY_SCRIPT = `(function(){
 	window.addEventListener("resize",navWidth);
 	function tidy(){
 		ownScreens();
+		footer();
 		navWidth();
 		announce();
 		if(!T.imageGen)document.querySelectorAll('[role="dialog"] button').forEach(function(b){

@@ -1,5 +1,6 @@
 // Drives the real client in headless Edge over the DevTools protocol: opens a
-// page, then runs steps in order. Uses the signed-in profile left by probe.sh.
+// page, then runs steps in order. Uses the signed-in profile left by probe.sh
+// (PROFILE=<dir> for another, e.g. a fresh one to be signed out).
 // usage: bun scripts/drive.ts <path> <step>...
 // steps:
 //   wait:<seconds>         let the page work
@@ -30,7 +31,7 @@ const edge = spawn(EDGE, [
 	"--no-first-run",
 	"--window-size=1280,1600",
 	`--remote-debugging-port=${debugPort}`,
-	`--user-data-dir=${resolve(".probe/profile")}`,
+	`--user-data-dir=${resolve(process.env.PROFILE ?? ".probe/profile")}`,
 	"about:blank",
 ]);
 

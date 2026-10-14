@@ -58,11 +58,13 @@ bun scripts/make-admin.ts <name>
 bun src/server.ts
 ```
 
-Open `http://localhost:3000/login` and sign in. The tables are created on the
-first start.
+Open `http://localhost:3000` and sign in with the client's own form. The
+tables are created on the first start.
 
 More accounts: make invite codes in the admin panel (`/admin` > Invites) or with
-`bun scripts/invite.ts`, then sign up at `/signup?code=<code>`.
+`bun scripts/invite.ts`. On the sign-in form, a username that doesn't exist yet
+starts sign-up and asks for the code; an invite link (`/signup?code=<code>`)
+fills it in.
 
 On Windows, run the commands in Git Bash or set the variables with
 `$env:DATABASE_URL = "..."` in PowerShell.
@@ -106,5 +108,5 @@ logos) is set in the admin panel.
 ## License
 
 [AGPL-3.0](LICENSE). If you run a modified instance for other people, you must
-offer them its source; the sign-in page links to it (`SOURCE_URL`, or the admin
+offer them its source; the signed-out home page links to it (`SOURCE_URL`, or the admin
 panel's Settings).

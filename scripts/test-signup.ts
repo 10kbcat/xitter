@@ -1,9 +1,11 @@
-// End-to-end check of invite sign-up against a running server. Makes its own
-// invite and removes the account it creates.
+// End-to-end check of sign-in and invite sign-up in X's own dialog, against a
+// running server: posts what the dialog posts and reads the Jetfuel screens
+// that come back. Makes its own invites and removes the accounts it creates.
 // usage: bun scripts/test-signup.ts
 
 import { sql } from "../src/db";
 import { createInvite } from "../src/invites";
+import { decode } from "../src/jetfuel";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const name = `t${Date.now() % 1e9}`;
@@ -14,54 +16,104 @@ function check(label: string, ok: boolean, detail: unknown = "") {
 	console.log(`${ok ? "ok  " : "FAIL"} ${label}${detail === "" ? "" : `: ${JSON.stringify(detail)}`}`);
 }
 
-const post = (f: Record<string, string>) => fetch(`${origin}/signup`, { method: "POST", body: new URLSearchParams(f), redirect: "manual" });
-const errorOf = async (r: Response) => (await r.text()).match(/class="error">([^<]*)/)?.[1] ?? "";
-const form = (o: Record<string, string> = {}) => ({ username: name, name: "Signup Test", password: "testpass123", confirm: "testpass123", flag: "trans", ...o });
+type Screen = { texts: string[]; errors: Record<string, string>; fields: Record<string, string>; cookies: string[] };
 
+// a dialog step: the screen it answers with, its form's field errors and values
+async function step(action: string, f: Record<string, string>, cookie = ""): Promise<Screen> {
+	const r = await fetch(`${origin}/i/jfapi/onboarding/web/actions/${action}`, { method: "POST", body: new URLSearchParams(f), headers: { cookie } });
+	const messages = decode(new Uint8Array(await r.arrayBuffer()));
+	const s: Screen = { texts: [], errors: {}, fields: {}, cookies: r.headers.getSetCookie().map((c) => c.split(";")[0]) };
+	for (const [tag, m] of messages) {
+		if (tag !== 0) continue;
+		for (const p of m.props) {
+			if (p[0] === 0) s.texts.push(p[1]);
+			// an error reply (ActionResponder): field name to text
+			if (p[0] === 17) Object.assign(s.errors, Object.fromEntries(p[1]));
+			if (p[0] === 30) {
+				Object.assign(s.fields, Object.fromEntries(p[1][1]));
+				Object.assign(s.errors, Object.fromEntries(p[1][2]));
+			}
+		}
+	}
+	return s;
+}
+const shows = (s: Screen, text: string) => s.texts.some((t) => t.includes(text));
+const digits = (code: string) => code.replace(/\D/g, "");
+
+// signed out, the client's own home page is the way in
+const root = await fetch(`${origin}/`, { redirect: "manual" });
+check("signed out, / is the client's home page, signed out", root.status === 200 && (await root.text()).includes('"isLoggedIn":false'));
+const home = await fetch(`${origin}/home`, { redirect: "manual" });
+check("other pages send you there", home.status === 302 && home.headers.get("location") === "/");
+const oldLogin = await fetch(`${origin}/login`, { redirect: "manual" });
+check("so does the old /login", oldLogin.status === 302 && oldLogin.headers.get("location") === "/");
+
+// sign-in
+let s = await step("begin_login", { username_or_email: "pozo" });
+check("a known username goes on to its password", s.fields.username === "pozo" && "password" in s.fields, s.fields);
+s = await step("login_enter_password", { username: "pozo", password: "wrong" });
+check("a wrong password is refused under its field", /Wrong/.test(s.errors.password ?? ""), s.errors);
+s = await step("login_enter_password", { username: "pozo", password: "testpass123" });
+check("the right one signs in", s.cookies.some((c) => c.startsWith("auth_token=")));
+
+// sign-up by invite code
 const code = await createInvite();
-const page = await (await fetch(`${origin}/signup?code=${code}`)).text();
-check("the invite link fills in the code", page.includes(`value="${code}"`));
+s = await step("begin_login", { username_or_email: name });
+const token = s.fields.session_token;
+check("an unknown username asks for an invite", shows(s, "Enter your invite code") && !!token);
+s = await step("finish_verification", { session_token: token, code: "11112222" });
+check("an unknown code is refused", /not valid/.test(s.errors.code ?? ""), s.errors);
+s = await step("finish_verification", { session_token: token, code: digits(code) });
+check("a good one opens account setup with the username filled in", shows(s, "Set up your account") && s.fields.username === name, s.fields);
 
-let r = await post(form({ code: "AAAA-BBBB-CCCC" }));
-check("an unknown code is refused", r.status === 400 && /not valid/.test(await errorOf(r)));
-r = await post(form({ code, confirm: "different" }));
-check("passwords must match", r.status === 400 && /match/.test(await errorOf(r)));
-r = await post(form({ code, username: "settings" }));
-check("reserved names are refused", r.status === 400 && /reserved/.test(await errorOf(r)));
-r = await post(form({ code, username: "ab" }));
-check("short names are refused", r.status === 400 && /4 to 15/.test(await errorOf(r)));
-r = await post(form({ code, username: "POZO" }));
-check("taken names are refused, whatever the case", r.status === 400 && /taken/.test(await errorOf(r)));
-
-r = await post(form({ code: code.toLowerCase().replace(/-/g, " ") }));
-const cookies = r.headers.getSetCookie().map((c) => c.split(";")[0]);
-check("sign-up works with the code typed loosely, and signs in", r.status === 303 && cookies.some((c) => c.startsWith("auth_token=")), r.status);
+const setup = (o: Record<string, string>) => step("verify_signup", { session_token: token, name: "Signup Test", username: name, password: "testpass123", ...o });
+s = await setup({ username: "settings" });
+check("reserved names are refused", /reserved/.test(s.errors.username ?? ""), s.errors);
+s = await setup({ username: "ab" });
+check("short names are refused", /4 to 15/.test(s.errors.username ?? ""), s.errors);
+s = await setup({ username: "POZO" });
+check("taken names are refused, whatever the case", /taken/.test(s.errors.username ?? ""), s.errors);
+s = await setup({ password: "short" });
+check("short passwords are refused", /8 characters/.test(s.errors.password ?? ""), s.errors);
+s = await setup({});
+const cookies = s.cookies.filter((c) => !c.startsWith("xitter_invite"));
+check("sign-up makes the account and signs it in", cookies.some((c) => c.startsWith("auth_token=")));
 
 const csrf = cookies.find((c) => c.startsWith("ct0="))?.slice(4) ?? "";
 const vars = encodeURIComponent(JSON.stringify({ screen_name: name }));
-const user = (await (await fetch(`${origin}/i/api/graphql/q/UserByScreenName?variables=${vars}`, { headers: { cookie: cookies.join("; "), "x-csrf-token": csrf } })).json())
-	.data?.user?.result;
-check("the new account is signed in and visible", user?.core?.screen_name === name);
-check("the chosen flag shows as the badge", /flag-trans\.svg$/.test(user?.affiliates_highlighted_label?.label?.badge?.url ?? ""), user?.affiliates_highlighted_label);
+const lookup = async () =>
+	(await (await fetch(`${origin}/i/api/graphql/q/UserByScreenName?variables=${vars}`, { headers: { cookie: cookies.join("; "), "x-csrf-token": csrf } })).json()).data?.user?.result;
+check("the new account is signed in and visible", (await lookup())?.core?.screen_name === name);
 // the client reads its own account from the page's start-up state
-const home = await (await fetch(`${origin}/home`, { headers: { cookie: cookies.join("; ") } })).text();
-check("new accounts get Edit profile, not the onboarding flow", home.includes('"default_profile_image":false'));
+const page = await (await fetch(`${origin}/home`, { headers: { cookie: cookies.join("; ") } })).text();
+check("new accounts get Edit profile, not the onboarding flow", page.includes('"default_profile_image":false'));
 
 // the flag picker in the Edit profile dialog posts here
 const setFlag = (flag: string) =>
 	fetch(`${origin}/i/api/1.1/account/update_flag.json`, { method: "POST", headers: { cookie: cookies.join("; "), "x-csrf-token": csrf }, body: new URLSearchParams({ flag }) });
 check("an unknown flag is refused", (await setFlag("nope")).status === 403);
-check("the flag can be changed", (await setFlag("pan")).ok);
-const relabelled = (await (await fetch(`${origin}/i/api/graphql/q/UserByScreenName?variables=${vars}`, { headers: { cookie: cookies.join("; "), "x-csrf-token": csrf } })).json()).data
-	?.user?.result;
-check("and shows the new badge", /flag-pan\.svg$/.test(relabelled?.affiliates_highlighted_label?.label?.badge?.url ?? ""));
+check("a flag can be set", (await setFlag("pan")).ok);
+check("and shows as the badge", /flag-pan\.svg$/.test((await lookup())?.affiliates_highlighted_label?.label?.badge?.url ?? ""));
 check("and can be removed", (await setFlag("")).ok);
 
-r = await post(form({ code, username: `${name}b` }));
-check("a used-up code is refused", r.status === 400 && /used up/.test(await errorOf(r)));
+s = await step("begin_login", { username_or_email: `${name}b` });
+s = await step("finish_verification", { session_token: s.fields.session_token, code: digits(code) });
+check("a used-up code is refused", /used up/.test(s.errors.code ?? ""), s.errors);
 
-await sql`delete from users where screen_name = ${name}`;
-await sql`delete from invites where code = ${code}`;
+// an invite link keeps its code, and the dialog skips asking for it
+const linked = await createInvite();
+const link = await fetch(`${origin}/signup?code=${linked}`, { redirect: "manual" });
+const inviteCookie = link.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("xitter_invite=")) ?? "";
+check("an invite link leads to the home page and keeps the code", link.status === 302 && link.headers.get("location") === "/" && !!inviteCookie);
+s = await step("begin_login", { username_or_email: `${name}c` }, inviteCookie);
+check("then a new username goes straight to account setup", shows(s, "Set up your account"));
+s = await step("verify_signup", { session_token: s.fields.session_token, name: "", username: `${name}c`, password: "testpass123" }, inviteCookie);
+check("and signing up spends the code and clears it", s.cookies.some((c) => c.startsWith("auth_token=")) && s.cookies.includes("xitter_invite="));
+const [spent] = await sql`select uses from invites where code = ${linked}`;
+check("the linked code is used", spent?.uses === 1, spent);
+
+await sql`delete from users where screen_name in (${name}, ${`${name}c`})`;
+await sql`delete from invites where code in (${code}, ${linked})`;
 await sql.close();
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

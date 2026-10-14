@@ -230,3 +230,11 @@ create table if not exists username_changes (
 	changed_at timestamptz not null default now()
 );
 create index if not exists username_changes_user_idx on username_changes (user_id, changed_at desc);
+
+-- sign-ups between the dialog's screens; kept here so a restart doesn't lose them
+create table if not exists signup_sessions (
+	token uuid primary key,
+	username text not null,
+	code text not null default '',
+	created_at timestamptz not null default now()
+);

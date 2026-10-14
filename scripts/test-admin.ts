@@ -5,6 +5,7 @@
 // usage: bun scripts/test-admin.ts <admin> <target> <organisation> <password>
 
 import { sql } from "../src/db";
+import { decode } from "../src/jetfuel";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const [adminName, targetName, orgName, password] = process.argv.slice(2);
@@ -93,14 +94,27 @@ check("removed affiliates lose the badge", !(await o.get("UserByScreenName", { s
 // invites and sign-up mode
 const { codes } = await a.admin("createInvite", { count: 1, uses: 1, orgId: org.id });
 const name = `adm${Date.now() % 1e8}`;
-const signup = (f: Record<string, string>) => fetch(`${origin}/signup`, { method: "POST", body: new URLSearchParams({ username: name, name: "Admin Test", password: "testpass123", confirm: "testpass123", ...f }), redirect: "manual" });
+// sign-up as X's dialog does it: username, invite code, then the account; true when it signs in
+async function signup(f: { code: string; username?: string }): Promise<boolean> {
+	const act = async (action: string, body: Record<string, string>) => {
+		const r = await fetch(`${origin}/i/jfapi/onboarding/web/actions/${action}`, { method: "POST", body: new URLSearchParams(body) });
+		const props = decode(new Uint8Array(await r.arrayBuffer())).flatMap(([tag, m]: any) => (tag === 0 ? m.props : []));
+		return { token: props.find((p: any) => p[0] === 30)?.[1][1].get("session_token") as string | undefined, cookies: r.headers.getSetCookie() };
+	};
+	const username = f.username ?? name;
+	const { token } = await act("begin_login", { username_or_email: username });
+	if (!token) return false;
+	await act("finish_verification", { session_token: token, code: f.code.replace(/\D/g, "") });
+	const done = await act("verify_signup", { session_token: token, name: "Admin Test", username, password: "testpass123" });
+	return done.cookies.some((c) => c.startsWith("auth_token="));
+}
 await a.admin("setSignupMode", { mode: "closed" });
-check("closed: sign-up refuses even good codes", (await signup({ code: codes[0] })).status === 400);
+check("closed: sign-up refuses even good codes", !(await signup({ code: codes[0] })));
 await a.admin("setSignupMode", { mode: "invite" });
-check("an organisation's invite signs up and affiliates", (await signup({ code: codes[0] })).status === 303 && (await sql`select 1 from affiliations af join users u on u.id = af.user_id where u.screen_name = ${name}`).length === 1);
+check("an organisation's invite signs up and affiliates", (await signup({ code: codes[0] })) && (await sql`select 1 from affiliations af join users u on u.id = af.user_id where u.screen_name = ${name}`).length === 1);
 const { codes: [revoked] } = await a.admin("createInvite", {});
 await a.admin("revokeInvite", { code: revoked });
-check("a revoked code is refused", (await signup({ code: revoked, username: `${name}r` })).status === 400);
+check("a revoked code is refused", !(await signup({ code: revoked, username: `${name}r` })));
 check("invites are listed with who used them", (await a.admin("invites")).invites?.find((i: any) => i.code === codes[0])?.used_by?.includes(name));
 
 // reports: the client's report flow, then the queue
@@ -133,7 +147,7 @@ const rules = await (await fetch(`${origin}/rules`)).text();
 check("the rules page shows the rules", rules.includes("Be kind.") && rules.includes("No spam."));
 const { codes: [followCode] } = await a.admin("createInvite", {});
 const followName = `fol${Date.now() % 1e8}`;
-await fetch(`${origin}/signup`, { method: "POST", body: new URLSearchParams({ code: followCode, username: followName, name: "F", password: "testpass123", confirm: "testpass123" }), redirect: "manual" });
+await signup({ code: followCode, username: followName });
 check("new accounts follow the default accounts", (await sql`select 1 from follows f join users u on u.id = f.follower_id join users o on o.id = f.followee_id where u.screen_name = ${followName} and o.id = ${org.id}::bigint`).length === 1);
 await sql`delete from users where screen_name = ${followName}`;
 await sql`delete from invites where code = ${followCode}`;

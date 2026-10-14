@@ -73,6 +73,10 @@ const DARK = 'html[style*="color-scheme: dark"]';
 const WIDE = "html[data-wide-nav]";
 // the X drawn at the top of the sign-in dialog, known by its path
 const DIALOG_LOGO = '[role="dialog"] span:has(> svg > path[d^="M21.742 21.75l-7.563-11.179"])';
+// the big X beside the signed-out home page's sign-in form
+const HERO = 'main div:has(> svg > path[d^="M285.38 207.711"])';
+// X's code field is sized for 6 boxes; the 8-digit invite code's boxes share the width
+const CODE_BOXES = ".jf-code-input-wrapper:has(> .jf-code-box:nth-child(7))";
 const LOGO_CSS = `${LOGO} svg{opacity:0}
 ${LOGO}{background:url(/public/icon-light.png) center/36px no-repeat}
 ${DARK} ${LOGO}{background-image:url(/public/icon-dark.png)}
@@ -80,7 +84,12 @@ ${WIDE} ${LOGO}{width:150px;background-image:url(/public/logo-light.png);backgro
 ${WIDE}${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}
 ${DIALOG_LOGO}{background:url(/public/icon-light.png) center/contain no-repeat}
 ${DARK} ${DIALOG_LOGO}{background-image:url(/public/icon-dark.png)}
-${DIALOG_LOGO} svg{opacity:0}`;
+${DIALOG_LOGO} svg{opacity:0}
+${HERO}{background:url(/public/logo-light.png) center/min(100%,391px) auto no-repeat}
+${DARK} ${HERO}{background-image:url(/public/logo-dark.png)}
+${HERO} svg{opacity:0}
+${CODE_BOXES}{justify-content:center;gap:6px}
+${CODE_BOXES} > .jf-code-box{flex:1 1 0;min-width:0;max-width:56px}`;
 
 // Paid features the client gates on a per-account claim. Nothing is paid for
 // here, so every account holds them.
@@ -93,11 +102,11 @@ const HOST_SWITCHES = ["responsive_web_media_upload_host"];
 const withoutHostSwitches = (config: Record<string, unknown>) =>
 	Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k)));
 
-function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"]) {
+function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"]) {
 	return {
 		optimist: [],
 		entities: {
-			users: { entities: { [user.id]: legacyUser(user) }, errors: {}, fetchStatus: { [user.id]: "loaded" } },
+			users: user ? { entities: { [user.id]: legacyUser(user) }, errors: {}, fetchStatus: { [user.id]: "loaded" } } : { entities: {}, errors: {}, fetchStatus: {} },
 		},
 		featureSwitch: {
 			defaultConfig: withoutHostSwitches(fs.defaultConfig),
@@ -125,7 +134,7 @@ function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>[
 				pushNotificationsPermission: null,
 				quoteVideoToggleUsed: false,
 			},
-			remote: { settings: settingsFor(user), fetchStatus: "loaded" },
+			remote: user ? { settings: settingsFor(user), fetchStatus: "loaded" } : { settings: {}, fetchStatus: "none" },
 			dataSaver: { dataSaverMode: false },
 			transient: { loginPromptShown: false, lastViewedDmInboxPath: "/messages", themeFocus: null, notificationsType: null },
 		},
@@ -152,7 +161,7 @@ function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>[
 			ssoInitTokens: {},
 			superFollowersCount: 0,
 			superFollowsApplicationStatus: "NotStarted",
-			user_id: user.id,
+			user_id: user?.id ?? null,
 			userFeatures: {},
 			xpaymentsEnrolled: false,
 			canAccessPayments: false,
@@ -169,12 +178,13 @@ const inline = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
 let runtimePatched: string | undefined;
 
-export function shell(user: User): string | undefined {
+// With no user the client boots signed out, for the sign-in dialog.
+export function shell(user: User | null): string | undefined {
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
 	runtimePatched ??= patchText(runtime);
-	const meta = { ...build.meta, sha: build.sha, isLoggedIn: true, userId: user.id, serverDate: Date.now() };
+	const meta = { ...build.meta, sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, serverDate: Date.now() };
 	const scripts = build.scripts
 		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}"></script>`)
 		.join("");
@@ -187,7 +197,7 @@ ${hideCss()}
 ${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user.flag), tidy: tidyData() })};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
 ${FLAG_PICKER_SCRIPT}</script>
 <script id="nonce-csp"></script>

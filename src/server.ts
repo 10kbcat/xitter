@@ -4,7 +4,7 @@ import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
-import { handleLogin, handleSignup, loginPage, rulesPage, signupPage } from "./login";
+import { handleLogin, rulesPage } from "./login";
 import { adminApi } from "./admin";
 import { loadSettings } from "./settings";
 import { flagPickerData } from "./flag-picker";
@@ -91,6 +91,9 @@ function parseJson(text: string | null): any {
 }
 
 async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Promise<Response> {
+	// the signed-out home page asks for a guest token first; it gets one, but
+	// nothing is readable without signing in
+	if (!viewer && url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
 	if (!viewer) return apiError(401, 32, "Could not authenticate you.");
 	if (req.method !== "GET" && req.headers.get("x-csrf-token") !== viewer.csrf)
 		return apiError(403, 353, "This request requires a matching csrf cookie and header.");
@@ -134,15 +137,22 @@ const server = Bun.serve({
 		const p = url.pathname;
 		if (p.startsWith("/abs/")) return serveClient(req, p);
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
-		if (p === "/rules") return rulesPage();
+		if (p === "/login" && req.method === "POST") return handleLogin(req);
+		if (p === "/rules" || p === "/tos" || p === "/privacy") return rulesPage();
 		// X's sign-in screens (jf.x.com), answered here
 		// inside the signed-in client the same screens come through /i/jfapi
 		if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
 			const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));
 			if (screen) return screen;
 		}
-		if (p === "/signup") return req.method === "POST" ? handleSignup(req) : signupPage(url);
+		// people sign in and up on the signed-out home page; an invite link's code
+		// is kept for the dialog, which then skips asking for it
+		if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
+			const headers = new Headers({ location: "/" });
+			const code = url.searchParams.get("code");
+			if (code) headers.append("set-cookie", `xitter_invite=${encodeURIComponent(code)}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly`);
+			return new Response(null, { status: 302, headers });
+		}
 		if (p.startsWith("/public/")) return servePublic(p);
 		if (p === "/favicon.ico") return servePublic("/public/favicon.png");
 		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });
@@ -162,8 +172,9 @@ const server = Bun.serve({
 			return serveApi(req, url, viewer);
 		}
 
-		if (!viewer) return Response.redirect("/login", 302);
-		const page = shell(viewer);
+		// signed out: X's own home page with its sign-in form, and the dialog
+		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
+		const page = shell(viewer ?? null);
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP } });
 	},

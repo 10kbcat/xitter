@@ -229,6 +229,36 @@ const message = variant({
 
 export type Message = [number, any];
 
+// Element types and property keys are names hashed to 16 bits: MurmurHash3
+// (x86, 32-bit, seed 0) of the UTF-8 name, low half, signed. As the client does.
+export function nameId(name: string): number {
+	const b = new TextEncoder().encode(name);
+	const mul = (x: number, y: number) => Math.imul(x, y);
+	const rotl = (x: number, r: number) => (x << r) | (x >>> (32 - r));
+	let h = 0;
+	const tail = b.length & ~3;
+	for (let i = 0; i < tail; i += 4) {
+		let k = b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
+		k = mul(rotl(mul(k, 0xcc9e2d51), 15), 0x1b873593);
+		h = (mul(rotl(h ^ k, 13), 5) + 0xe6546b64) | 0;
+	}
+	let k = 0;
+	switch (b.length & 3) {
+		case 3:
+			k ^= b[tail + 2] << 16;
+		case 2:
+			k ^= b[tail + 1] << 8;
+		case 1:
+			k ^= b[tail];
+			h ^= mul(rotl(mul(k, 0xcc9e2d51), 15), 0x1b873593);
+	}
+	h ^= b.length;
+	h = mul(h ^ (h >>> 16), 0x85ebca6b);
+	h = mul(h ^ (h >>> 13), 0xc2b2ae35);
+	h ^= h >>> 16;
+	return (h << 16) >> 16;
+}
+
 export function decode(bytes: Uint8Array): Message[] {
 	const r = new Reader(bytes);
 	const out: Message[] = [];
