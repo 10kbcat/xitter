@@ -5,7 +5,8 @@ import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { handleLogin, loginPage } from "./login";
 import { patchFile } from "./patch";
-import { mediaUpload, serveMedia } from "./media";
+import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
+import { resumeVideos } from "./video";
 import { livePipeline, restRoute } from "./rest";
 import { shell } from "./shell";
 
@@ -23,6 +24,10 @@ const MIME: Record<string, string> = {
 
 // On its own domain the client prefixes API paths with /i/api; in its localhost
 // dev mode it calls the bare paths.
+// The client also calls outside services on its own (grok.com checkout, ads
+// measurement). Requests from the page may only reach this instance.
+const PAGE_CSP = "connect-src 'self' blob: data:";
+
 const API_PREFIX = /^\/(i\/api\/|i\/jfapi\/|i\/media\/|1\.1\/|2\/|graphql\/|fleets\/|live_pipeline\/)/;
 // calls no handler exists for yet, most frequent first
 const unknown = new Map<string, number>();
@@ -95,6 +100,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 }
 
 await migrate();
+await resumeVideos(MEDIA_DIR);
 
 const server = Bun.serve({
 	port: PORT,
@@ -108,7 +114,7 @@ const server = Bun.serve({
 
 		const viewer = await getViewer(req);
 		// uploads stay inside the instance: only signed-in users get them
-		if (p.startsWith("/media/")) return viewer ? serveMedia(p) : new Response("not found", { status: 404 });
+		if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });
 		if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
 		if (API_PREFIX.test(p) || req.method !== "GET") {
 			// the event stream must outlive the default idle timeout
@@ -119,7 +125,7 @@ const server = Bun.serve({
 		if (!viewer) return Response.redirect("/login", 302);
 		const page = shell(viewer);
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
-		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP } });
 	},
 	error(e) {
 		console.error(e);

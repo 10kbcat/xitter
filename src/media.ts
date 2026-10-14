@@ -1,24 +1,34 @@
-// Uploaded images: the client's chunked upload (INIT, APPEND, FINALIZE,
-// STATUS), storage on disk, serving, and the media objects attached to posts.
+// Uploads: the client's chunked upload (INIT, APPEND, FINALIZE, STATUS),
+// storage on disk, serving, and the media objects attached to posts.
 // Images are stored as uploaded; GIFs are served as images, so they animate
-// without a video conversion step.
+// without a video conversion step. Videos are converted by video.ts.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
+import { MAX_VIDEO_BYTES, posterFile, progress, queueVideo, sourceFile, videoError, videoSupported } from "./video";
 
 export const MEDIA_DIR = process.env.MEDIA_DIR ?? "media";
 const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_GIF = 15 * 1024 * 1024;
 const MAX_PENDING_MS = 60 * 60 * 1000;
 
-type Pending = { userId: string; total: number; category: string; chunks: Map<number, Buffer>; started: number };
+type Pending = { userId: string; total: number; category: string; video: boolean; chunks: Map<number, Buffer>; started: number };
 const pending = new Map<string, Pending>();
 
-export type MediaRow = { id: string; kind: string; mime: string; size: number; width: number; height: number; position: number | null };
+export type MediaRow = {
+	id: string;
+	kind: string;
+	mime: string;
+	size: number;
+	width: number;
+	height: number;
+	position: number | null;
+	duration_ms: number | null;
+};
 
 type Image = { mime: string; width: number; height: number };
 
@@ -52,7 +62,9 @@ export function sniffImage(b: Buffer): Image | undefined {
 
 const fileOf = (id: string) => join(MEDIA_DIR, id);
 const EXT: Record<string, string> = { "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/jpeg": "jpg" };
-export const mediaUrl = (id: string, mime: string) => `${PUBLIC_ORIGIN}/media/${id}.${EXT[mime] ?? "bin"}`;
+const EXT_VIDEO: Record<string, string> = { "video/mp4": "mp4" };
+export const mediaUrl = (id: string, mime: string) => `${PUBLIC_ORIGIN}/media/${id}.${EXT[mime] ?? EXT_VIDEO[mime] ?? "bin"}`;
+const posterUrl = (id: string) => `${PUBLIC_ORIGIN}/media/poster/${id}.jpg`;
 // stored paths are relative so the instance can move to another domain
 export const absolute = (path: string | null) => (path?.startsWith("/") ? PUBLIC_ORIGIN + path : path);
 
@@ -83,6 +95,14 @@ async function finalize(id: string, p: Pending): Promise<Response> {
 	const parts = [...p.chunks].sort((a, b) => a[0] - b[0]).map((c) => c[1]);
 	const data = Buffer.concat(parts);
 	if (data.length !== p.total) return uploadError("File size does not match the size announced at INIT.");
+	if (p.video) {
+		mkdirSync(MEDIA_DIR, { recursive: true });
+		writeFileSync(sourceFile(MEDIA_DIR, id), data);
+		await sql`insert into media (id, user_id, kind, mime, size, width, height, state)
+			values (${id}::bigint, ${p.userId}::bigint, 'video', 'video/mp4', ${data.length}, 0, 0, 'processing')`;
+		queueVideo(MEDIA_DIR, id);
+		return Response.json({ ...idFields(id), size: data.length, expires_after_secs: 86400, processing_info: { state: "pending", check_after_secs: 1 } });
+	}
 	const image = sniffImage(data);
 	if (!image) return uploadError("Unsupported file. Images only: JPEG, PNG, GIF or WebP.");
 	if (data.length > (image.mime === "image/gif" ? MAX_GIF : MAX_IMAGE)) return uploadError("File is too large.");
@@ -108,10 +128,12 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 	switch (fields.command) {
 		case "INIT": {
 			const total = Number(fields.total_bytes);
-			if (!Number.isInteger(total) || total <= 0 || total > MAX_GIF) return uploadError("File is too large or empty.");
-			if (fields.media_type && !/^image\//.test(fields.media_type)) return uploadError("Only images can be uploaded for now.");
+			const video = /^video\//.test(fields.media_type ?? "") || /video/.test(fields.media_category ?? "");
+			if (video && !(await videoSupported())) return uploadError("Video uploads are not available on this server.");
+			if (!video && fields.media_type && !/^image\//.test(fields.media_type)) return uploadError("Only images and videos can be uploaded.");
+			if (!Number.isInteger(total) || total <= 0 || total > (video ? MAX_VIDEO_BYTES : MAX_GIF)) return uploadError("File is too large or empty.");
 			const newMedia = newId();
-			pending.set(newMedia, { userId: viewer.id, total, category: fields.media_category ?? "", chunks: new Map(), started: Date.now() });
+			pending.set(newMedia, { userId: viewer.id, total, category: fields.media_category ?? "", video, chunks: new Map(), started: Date.now() });
 			return Response.json({ ...idFields(newMedia), expires_after_secs: 86400 }, { status: 202 });
 		}
 		case "APPEND": {
@@ -123,6 +145,21 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 			p.chunks.set(Number(fields.segment_index) || 0, file);
 			return new Response(null, { status: 204 });
 		}
+		// the video uploader: one blob holding the consecutive segments listed in
+		// segment_indexes, checked against media_md5; kept under its first index
+		case "APPENDMULTI": {
+			const p = id ? pending.get(id) : undefined;
+			if (!p || p.userId !== viewer.id) return uploadError("Unknown upload.", 404);
+			if (!file) return uploadError("No data in APPENDMULTI.");
+			const first = Number((fields.segment_indexes ?? "0").split(",")[0]);
+			if (!Number.isInteger(first) || first < 0) return uploadError("Bad segment_indexes.");
+			if (fields.media_md5 && new Bun.CryptoHasher("md5").update(file).digest("hex") !== fields.media_md5.toLowerCase())
+				return uploadError("Segment checksum does not match.");
+			const received = [...p.chunks.values()].reduce((n, c) => n + c.length, 0);
+			if (received + file.length > p.total) return uploadError("More data than announced at INIT.");
+			p.chunks.set(first, file);
+			return new Response(null, { status: 204 });
+		}
 		case "FINALIZE": {
 			const p = id ? pending.get(id) : undefined;
 			if (!p || p.userId !== viewer.id) return uploadError("Unknown upload.", 404);
@@ -130,8 +167,12 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 		}
 		case "STATUS": {
 			if (!isId(id)) return uploadError("Unknown upload.", 404);
-			const [row] = await sql`select id from media where id = ${id}::bigint and user_id = ${viewer.id}::bigint`;
+			const [row] = await sql`select state from media where id = ${id}::bigint and user_id = ${viewer.id}::bigint`;
 			if (!row) return uploadError("Unknown upload.", 404);
+			if (row.state === "processing")
+				return Response.json({ ...idFields(id), processing_info: { state: "in_progress", check_after_secs: 1, progress_percent: progress.get(id!) ?? 0 } });
+			if (row.state === "failed")
+				return Response.json({ ...idFields(id), processing_info: { state: "failed", error: { code: 1, name: "InvalidMedia", message: videoError(id!) } } });
 			return Response.json({ ...idFields(id), processing_info: { state: "succeeded", progress_percent: 100 } });
 		}
 	}
@@ -140,10 +181,19 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 
 const mimeCache = new Map<string, string>();
 
-// /media/<id>[.ext] and /media/banner/<id>[/<size>]; the client asks for sizes
-// through the query string or a path suffix, and gets the original either way
-export async function serveMedia(pathname: string): Promise<Response> {
-	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z]+)?(?:\/[\w-]+)?$/.exec(pathname);
+const IMMUTABLE = "public, max-age=31536000, immutable";
+
+// /media/<id>[.ext], /media/banner/<id>[/<size>] and /media/poster/<id>.jpg; the
+// client asks for sizes through the query string or a path suffix, and gets the
+// original either way. Byte ranges are answered so the video player can seek.
+export async function serveMedia(req: Request, pathname: string): Promise<Response> {
+	const poster = /^\/media\/poster\/(\d{1,19})\.jpg$/.exec(pathname);
+	if (poster) {
+		const file = posterFile(MEDIA_DIR, poster[1]);
+		if (!existsSync(file)) return new Response("not found", { status: 404 });
+		return new Response(Bun.file(file), { headers: { "content-type": "image/jpeg", "cache-control": IMMUTABLE, "x-content-type-options": "nosniff" } });
+	}
+	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
 	if (!m || !existsSync(fileOf(m[1]))) return new Response("not found", { status: 404 });
 	let mime = mimeCache.get(m[1]);
 	if (!mime) {
@@ -152,23 +202,41 @@ export async function serveMedia(pathname: string): Promise<Response> {
 		mime = row.mime as string;
 		mimeCache.set(m[1], mime);
 	}
-	return new Response(readFileSync(fileOf(m[1])), {
-		headers: { "content-type": mime, "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" },
-	});
+	const headers: Record<string, string> = { "content-type": mime, "cache-control": IMMUTABLE, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
+	const size = statSync(fileOf(m[1])).size;
+	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+	if (range && (range[1] || range[2])) {
+		// "bytes=-N" means the last N bytes
+		const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+		const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+		if (start > end || start >= size) return new Response(null, { status: 416, headers: { "content-range": `bytes */${size}` } });
+		return new Response(Bun.file(fileOf(m[1])).slice(start, end + 1), {
+			status: 206,
+			headers: { ...headers, "content-range": `bytes ${start}-${end}/${size}`, "content-length": String(end - start + 1) },
+		});
+	}
+	return new Response(Bun.file(fileOf(m[1])), { headers });
 }
 
-// attaches uploads to a new post; only the poster's own unused uploads count
+// attaches uploads to a new post; only the poster's own unused, finished
+// uploads count. A video goes alone, photos up to four.
 export async function attachMedia(userId: string, postId: string, mediaIds: string[]) {
-	for (const [i, id] of mediaIds.slice(0, 4).entries())
-		await sql`update media set post_id = ${postId}::bigint, position = ${i}
-			where id = ${id}::bigint and user_id = ${userId}::bigint and post_id is null`;
+	const ids = mediaIds.filter((id) => isId(id)).slice(0, 4);
+	if (!ids.length) return;
+	const rows = await sql`select id, kind from media where id = any(${sql.array(ids, "INT8")}) and user_id = ${userId}::bigint
+		and post_id is null and state = 'ready'`;
+	const kinds = new Map<string, string>(rows.map((r: any) => [String(r.id), r.kind]));
+	const usable = ids.filter((id) => kinds.has(id));
+	const video = usable.find((id) => kinds.get(id) === "video");
+	for (const [i, id] of (video ? [video] : usable).entries())
+		await sql`update media set post_id = ${postId}::bigint, position = ${i} where id = ${id}::bigint`;
 }
 
 export async function mediaForPosts(postIds: string[]): Promise<Map<string, MediaRow[]>> {
 	const out = new Map<string, MediaRow[]>();
 	if (!postIds.length) return out;
-	const rows = await sql`select id, post_id, kind, mime, size, width, height, position from media
-		where post_id = any(${sql.array(postIds, "INT8")}) order by post_id, position`;
+	const rows = await sql`select id, post_id, kind, mime, size, width, height, position, duration_ms from media
+		where post_id = any(${sql.array(postIds, "INT8")}) and state = 'ready' order by post_id, position`;
 	for (const r of rows) {
 		const list = out.get(r.post_id) ?? [];
 		list.push(r as MediaRow);
@@ -182,8 +250,9 @@ function fit(w: number, h: number, max: number) {
 	return { w: Math.round(w * scale), h: Math.round(h * scale), resize: "fit" };
 }
 
-// one photo as it appears in a post's entities.media and extended_entities.media
+// one photo or video as it appears in a post's entities.media and extended_entities.media
 export function mediaEntity(m: MediaRow, postId: string, screenName: string, index: number, textLength: number) {
+	if (m.kind === "video") return videoEntity(m, postId, screenName, textLength);
 	const page = `${PUBLIC_ORIGIN}/${screenName}/status/${postId}/photo/${index + 1}`;
 	return {
 		allow_download_status: { allow_download: true },
@@ -206,5 +275,41 @@ export function mediaEntity(m: MediaRow, postId: string, screenName: string, ind
 		},
 		type: "photo",
 		url: page,
+	};
+}
+
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+
+// a converted video: the poster stands in for the image, the MP4 is the only variant
+function videoEntity(m: MediaRow, postId: string, screenName: string, textLength: number) {
+	const page = `${PUBLIC_ORIGIN}/${screenName}/status/${postId}/video/1`;
+	const d = gcd(m.width, m.height) || 1;
+	const key = `7_${m.id}`;
+	const seconds = Math.max(1, (m.duration_ms ?? 1000) / 1000);
+	return {
+		additional_media_info: { monetizable: false },
+		allow_download_status: { allow_download: true },
+		display_url: `pic.${PUBLIC_HOSTNAME}/${m.id}`,
+		expanded_url: page,
+		ext_media_availability: { status: "Available" },
+		id_str: m.id,
+		indices: [textLength, textLength],
+		media_key: key,
+		media_results: { result: { media_key: key } },
+		media_url_https: posterUrl(m.id),
+		original_info: { focus_rects: [], height: m.height, width: m.width },
+		sizes: {
+			large: fit(m.width, m.height, 2048),
+			medium: fit(m.width, m.height, 1200),
+			small: fit(m.width, m.height, 680),
+			thumb: { h: 150, w: 150, resize: "crop" },
+		},
+		type: "video",
+		url: page,
+		video_info: {
+			aspect_ratio: [m.width / d, m.height / d],
+			duration_millis: m.duration_ms ?? 0,
+			variants: [{ bitrate: Math.round((m.size * 8) / seconds), content_type: "video/mp4", url: mediaUrl(m.id, m.mime) }],
+		},
 	};
 }

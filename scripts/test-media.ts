@@ -54,6 +54,7 @@ check("photo is served to a signed-in user", file.status === 200 && !!file.heade
 check("photo is hidden from visitors", (await fetch(media.media_url_https)).status === 404);
 const stolen = await gql("CreateTweet", { tweet_text: "reuse", media: { media_entities: [{ media_id: photo }] } });
 check("an upload cannot be attached twice", !stolen.data?.create_tweet?.tweet_results?.result?.legacy?.extended_entities);
+for (const id of [post?.rest_id, stolen.data?.create_tweet?.tweet_results?.result?.rest_id]) if (id) await gql("DeleteTweet", { tweet_id: id });
 
 const avatar = await upload(imagePath, "profile_image", 1);
 const a = await (await fetch(`${origin}/i/api/1.1/account/update_profile_image.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: avatar, return_user: "true" }) })).json();
@@ -72,8 +73,8 @@ const p = await (await fetch(`${origin}/i/api/1.1/account/update_profile.json`, 
 check("profile text updated", p.description === "testing xitter" && p.location === "Kyiv" && p.url === "https://example.org", { description: p.description, location: p.location, url: p.url });
 const tooLong = await fetch(`${origin}/i/api/1.1/account/update_profile.json`, { method: "POST", headers, body: new URLSearchParams({ description: "x".repeat(161) }) });
 check("161-character bio is refused", tooLong.status === 403);
-const notImage = await fetch(`${origin}/i/media/upload.json?command=INIT&total_bytes=10&media_type=video/mp4&media_category=tweet_video`, { method: "POST", headers });
-check("video is refused for now", notImage.status === 400);
+const notImage = await fetch(`${origin}/i/media/upload.json?command=INIT&total_bytes=10&media_type=application/pdf&media_category=tweet_image`, { method: "POST", headers });
+check("other file types are refused", notImage.status === 400);
 
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

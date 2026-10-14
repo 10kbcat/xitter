@@ -9,7 +9,8 @@
 //   file:<selector>=<path> put a local file into a file input
 //   shot:<name>            screenshot to .probe/<name>.png
 //   eval:<expression>      print the value of a JS expression
-// Console errors are printed at the end.
+//   mark                   forget errors seen so far
+// Console errors are printed at the end. NET=1 prints requests, EXCEPTIONS=1 caught exceptions.
 // Git Bash rewrites an argument that starts with "/", so the path's slash is optional.
 
 import { spawn } from "node:child_process";
@@ -52,6 +53,7 @@ const waiting = new Map<number, (v: any) => void>();
 const consoleErrors = new Map<string, number>();
 // with EXCEPTIONS=1, exceptions the client catches itself are listed too (noise as in js-errors.ts)
 const exceptions = new Map<string, number>();
+const requests = new Map<string, string>();
 const NOISE = /DetermineComponentFrameRoot|^\d*x? ?Promise|React error #460|Invalid URL|^Error  at/;
 ws.addEventListener("message", (ev) => {
 	const msg = JSON.parse(String(ev.data));
@@ -59,6 +61,13 @@ ws.addEventListener("message", (ev) => {
 		const text = msg.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").split("\n").slice(0, 3).join(" | ").slice(0, 400);
 		consoleErrors.set(text, (consoleErrors.get(text) ?? 0) + 1);
 	}
+	// with NET=1, requests outside the client's own files are printed as they finish or fail
+	if (process.env.NET && msg.method === "Network.requestWillBeSent" && !/\/abs\/|^data:/.test(msg.params.request.url))
+		requests.set(msg.params.requestId, `${msg.params.request.method} ${msg.params.request.url.slice(0, 160)}`);
+	if (process.env.NET && msg.method === "Network.responseReceived" && requests.has(msg.params.requestId))
+		console.log(`net ${msg.params.response.status} ${requests.get(msg.params.requestId)}`);
+	if (process.env.NET && msg.method === "Network.loadingFailed" && requests.has(msg.params.requestId))
+		console.log(`net FAILED ${msg.params.errorText} ${requests.get(msg.params.requestId)}`);
 	if (msg.method === "Debugger.paused") {
 		const { reason, data, callFrames } = msg.params;
 		if (reason === "exception" || reason === "promiseRejection") {
@@ -85,6 +94,7 @@ const evaluate = async (expression: string) =>
 
 await call("Page.enable");
 await call("Runtime.enable");
+if (process.env.NET) await call("Network.enable");
 if (process.env.EXCEPTIONS) {
 	await call("Debugger.enable");
 	await call("Debugger.setPauseOnExceptions", { state: "all" });
@@ -108,12 +118,17 @@ const clickText = (text: string) => `(() => {
 for (const step of steps) {
 	const i = step.indexOf(":");
 	const [kind, arg] = [step.slice(0, i), step.slice(i + 1)];
-	if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
+	if (step === "mark") {
+		// report only what happens after this point
+		exceptions.clear();
+		consoleErrors.clear();
+	} else if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
 	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
 	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(arg)}); if (!e) return "not found"; e.click(); return "clicked"; })()`)}`);
 	else if (kind === "type") await call("Input.insertText", { text: arg });
 	else if (kind === "file") {
-		const [selector, file] = arg.split("=");
+		const cut = arg.lastIndexOf("=");
+		const [selector, file] = [arg.slice(0, cut), arg.slice(cut + 1)];
 		const doc = await call("DOM.getDocument", { depth: -1, pierce: true });
 		const node = await call("DOM.querySelector", { nodeId: doc.root.nodeId, selector });
 		const r = await call("DOM.setFileInputFiles", { nodeId: node.nodeId, files: [resolve(file)] });

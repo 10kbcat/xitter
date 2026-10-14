@@ -68,7 +68,7 @@ create index if not exists follows_followee_idx on follows (followee_id);
 create table if not exists media (
 	id bigint primary key,
 	user_id bigint not null references users (id) on delete cascade,
-	-- 'photo' or 'animated_gif'
+	-- 'photo' or 'video'
 	kind text not null,
 	mime text not null,
 	size integer not null,
@@ -94,3 +94,7 @@ create or replace view feed_items as
 	union all
 	select r.id, r.post_id, r.user_id, r.user_id, false, r.created_at
 	from reposts r;
+
+-- videos: converted after upload; 'processing' until ffmpeg is done
+alter table media add column if not exists duration_ms integer;
+alter table media add column if not exists state text not null default 'ready';

@@ -61,6 +61,13 @@ export function settingsFor(user: User): Record<string, unknown> {
 	};
 }
 
+// Switches whose values name x.com hosts. The client checks them against host
+// lists that patch.ts has already rewritten, so the captured value would fail;
+// without the switch the client falls back to its (patched) default.
+const HOST_SWITCHES = ["responsive_web_media_upload_host"];
+const withoutHostSwitches = (config: Record<string, unknown>) =>
+	Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k)));
+
 function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"]) {
 	return {
 		optimist: [],
@@ -68,8 +75,8 @@ function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>[
 			users: { entities: { [user.id]: legacyUser(user) }, errors: {}, fetchStatus: { [user.id]: "loaded" } },
 		},
 		featureSwitch: {
-			defaultConfig: fs.defaultConfig,
-			user: { config: fs.config, impression_pointers: {}, impressions: {}, keysRead: {}, settingsVersion: fs.settingsVersion },
+			defaultConfig: withoutHostSwitches(fs.defaultConfig),
+			user: { config: withoutHostSwitches(fs.config), impression_pointers: {}, impressions: {}, keysRead: {}, settingsVersion: fs.settingsVersion },
 			debug: {},
 			featureSetToken: fs.featureSetToken,
 			isLoaded: true,
