@@ -23,7 +23,8 @@ import { resolve } from "node:path";
 const [pathArg = "home", ...steps] = process.argv.slice(2);
 const page = `/${pathArg.replace(/^\/+/, "")}`;
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
-const debugPort = 9378;
+// CDP_PORT=<n> lets two runs work at once
+const debugPort = Number(process.env.CDP_PORT ?? 9378);
 const EDGE = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 if (!EDGE) throw new Error("Edge not found");
 
