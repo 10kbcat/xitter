@@ -93,9 +93,10 @@ function parseJson(text: string | null): any {
 }
 
 async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Promise<Response> {
-	// the signed-out home page and the chat app ask for a guest token; they get
-	// one, but nothing is readable without signing in
-	if (url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
+	// the signed-out home page asks for a guest token first; it gets one, but
+	// nothing is readable without signing in. Signed in, a guest token would make
+	// the client act as a guest and stop sending its csrf header.
+	if (!viewer && url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
 	if (!viewer) return apiError(401, 32, "Could not authenticate you.");
 	if (req.method !== "GET" && req.headers.get("x-csrf-token") !== viewer.csrf)
 		return apiError(403, 353, "This request requires a matching csrf cookie and header.");
@@ -195,7 +196,11 @@ const server = Bun.serve({
 		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
 		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi);
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
-		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP } });
+		const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
+		// a guest token left from the signed-out page makes the signed-in client act
+		// as a guest (no csrf header, every write refused)
+		if (viewer && /(?:^|;\s*)gt=/.test(req.headers.get("cookie") ?? "")) headers.append("set-cookie", "gt=; Path=/; Max-Age=0");
+		return new Response(page, { headers });
 	},
 	websocket: chatSocket,
 	error(e) {

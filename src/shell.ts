@@ -186,8 +186,10 @@ export function shell(user: User | null, multi = false): string | undefined {
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
 	runtimePatched ??= patchText(runtime);
-	// the chat build's address, like every other address, is ours
-	const meta = { ...JSON.parse(patchText(JSON.stringify(build.meta))), sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
+	// the chat build's address is ours (the rest of the metadata stays as captured:
+	// the client decides from it where its csrf header goes)
+	const chatBuild = build.meta.xchatEmbedBuild;
+	const meta = { ...build.meta, ...(typeof chatBuild === "string" ? { xchatEmbedBuild: patchText(chatBuild) } : {}), sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
 	const scripts = build.scripts
 		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}"></script>`)
 		.join("");

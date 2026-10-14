@@ -66,7 +66,14 @@ ws.addEventListener("message", (ev) => {
 	}
 	// with NET=1, requests outside the client's own files are printed as they finish or fail
 	if (process.env.NET && msg.method === "Network.requestWillBeSent" && !/\/abs\/|^data:/.test(msg.params.request.url))
-		requests.set(msg.params.requestId, `${msg.params.request.method} ${msg.params.request.url.slice(0, 160)}`);
+		requests.set(
+			msg.params.requestId,
+			`${msg.params.request.method} ${msg.params.request.url.slice(0, 160)}` +
+				// NET=2: also the header names and the script that sent it
+				(process.env.NET === "2"
+					? ` [${Object.keys(msg.params.request.headers).join(",")}] from ${(msg.params.initiator?.stack?.callFrames ?? []).slice(0, 2).map((f: any) => `${f.url.split("/").pop()}:${f.lineNumber}`).join(" < ")}`
+					: ""),
+		);
 	if (process.env.NET && msg.method === "Network.responseReceived" && requests.has(msg.params.requestId))
 		console.log(`net ${msg.params.response.status} ${requests.get(msg.params.requestId)}`);
 	if (process.env.NET && msg.method === "Network.loadingFailed" && requests.has(msg.params.requestId))
