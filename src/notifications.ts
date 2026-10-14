@@ -4,6 +4,7 @@
 // posts themselves). Entries sort by time in milliseconds, which is also what
 // the cursors and the read marker hold.
 
+import { blockedFor, hasMutedWord, mutedFor } from "./blocks";
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
@@ -27,6 +28,8 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 	const lo = opts.after !== undefined ? new Date(opts.after + 1) : new Date(0);
 	const hi = opts.before ? new Date(opts.before) : new Date(8.64e15);
 	const out: Item[] = [];
+	// nothing from blocked or muted accounts, nor posts holding a muted word
+	const hidden = sql`(select x.id from ${blockedFor(viewerId)} as x(id) union all select x.id from ${mutedFor(viewerId)} as x(id))`;
 
 	if (!opts.mentionsOnly) {
 		for (const kind of ["like", "repost"] as const) {
@@ -35,7 +38,7 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 				select a.post_id, max(a.created_at) as at, count(*)::int as total,
 					(array_agg(a.user_id order by a.created_at desc))[1:${SHOWN_USERS}] as users
 				from ${table} a join posts p on p.id = a.post_id
-				where p.user_id = ${viewerId}::bigint and a.user_id <> ${viewerId}::bigint
+				where p.user_id = ${viewerId}::bigint and a.user_id <> ${viewerId}::bigint and a.user_id not in ${hidden}
 				group by a.post_id
 				having max(a.created_at) >= ${lo} and max(a.created_at) < ${hi}
 				order by at desc limit ${opts.limit}`;
@@ -45,7 +48,7 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 		const follows = await sql`
 			select date_trunc('day', f.created_at) as day, max(f.created_at) as at, count(*)::int as total,
 				(array_agg(f.follower_id order by f.created_at desc))[1:${SHOWN_USERS}] as users
-			from follows f where f.followee_id = ${viewerId}::bigint
+			from follows f where f.followee_id = ${viewerId}::bigint and f.follower_id not in ${hidden}
 			group by 1
 			having max(f.created_at) >= ${lo} and max(f.created_at) < ${hi}
 			order by at desc limit ${opts.limit}`;
@@ -55,16 +58,16 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 	const posts = await sql`
 		select x.id, x.created_at as at, x.reason from (
 			select p.id, p.created_at, 'reply' as reason from posts p join posts parent on parent.id = p.reply_to_id
-				where parent.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint
+				where parent.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint and p.user_id not in ${hidden} and not ${hasMutedWord(viewerId, "notifications", sql`p.id`)}
 			union all
 			select p.id, p.created_at, 'mention' from posts p join post_mentions m on m.post_id = p.id
-				where m.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint
+				where m.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint and p.user_id not in ${hidden} and not ${hasMutedWord(viewerId, "notifications", sql`p.id`)}
 			${
 				opts.mentionsOnly
 					? sql``
 					: sql`union all
 			select p.id, p.created_at, 'quote' from posts p join posts quoted on quoted.id = p.quote_id
-				where quoted.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint`
+				where quoted.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint and p.user_id not in ${hidden} and not ${hasMutedWord(viewerId, "notifications", sql`p.id`)}`
 			}
 		) x where x.created_at >= ${lo} and x.created_at < ${hi}
 		order by x.created_at desc limit ${opts.limit * 2}`;

@@ -1,6 +1,7 @@
 // GraphQL operations, routed by name. The client sends a query id that changes
 // with every build; the name after it is stable.
 
+import { blockedIds } from "./blocks";
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
 import { notificationsTimeline, unreadCount } from "./notifications";
@@ -227,6 +228,18 @@ const follows =
 		return userTimeline(wholeList(users.map((u, i) => userEntry(u, (base - BigInt(i) - 1n).toString())), base));
 	};
 
+// Settings > Privacy > Blocked and Muted accounts; both lists come back whole
+const relationList =
+	(kind: "blocks" | "mutes" | "none"): Handler =>
+	async (viewer, vars) => {
+		const ids = vars.cursor || kind === "none" ? [] : await blockedIds(viewer.id, kind);
+		const users = await usersByIds(viewer.id, ids);
+		const base = BigInt(newId());
+		const entries = ids.flatMap((id, i) => (users.has(id) ? [userEntry(users.get(id)!, (base - BigInt(i) - 1n).toString())] : []));
+		const timeline = { timeline: { instructions: [{ type: "TimelineAddEntries", entries: wholeList(entries, base) }] } };
+		return { data: { viewer: kind === "mutes" ? { muting_timeline: timeline } : { timeline } } };
+	};
+
 const viewerUser = (fields: object) => ({ data: { viewer: { user_results: { result: { __typename: "User", ...fields } } } } });
 
 const handlers: Record<string, Handler> = {
@@ -305,6 +318,9 @@ const handlers: Record<string, Handler> = {
 	UserOriginalsTimeline: profileFeed(false, "both"),
 	UserTweetsAndReplies: profileFeed(true, "both"),
 	Likes: likes,
+	BlockedAccountsAll: relationList("blocks"),
+	BlockedAccountsImported: relationList("none"),
+	MutedAccounts: relationList("mutes"),
 	Following: follows("following"),
 	Followers: follows("followers"),
 	UserMedia: userMedia("any"),

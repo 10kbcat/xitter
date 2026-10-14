@@ -10,3 +10,4 @@ server.log*
 .probe/
 # uploaded files
 media/
+CLAUDE.md

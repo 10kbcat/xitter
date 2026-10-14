@@ -128,3 +128,30 @@ create index if not exists posts_quote_idx on posts (quote_id) where quote_id is
 create index if not exists posts_reply_idx on posts (reply_to_id) where reply_to_id is not null;
 -- notifications newer than this are unread
 alter table users add column if not exists notifications_seen_at timestamptz not null default now();
+
+-- a block hides both accounts from each other; a mute only hides the muted
+-- account from the muter's home feeds and notifications
+create table if not exists blocks (
+	blocker_id bigint not null references users (id) on delete cascade,
+	blocked_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (blocker_id, blocked_id)
+);
+create index if not exists blocks_blocked_idx on blocks (blocked_id);
+create table if not exists mutes (
+	muter_id bigint not null references users (id) on delete cascade,
+	muted_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (muter_id, muted_id)
+);
+-- muted words; surfaces are home_timeline, tweet_replies and notifications
+create table if not exists muted_keywords (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	keyword text not null,
+	surfaces text[] not null,
+	exclude_following boolean not null default false,
+	valid_until timestamptz,
+	created_at timestamptz not null default now()
+);
+create unique index if not exists muted_keywords_user_word_idx on muted_keywords (user_id, lower(keyword));

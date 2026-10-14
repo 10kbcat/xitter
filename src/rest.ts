@@ -1,13 +1,14 @@
 // The few REST endpoints the client still uses next to GraphQL.
 
 import { type Viewer, clearedCookies, logout } from "./auth";
+import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKeyword } from "./blocks";
 import { sql } from "./db";
 import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
-import { setFollow, userById, usersByIds } from "./users";
+import { setFollow, userById, userByName, usersByIds } from "./users";
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
 
@@ -72,6 +73,32 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
 		return Response.json(legacyUser(user));
 	}
+	const relation = /^\/1\.1\/(blocks|mutes\/users)\/(create|destroy)\.json$/.exec(path);
+	if (relation && method === "POST") {
+		const f = await form(req);
+		const target = f.user_id ?? (f.screen_name ? (await userByName(viewer.id, f.screen_name))?.id : undefined);
+		if (!isId(target) || target === viewer.id) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		const on = relation[2] === "create";
+		if (relation[1] === "blocks") await setBlock(viewer.id, target, on);
+		else await setMute(viewer.id, target, on);
+		const user = await userById(viewer.id, target);
+		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		return Response.json(legacyUser(user));
+	}
+	const keywords = /^\/1\.1\/mutes\/keywords\/(list|create|update|destroy)\.json$/.exec(path);
+	if (keywords) {
+		const f = method === "POST" ? await form(req) : {};
+		if (keywords[1] === "create") {
+			const error = await addKeyword(viewer.id, f);
+			if (error) return Response.json({ errors: [{ code: 214, message: error }] }, { status: 400 });
+		} else if (keywords[1] === "update" && isId(f.id)) await updateKeyword(viewer.id, f.id, f);
+		else if (keywords[1] === "destroy") await removeKeywords(viewer.id, (f.ids ?? "").split(",").filter(isId));
+		return Response.json(await mutedKeywords(viewer.id));
+	}
+	// words the client warns about muting; there are none
+	if (path === "/1.1/mutes/keywords/discouraged.json") return Response.json({ discouraged_keywords: [] });
+	// notification filters (who may notify you); none are kept
+	if (path === "/1.1/mutes/advanced_filters.json") return Response.json({});
 	// the notifications page reports the newest entry it has shown
 	if (/^\/2\/notifications\/\w+\/last_seen_cursor(\.json)?$/.test(path) && method === "POST") {
 		const body = await req.text();

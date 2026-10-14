@@ -25,6 +25,9 @@ export type User = {
 		following: number;
 		followedByViewer: boolean;
 		followsViewer: boolean;
+		blocking?: boolean;
+		blockedBy?: boolean;
+		muting?: boolean;
 	};
 };
 

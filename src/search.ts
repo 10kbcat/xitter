@@ -13,6 +13,7 @@
 //   filter:follows                   authors the viewer follows
 //   lang:xx, near:, other operators  accepted and ignored
 
+import { blockedFor } from "./blocks";
 import { sql } from "./db";
 
 type Clause = ReturnType<typeof sql>;
@@ -95,14 +96,15 @@ export async function searchPosts(
 	const cond = postCondition(query, opts.viewerId);
 	if (!cond) return [];
 	const media = opts.media ? sql`and exists (select 1 from media fm where fm.post_id = p.id)` : sql``;
+	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)}`;
 	if (opts.top) {
-		const rows = await sql`select p.id from posts p where ${cond} ${media}
+		const rows = await sql`select p.id from posts p where ${cond} ${media} ${hidden}
 			order by ((select count(*) from likes x where x.post_id = p.id) + 2 * (select count(*) from reposts x where x.post_id = p.id)
 				+ (select count(*) from posts x where x.reply_to_id = p.id)) desc, p.id desc
 			limit ${opts.limit} offset ${opts.offset ?? 0}`;
 		return rows.map((r: any) => String(r.id));
 	}
-	const rows = await sql`select p.id from posts p where ${cond} ${media}
+	const rows = await sql`select p.id from posts p where ${cond} ${media} ${hidden}
 		${opts.before ? sql`and p.id < ${opts.before}::bigint` : sql``} order by p.id desc limit ${opts.limit}`;
 	return rows.map((r: any) => String(r.id));
 }

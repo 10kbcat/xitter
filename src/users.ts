@@ -1,4 +1,5 @@
 import type { User } from "./auth";
+import { isBlockedEitherWay } from "./blocks";
 import { sql } from "./db";
 
 // Author columns shared by every query that returns a user; expects the users
@@ -14,7 +15,10 @@ export const userCols = (viewerId: string) => sql`
 	(select count(*)::int from follows x where x.followee_id = u.id) as a_followers,
 	(select count(*)::int from follows x where x.follower_id = u.id) as a_following,
 	exists (select 1 from follows x where x.follower_id = ${viewerId}::bigint and x.followee_id = u.id) as a_followed_by_viewer,
-	exists (select 1 from follows x where x.follower_id = u.id and x.followee_id = ${viewerId}::bigint) as a_follows_viewer`;
+	exists (select 1 from follows x where x.follower_id = u.id and x.followee_id = ${viewerId}::bigint) as a_follows_viewer,
+	exists (select 1 from blocks x where x.blocker_id = ${viewerId}::bigint and x.blocked_id = u.id) as a_blocking,
+	exists (select 1 from blocks x where x.blocker_id = u.id and x.blocked_id = ${viewerId}::bigint) as a_blocked_by,
+	exists (select 1 from mutes x where x.muter_id = ${viewerId}::bigint and x.muted_id = u.id) as a_muting`;
 
 export function toUser(r: any): User {
 	return {
@@ -38,6 +42,9 @@ export function toUser(r: any): User {
 			following: r.a_following,
 			followedByViewer: r.a_followed_by_viewer,
 			followsViewer: r.a_follows_viewer,
+			blocking: r.a_blocking,
+			blockedBy: r.a_blocked_by,
+			muting: r.a_muting,
 		},
 	};
 }
@@ -54,6 +61,7 @@ export async function userById(viewerId: string, id: string): Promise<User | und
 
 export async function setFollow(followerId: string, followeeId: string, on: boolean) {
 	if (followerId === followeeId) return;
+	if (on && (await isBlockedEitherWay(followerId, followeeId))) return;
 	if (on) await sql`insert into follows (follower_id, followee_id) values (${followerId}::bigint, ${followeeId}::bigint) on conflict do nothing`;
 	else await sql`delete from follows where follower_id = ${followerId}::bigint and followee_id = ${followeeId}::bigint`;
 }

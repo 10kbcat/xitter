@@ -3,6 +3,7 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
+import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor } from "./blocks";
 import { mediaForPosts } from "./media";
 import { toUser, userCols, usersByIds } from "./users";
 
@@ -121,10 +122,17 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 			: q.media === "video"
 				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
+	// blocked accounts never show; muted ones and muted words only leave the home feeds
+	// a profile stays readable to the one who blocked it ("View posts"), never to the blocked
+	const home = !("user" in q.authors);
+	const blocked = home ? blockedFor(q.viewerId) : sql`(select blocker_id from blocks where blocked_id = ${q.viewerId}::bigint)`;
+	const hidden = sql`f.author_id not in ${blocked} and (select x.user_id from posts x where x.id = f.post_id) not in ${blocked}
+		${home ? sql`and f.author_id not in ${mutedFor(q.viewerId)} and (select x.user_id from posts x where x.id = f.post_id) not in ${mutedFor(q.viewerId)}
+			and not ${hasMutedWord(q.viewerId, "home_timeline", sql`f.post_id`)}` : sql``}`;
 	const rows = q.after
-		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and f.item_id > ${q.after}::bigint
+		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
-		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
+		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
 			order by f.item_id desc limit ${q.limit}`;
 	if (q.after) rows.reverse();
 
@@ -154,7 +162,8 @@ export async function ancestors(viewerId: string, replyToId: string): Promise<Po
 }
 
 export async function replies(viewerId: string, id: string, limit = 100): Promise<PostRow[]> {
-	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint order by p.id asc limit ${limit}`;
+	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.user_id not in ${blockedFor(viewerId)}
+		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)} order by p.id asc limit ${limit}`;
 	return hydrate(viewerId, rows.map(toRow));
 }
 
@@ -176,13 +185,15 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	const id = newId();
 	let conversationId = id;
 	if (opts.replyToId) {
-		const [parent] = await sql`select conversation_id from posts where id = ${opts.replyToId}::bigint`;
+		const [parent] = await sql`select conversation_id, user_id from posts where id = ${opts.replyToId}::bigint`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
+		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
 	}
 	if (opts.quoteId) {
-		const [quoted] = await sql`select id from posts where id = ${opts.quoteId}::bigint`;
+		const [quoted] = await sql`select id, user_id from posts where id = ${opts.quoteId}::bigint`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
+		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
 	}
 	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id)
 		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint)`;
