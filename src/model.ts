@@ -3,6 +3,7 @@
 
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
+import { type MediaRow, absolute, mediaEntity } from "./media";
 
 const DEFAULT_AVATAR = `${PUBLIC_ORIGIN}/abs/sticky/default_profile_images/default_profile_normal.png`;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -27,8 +28,8 @@ export function userResult(u: User) {
 		__typename: "User",
 		action_counts: { favorites_count: u.stats?.likes ?? 0 },
 		affiliates_highlighted_label: {},
-		avatar: { image_url: u.avatar_url ?? DEFAULT_AVATAR },
-		...(u.banner_url ? { banner: { image_url: u.banner_url } } : {}),
+		avatar: { image_url: absolute(u.avatar_url) ?? DEFAULT_AVATAR },
+		...(u.banner_url ? { banner: { image_url: absolute(u.banner_url) } } : {}),
 		core: { created_at: apiDate(u.created_at), name: u.name, screen_name: u.screen_name },
 		follow_request_sent: false,
 		has_graduated_access: true,
@@ -61,7 +62,7 @@ export function userResult(u: User) {
 		tweet_counts: { media_tweets: 0, tweets: u.stats?.posts ?? 0 },
 		verification: verification(u),
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
-		website: { url: "" },
+		website: { url: u.website ?? "" },
 	};
 }
 
@@ -86,7 +87,7 @@ export function legacyUser(u: User) {
 		friends_count: u.stats?.following ?? 0,
 		media_count: 0,
 		statuses_count: u.stats?.posts ?? 0,
-		url: "",
+		url: u.website ?? "",
 		is_blue_verified: u.verified_type !== null,
 		...(u.verified_type === "business" ? { verified_type: "Business" } : {}),
 		...(u.verified_type === "government" ? { verified_type: "Government" } : {}),
@@ -96,8 +97,8 @@ export function legacyUser(u: User) {
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
 		verified: false,
 		protected: false,
-		profile_image_url_https: u.avatar_url ?? DEFAULT_AVATAR,
-		...(u.banner_url ? { profile_banner_url: u.banner_url } : {}),
+		profile_image_url_https: absolute(u.avatar_url) ?? DEFAULT_AVATAR,
+		...(u.banner_url ? { profile_banner_url: absolute(u.banner_url) } : {}),
 		can_media_tag: true,
 		follow_request_sent: false,
 		description: u.bio,
@@ -131,11 +132,14 @@ export type PostRow = {
 	reposted: boolean;
 	bookmarked: boolean;
 	author: User;
+	media?: MediaRow[];
 };
 
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
 
 export function tweetResult(p: PostRow, withTypename = true) {
+	const textLength = [...p.text].length;
+	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
 	return {
 		...(withTypename ? { __typename: "Tweet" } : {}),
 		cashtag_attachments: [],
@@ -157,7 +161,8 @@ export function tweetResult(p: PostRow, withTypename = true) {
 			conversation_id_str: p.conversation_id,
 			created_at: apiDate(p.created_at),
 			display_text_range: [0, [...p.text].length],
-			entities: {},
+			entities: media.length ? { media } : {},
+			...(media.length ? { extended_entities: { media } } : {}),
 			favorite_count: p.like_count,
 			favorited: p.liked,
 			full_text: p.text,

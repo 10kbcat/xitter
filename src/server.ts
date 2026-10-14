@@ -5,6 +5,7 @@ import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { handleLogin, loginPage } from "./login";
 import { patchFile } from "./patch";
+import { mediaUpload, serveMedia } from "./media";
 import { livePipeline, restRoute } from "./rest";
 import { shell } from "./shell";
 
@@ -22,7 +23,7 @@ const MIME: Record<string, string> = {
 
 // On its own domain the client prefixes API paths with /i/api; in its localhost
 // dev mode it calls the bare paths.
-const API_PREFIX = /^\/(i\/api\/|i\/jfapi\/|1\.1\/|2\/|graphql\/|fleets\/|live_pipeline\/)/;
+const API_PREFIX = /^\/(i\/api\/|i\/jfapi\/|i\/media\/|1\.1\/|2\/|graphql\/|fleets\/|live_pipeline\/)/;
 // calls no handler exists for yet, most frequent first
 const unknown = new Map<string, number>();
 
@@ -74,6 +75,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		const body = decodeURIComponent(await req.clone().text()).replace(/\+/g, " ");
 		for (const m of body.matchAll(/.{0,160}(?:[Ee]rror|exception|stack).{0,400}/g)) console.log(`client-report ${path}: ${m[0]}`);
 	}
+	if (/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path)) return mediaUpload(req, url, viewer);
 	if (gql >= 0) {
 		const name = parts[parts.length - 1];
 		if (knownOperation(name)) {
@@ -105,6 +107,8 @@ const server = Bun.serve({
 		if (p === "/sw.js" || p === "/favicon.ico" || p === "/manifest.json") return new Response(null, { status: 404 });
 
 		const viewer = await getViewer(req);
+		// uploads stay inside the instance: only signed-in users get them
+		if (p.startsWith("/media/")) return viewer ? serveMedia(p) : new Response("not found", { status: 404 });
 		if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
 		if (API_PREFIX.test(p) || req.method !== "GET") {
 			// the event stream must outlive the default idle timeout

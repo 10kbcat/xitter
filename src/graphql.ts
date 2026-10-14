@@ -3,6 +3,7 @@
 
 import type { Viewer } from "./auth";
 import { isId, newId } from "./ids";
+import { attachMedia } from "./media";
 import { cursorEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
 import {
 	MAX_POST_LENGTH,
@@ -104,11 +105,15 @@ const bookmarks: Handler = async (viewer, vars) => {
 
 const createTweet: Handler = async (viewer, vars) => {
 	const text = typeof vars.tweet_text === "string" ? vars.tweet_text.trim() : "";
-	if (!text) throw new PostError("Your post is empty.", 170);
+	const mediaIds: string[] = (Array.isArray(vars.media?.media_entities) ? vars.media.media_entities : [])
+		.map((m: any) => String(m?.media_id ?? ""))
+		.filter(isId);
+	if (!text && !mediaIds.length) throw new PostError("Your post is empty.", 170);
 	if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
 	const replyTo = vars.reply?.in_reply_to_tweet_id;
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
 	const id = await createPost(viewer.id, text, replyTo);
+	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
 };

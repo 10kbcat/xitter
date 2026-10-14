@@ -8,3 +8,5 @@ samples/
 client/
 server.log
 .probe/
+# uploaded files
+media/

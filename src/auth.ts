@@ -8,6 +8,7 @@ export type User = {
 	name: string;
 	bio: string;
 	location: string;
+	website?: string;
 	avatar_url: string | null;
 	banner_url: string | null;
 	verified_type: "blue" | "business" | "government" | null;
@@ -68,7 +69,7 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
 	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.avatar_url, u.banner_url, u.verified_type, u.created_at, s.csrf, s.token
+		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.created_at, s.csrf, s.token
 		from sessions s join users u on u.id = s.user_id
 		where s.token = ${token}`;
 	return row as Viewer | undefined;

@@ -1,6 +1,7 @@
 import { sql } from "./db";
 import { newId } from "./ids";
 import type { PostRow } from "./model";
+import { mediaForPosts } from "./media";
 import { toUser, userCols } from "./users";
 
 export const MAX_POST_LENGTH = 280;
@@ -42,9 +43,15 @@ function toRow(r: any): PostRow {
 	};
 }
 
+async function withMedia(posts: PostRow[]): Promise<PostRow[]> {
+	const media = await mediaForPosts(posts.map((p) => p.id));
+	for (const p of posts) p.media = media.get(p.id) ?? [];
+	return posts;
+}
+
 export async function getPost(viewerId: string, id: string): Promise<PostRow | undefined> {
 	const rows = await sql`${select(viewerId)} where p.id = ${id}::bigint`;
-	return rows[0] && toRow(rows[0]);
+	return rows[0] && (await withMedia([toRow(rows[0])]))[0];
 }
 
 // top-level posts, newest first; `before`/`after` are exclusive post ids
@@ -54,7 +61,7 @@ export async function homePosts(viewerId: string, limit: number, range: { before
 		: range.before
 			? await sql`${select(viewerId)} where p.reply_to_id is null and p.id < ${range.before}::bigint order by p.id desc limit ${limit}`
 			: await sql`${select(viewerId)} where p.reply_to_id is null order by p.id desc limit ${limit}`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 // the chain of posts this one replies to, oldest first
@@ -67,19 +74,19 @@ export async function ancestors(viewerId: string, replyToId: string): Promise<Po
 				select x.id, x.reply_to_id from posts x join chain c on x.id = c.reply_to_id
 			) select id from chain)
 		order by p.id asc`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 export async function replies(viewerId: string, id: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint order by p.id asc limit ${limit}`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 export async function bookmarkedPosts(viewerId: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)}
 		join bookmarks b on b.post_id = p.id and b.user_id = ${viewerId}::bigint
 		order by b.created_at desc limit ${limit}`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 // posts on a profile, newest first; replies only on the "with replies" tab
@@ -88,14 +95,14 @@ export async function userPosts(viewerId: string, userId: string, withReplies: b
 	const rows = withReplies
 		? await sql`${select(viewerId)} where p.user_id = ${userId}::bigint and p.id < ${max}::bigint order by p.id desc limit ${limit}`
 		: await sql`${select(viewerId)} where p.user_id = ${userId}::bigint and p.reply_to_id is null and p.id < ${max}::bigint order by p.id desc limit ${limit}`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)}
 		join likes lk on lk.post_id = p.id and lk.user_id = ${userId}::bigint
 		order by lk.created_at desc limit ${limit}`;
-	return rows.map(toRow);
+	return withMedia(rows.map(toRow));
 }
 
 export async function createPost(userId: string, text: string, replyToId?: string): Promise<string> {

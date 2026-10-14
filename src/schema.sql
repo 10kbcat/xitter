@@ -64,3 +64,20 @@ create table if not exists follows (
 	check (follower_id <> followee_id)
 );
 create index if not exists follows_followee_idx on follows (followee_id);
+
+create table if not exists media (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	-- 'photo' or 'animated_gif'
+	kind text not null,
+	mime text not null,
+	size integer not null,
+	width integer not null,
+	height integer not null,
+	post_id bigint references posts (id) on delete set null,
+	position smallint,
+	created_at timestamptz not null default now()
+);
+create index if not exists media_post_idx on media (post_id, position);
+
+alter table users add column if not exists website text not null default '';
