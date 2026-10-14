@@ -7,6 +7,7 @@
 //   click:<text>           click the innermost visible element whose text is exactly <text>
 //   css:<selector>         click the first element matching <selector>
 //   type:<text>            insert text at the focused element
+//   keys:<text>            type it key by key
 //   file:<selector>=<path> put a local file into a file input
 //   shot:<name>            screenshot to .probe/<name>.png
 //   eval:<expression>      print the value of a JS expression
@@ -107,10 +108,15 @@ await call("Emulation.setDeviceMetricsOverride", { width, height: 1600, deviceSc
 await call("Page.navigate", { url: origin + page });
 await Bun.sleep(6000);
 
+// every element, also inside open shadow roots (the chat app draws in one)
+const DEEP = `const deepAll = (root = document) => { const out = []; for (const e of root.querySelectorAll("*")) { out.push(e); if (e.shadowRoot) out.push(...deepAll(e.shadowRoot)); } return out; };
+	const deepQuery = (sel) => deepAll().find((e) => e.matches(sel));`;
+
 // the innermost visible element with exactly this text, clicked like a user would
 const clickText = (text: string) => `(() => {
+	${DEEP}
 	const want = ${JSON.stringify(text)};
-	const all = [...document.querySelectorAll("body *")].filter((e) => e.innerText?.trim() === want && e.getClientRects().length);
+	const all = deepAll().filter((e) => e.innerText?.trim() === want && e.getClientRects().length);
 	const el = all.find((e) => ![...e.children].some((c) => c.innerText?.trim() === want)) ?? all[0];
 	if (!el) return "not found";
 	const target = el.closest("a,button,[role=button],[role=menuitem],[role=tab],[role=link]") ?? el;
@@ -127,8 +133,15 @@ for (const step of steps) {
 		consoleErrors.clear();
 	} else if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
 	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
-	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(arg)}); if (!e) return "not found"; e.focus?.(); e.click(); return "clicked"; })()`)}`);
+	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { ${DEEP} const e = deepQuery(${JSON.stringify(arg)}); if (!e) return "not found"; e.focus?.(); e.click(); return "clicked"; })()`)}`);
 	else if (kind === "type") await call("Input.insertText", { text: arg });
+	// key by key, for fields that take one character per box
+	else if (kind === "keys")
+		for (const ch of arg) {
+			await call("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch, code: /\d/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}` });
+			await call("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: /\d/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}` });
+			await Bun.sleep(150);
+		}
 	else if (kind === "file") {
 		const cut = arg.lastIndexOf("=");
 		const [selector, file] = [arg.slice(0, cut), arg.slice(cut + 1)];

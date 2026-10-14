@@ -238,3 +238,34 @@ create table if not exists signup_sessions (
 	code text not null default '',
 	created_at timestamptz not null default now()
 );
+
+-- Chat (src/chat.ts). Messages are encrypted by the browsers; what is kept is
+-- each account's public keys, who is in which conversation, and every event as
+-- the sealed blob the sender built, stamped by the server.
+create table if not exists chat_keys (
+	user_id bigint not null references users (id) on delete cascade,
+	version bigint not null,
+	public_key text not null,
+	signing_public_key text not null,
+	identity_public_key_signature text not null default '',
+	registration_method text not null default 'CustomPin',
+	created_at timestamptz not null default now(),
+	primary key (user_id, version)
+);
+create table if not exists chat_members (
+	conversation_id text not null,
+	user_id bigint not null references users (id) on delete cascade,
+	joined_at timestamptz not null default now(),
+	primary key (conversation_id, user_id)
+);
+create index if not exists chat_members_user_idx on chat_members (user_id);
+create table if not exists chat_events (
+	seq bigint primary key,
+	conversation_id text not null,
+	sender_id bigint not null references users (id) on delete cascade,
+	-- the event's detail: 1 message, 3 key change, 12 read, ... (chat.ts KIND)
+	kind smallint not null,
+	event bytea not null,
+	created_at timestamptz not null default now()
+);
+create index if not exists chat_events_conversation_idx on chat_events (conversation_id, kind, seq desc);

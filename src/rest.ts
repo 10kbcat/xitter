@@ -155,6 +155,7 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	}
 	if (path === "/1.1/account/settings.json") return Response.json(settingsFor(viewer) ?? {});
 	if (path === "/1.1/hashflags.json") return Response.json([]);
+	if (path === "/1.1/help/settings.json") return Response.json({});
 	if (path === "/fleets/v1/fleetline") return Response.json({ threads: [], hydrated_threads: [], refresh_delay_secs: 300 });
 	if (path === "/fleets/v1/avatar_content") return Response.json({ users: {}, refresh_delay_secs: 0 });
 	if (path === "/1.1/friends/following/list.json") return Response.json(EMPTY_LIST);

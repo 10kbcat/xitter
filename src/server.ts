@@ -11,6 +11,7 @@ import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
 import { patchFile, patchText } from "./patch";
+import { chatSocket, juiceboxProxy, socketUser } from "./chat";
 import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -92,9 +93,9 @@ function parseJson(text: string | null): any {
 }
 
 async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Promise<Response> {
-	// the signed-out home page asks for a guest token first; it gets one, but
-	// nothing is readable without signing in
-	if (!viewer && url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
+	// the signed-out home page and the chat app ask for a guest token; they get
+	// one, but nothing is readable without signing in
+	if (url.pathname.endsWith("/1.1/guest/activate.json")) return Response.json({ guest_token: "1" });
 	if (!viewer) return apiError(401, 32, "Could not authenticate you.");
 	if (req.method !== "GET" && req.headers.get("x-csrf-token") !== viewer.csrf)
 		return apiError(403, 353, "This request requires a matching csrf cookie and header.");
@@ -112,7 +113,9 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (gql >= 0) {
 		const name = parts[parts.length - 1];
 		if (knownOperation(name)) {
-			const vars = req.method === "GET" ? parseJson(url.searchParams.get("variables")) : parseJson(await req.text()).variables;
+			let vars = req.method === "GET" ? parseJson(url.searchParams.get("variables")) : parseJson(await req.text()).variables;
+			// the chat app sends its variables as a JSON string
+			if (typeof vars === "string") vars = parseJson(vars);
 			return runOperation(name, viewer, vars ?? {});
 		}
 	} else if (path === "/live_pipeline/events") {
@@ -137,6 +140,14 @@ const server = Bun.serve({
 		const url = new URL(req.url);
 		const p = url.pathname;
 		if (p.startsWith("/abs/")) return serveClient(req, p);
+		// chat: the live socket (its token from GenerateXChatTokenMutation) and
+		// the way to the key backup realm
+		if (p === "/xchat/ws") {
+			const userId = socketUser(url.searchParams.get("token") ?? "");
+			if (!userId) return new Response("bad token", { status: 401 });
+			return server.upgrade(req, { data: { userId } }) ? undefined : new Response("expected a websocket", { status: 400 });
+		}
+		if (p.startsWith("/juicebox/")) return juiceboxProxy(req, p.slice("/juicebox/".length));
 		// Chat's manifest: the pinned chat build's own, its addresses ours
 		if (p === "/xchat/embed-v1.json") {
 			const base = loadBuild()?.build.meta.xchatEmbedBuild as string | undefined;
@@ -186,6 +197,7 @@ const server = Bun.serve({
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP } });
 	},
+	websocket: chatSocket,
 	error(e) {
 		console.error(e);
 		return apiError(500, 131, "Internal error.");

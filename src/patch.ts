@@ -20,6 +20,14 @@ const RULES: [RegExp, string][] = [
 	[/https:\/\/abs\.twimg\.com/g, `${PUBLIC_ORIGIN}/abs`],
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`https://${h.replace(/\./g, "\\.")}`, "g"), PUBLIC_ORIGIN]),
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`"${h.replace(/\./g, "\\.")}"`, "g"), `"${PUBLIC_HOSTNAME}"`]),
+	// the chat app's own list of API hosts (it sends the csrf header only to them)
+	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`\`${h.replace(/\./g, "\\.")}\``, "g"), `\`${PUBLIC_HOSTNAME}\``]),
+	// its socket
+	[/wss:\/\/chat-ws\.x\.com\/ws/g, `${PUBLIC_ORIGIN.replace(/^http/, "ws")}/xchat/ws`],
+	// the key backup realms it trusts ("pinned realms"): ours instead of X's first
+	[/https:\/\/realm-a\.x\.com\//g, `${PUBLIC_ORIGIN}/juicebox/`],
+	// and the media host for chat attachments
+	[/https:\/\/ton\.x\.com/g, PUBLIC_ORIGIN],
 	// the site's own links, also when the address is the start of a longer string
 	// or template (profile hrefs, share links); subdomains are not matched
 	[/https:\/\/x\.com(?=["'`$/?#])/g, PUBLIC_ORIGIN],

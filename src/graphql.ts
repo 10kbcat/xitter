@@ -1,6 +1,7 @@
 // GraphQL operations, routed by name. The client sends a query id that changes
 // with every build; the name after it is stable.
 
+import { ChatError, chatHandlers } from "./chat";
 import { sql } from "./db";
 import { blockedIds } from "./blocks";
 import { rankedFeed } from "./ranking";
@@ -653,13 +654,16 @@ Object.assign(handlers, {
 	ExploreSidebar: () => exploreSidebar(),
 } satisfies Record<string, Handler>);
 
+// the chat app's operations
+Object.assign(handlers, chatHandlers);
+
 export const knownOperation = (name: string) => name in handlers;
 
 export async function runOperation(name: string, viewer: Viewer, vars: Vars): Promise<Response> {
 	try {
 		return Response.json(await handlers[name](viewer, vars));
 	} catch (e) {
-		if (e instanceof PostError || e instanceof articles.ArticleError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
+		if (e instanceof PostError || e instanceof articles.ArticleError || e instanceof ChatError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
 		throw e;
 	}
 }
