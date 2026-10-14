@@ -239,7 +239,21 @@ const handlers: Record<string, Handler> = {
 	// features that do not exist here: valid empty answers so the client stays quiet
 	ProfileSpotlightsQuery: () => ({ data: {} }),
 	UserSportsProfile: () => ({ data: {} }),
-	useFetchAnalyticsQuery: () => ({ data: {} }),
+	// own-profile analytics widget; it reads data.result.result and throws on null
+	useFetchAnalyticsQuery: (v, vars) => ({
+		data: {
+			result: {
+				result: {
+					__typename: "User",
+					id: globalId("User", v.id),
+					free_metrics_rollup: (Array.isArray(vars.requested_metrics) ? vars.requested_metrics : []).map((metric_type: string) => ({
+						metric_type,
+						metric_value: 0,
+					})),
+				},
+			},
+		},
+	}),
 	isEligibleForVoButtonUpsellQuery: () => ({ data: {} }),
 	usePremiumPaywallOnLoadMutation: () => ({ data: {} }),
 	BookmarkFoldersSlice: () => viewerUser({ bookmark_collections_slice: { items: [], slice_info: {} } }),
