@@ -11,7 +11,7 @@ import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
 import { patchFile, patchText } from "./patch";
-import { chatSocket, juiceboxProxy, socketUser } from "./chat";
+import { chatMediaRoute, chatSocket, juiceboxProxy, socketUser } from "./chat";
 import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -178,6 +178,7 @@ const server = Bun.serve({
 		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });
 
 		const viewer = await getViewer(req);
+		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 		// uploads stay inside the instance: only signed-in users get them
 		if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });
 		// the admin panel: staff only; everyone else gets the client's not-found page

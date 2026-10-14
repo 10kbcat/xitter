@@ -13,3 +13,5 @@ media/
 CLAUDE.md
 AGENTS.md
 data/
+realm.env
+deploy/juicebox/verify/

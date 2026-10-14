@@ -269,3 +269,42 @@ create table if not exists chat_events (
 	created_at timestamptz not null default now()
 );
 create index if not exists chat_events_conversation_idx on chat_events (conversation_id, kind, seq desc);
+create index if not exists chat_events_sender_idx on chat_events (sender_id);
+alter table chat_members add column if not exists accepted boolean not null default true;
+alter table chat_members add column if not exists archived boolean not null default false;
+alter table chat_members add column if not exists muted boolean not null default false;
+alter table chat_members add column if not exists deleted_before bigint not null default 0;
+create table if not exists chat_conversations (
+	id text primary key,
+	creator_id bigint not null references users(id) on delete cascade,
+	metadata jsonb not null default '{}',
+	created boolean not null default false
+);
+create index if not exists chat_conversations_creator_idx on chat_conversations (creator_id);
+create table if not exists chat_trust (
+	user_id bigint not null references users(id) on delete cascade,
+	trusted_id bigint not null references users(id) on delete cascade,
+	primary key (user_id, trusted_id)
+);
+create index if not exists chat_trust_target_idx on chat_trust (trusted_id);
+create table if not exists chat_hidden_events (
+	user_id bigint not null references users(id) on delete cascade,
+	seq bigint not null references chat_events(seq) on delete cascade,
+	primary key (user_id, seq)
+);
+create index if not exists chat_hidden_events_seq_idx on chat_hidden_events (seq);
+create table if not exists chat_uploads (
+	hash text primary key,
+	resume_id bigint not null unique,
+	conversation_id text not null,
+	message_id text not null,
+	uploader_id bigint not null references users(id) on delete cascade,
+	total_bytes bigint not null check (total_bytes > 0),
+	ready boolean not null default false,
+	expires_at timestamptz,
+	created_at timestamptz not null default now()
+);
+create index if not exists chat_uploads_uploader_idx on chat_uploads (uploader_id);
+alter table chat_events add column if not exists audience_id bigint references users(id) on delete cascade;
+create index if not exists chat_events_audience_idx on chat_events (audience_id);
+alter table chat_events add column if not exists deleted boolean not null default false;

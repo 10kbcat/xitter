@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ServerWebSocket } from "bun";
 import type { User, Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
+import { verifyChatToken } from "./chat-token";
+import { chatMedia } from "./chat-media";
 import { sql } from "./db";
 import { absolute } from "./media";
 import { newId } from "./ids";
@@ -59,16 +61,9 @@ function jwt(header: object, claims: object, key: string): string {
 	const body = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(claims))}`;
 	return `${body}.${createHmac("sha256", key).update(body).digest("base64url")}`;
 }
-function verifyJwt(token: string, key: string): any {
-	const [h, c, sig] = token.split(".");
-	if (!sig || createHmac("sha256", key).update(`${h}.${c}`).digest("base64url") !== sig) return undefined;
-	const claims = JSON.parse(Buffer.from(c, "base64url").toString());
-	return claims.exp && claims.exp * 1000 < Date.now() ? undefined : claims;
-}
-
 // the chat socket's token, from GenerateXChatTokenMutation
 const socketToken = (userId: string) => jwt({ alg: "HS256", typ: "JWT" }, { sub: userId, exp: Math.floor(Date.now() / 1000) + 86400 }, secrets.tokenKey);
-export const socketUser = (token: string): string | undefined => verifyJwt(token, secrets.tokenKey)?.sub;
+export const socketUser = (token: string): string | undefined => verifyChatToken(token, secrets.tokenKey)?.sub as string | undefined;
 
 // what the realm accepts: kid tenant:version, iss tenant, aud realm, sub user
 const realmToken = (userId: string) =>
@@ -186,6 +181,7 @@ async function publicKeys(userId: string, withTokens: boolean) {
 }
 
 async function signingKey(userId: string, version: string | undefined): Promise<string | undefined> {
+	if (version && (!/^\d{1,19}$/.test(version) || BigInt(version) > 9223372036854775807n)) throw new ChatError("Invalid public key version.");
 	const [k] = version
 		? await sql`select signing_public_key from chat_keys where user_id = ${userId}::bigint and version = ${version}::bigint`
 		: await sql`select signing_public_key from chat_keys where user_id = ${userId}::bigint order by version desc limit 1`;
@@ -214,14 +210,38 @@ async function joinable(viewerId: string, conversationId: string): Promise<strin
 	const pair = directMembers(conversationId);
 	if (pair) {
 		if (!pair.includes(viewerId)) throw new ChatError("Not a member of this conversation.");
-		await sql`insert into chat_members (conversation_id, user_id) values (${conversationId}, ${pair[0]}::bigint), (${conversationId}, ${pair[1]}::bigint)
-			on conflict do nothing`;
+		if (pair[0] === pair[1]) throw new ChatError("Choose another recipient.");
+		await writable(viewerId, pair);
+		const peer = pair.find((id) => id !== viewerId)!;
+		const [trusted] = await sql`select 1 where exists (select 1 from follows where follower_id = ${peer}::bigint and followee_id = ${viewerId}::bigint)
+			or exists (select 1 from chat_trust where user_id = ${peer}::bigint and trusted_id = ${viewerId}::bigint)`;
+		await sql`insert into chat_members (conversation_id, user_id, accepted) values (${conversationId}, ${viewerId}::bigint, true), (${conversationId}, ${peer}::bigint, ${!!trusted})
+			on conflict (conversation_id, user_id) do nothing`;
 		return pair;
 	}
 	const all = await members(conversationId);
 	if (!all.includes(viewerId)) throw new ChatError("Not a member of this conversation.");
+	await writable(viewerId, all);
 	return all;
 }
+
+async function writable(viewerId: string, all: string[]) {
+	const users = await sql`select id::text, status from users where id = any(${sql.array(all, "INT8")})`;
+	if (users.length !== new Set(all).size || users.some((user: any) => user.status === "suspended")) throw new ChatError("Account unavailable.");
+	const [blocked] = await sql`select 1 from blocks where (blocker_id = ${viewerId}::bigint and blocked_id = any(${sql.array(all, "INT8")}))
+		or (blocked_id = ${viewerId}::bigint and blocker_id = any(${sql.array(all, "INT8")})) limit 1`;
+	if (blocked) throw new ChatError("Messaging is blocked.");
+}
+
+async function authorized(viewerId: string, conversationId: string) {
+	const all = await members(conversationId);
+	if (!all.includes(viewerId)) throw new ChatError("Not a member of this conversation.");
+	await writable(viewerId, all);
+	return all;
+}
+
+const media = chatMedia(authorized, joinable);
+export const chatMediaRoute = media.route;
 
 // the token every event of a conversation carries (field 5); the client reads
 // it back from the events and signs with it
@@ -239,7 +259,7 @@ async function stamp(ev: Struct, senderId: string, conversationId: string): Prom
 	ev[3] = str(senderId);
 	ev[4] = str(conversationId);
 	ev[5] ??= str(conversationToken(senderId, conversationId));
-	ev[6] ??= str(String(Date.now()));
+	ev[6] = str(String(Date.now()));
 	ev[8] = i32(3);
 	ev[11] = bool(true);
 	const sig = thrift.fields(ev[9]);
@@ -258,10 +278,10 @@ async function stamp(ev: Struct, senderId: string, conversationId: string): Prom
 const KIND = { message: 1, keyChange: 3, groupChange: 4, typing: 6, delete: 7, conversationDelete: 8, read: 12, unread: 13 } as const;
 const kindOf = (ev: Struct) => Number(Object.keys(thrift.fields(ev[7]) ?? {})[0] ?? 0);
 
-async function store(seq: string, ev: Struct, senderId: string, conversationId: string): Promise<Uint8Array> {
+async function store(seq: string, ev: Struct, senderId: string, conversationId: string, audienceId: string | null = null): Promise<Uint8Array> {
 	const bytes = thrift.encode(ev);
-	await sql`insert into chat_events (seq, conversation_id, sender_id, kind, event)
-		values (${seq}::bigint, ${conversationId}, ${senderId}::bigint, ${kindOf(ev)}, ${Buffer.from(bytes)})`;
+	await sql`insert into chat_events (seq, conversation_id, sender_id, kind, event, audience_id)
+		values (${seq}::bigint, ${conversationId}, ${senderId}::bigint, ${kindOf(ev)}, ${Buffer.from(bytes)}, ${audienceId}::bigint)`;
 	return bytes;
 }
 
@@ -306,7 +326,9 @@ export const chatSocket = {
 		if (!ev || !conversationId || kindOf(ev) !== KIND.typing) return;
 		const all = await members(conversationId);
 		if (!all.includes(ws.data.userId)) return;
+		try { await writable(ws.data.userId, all); } catch { return; }
 		ev[3] = str(ws.data.userId);
+		ev[6] = str(String(Date.now()));
 		deliver(all, [thrift.encode(ev)], ws);
 	},
 };
@@ -317,29 +339,48 @@ type Vars = Record<string, any>;
 
 async function conversationData(viewerId: string, conversationId: string) {
 	const all = await members(conversationId);
-	const latest = await sql`select event from chat_events where conversation_id = ${conversationId} and kind = ${KIND.message} order by seq desc limit 20`;
+	const latest = await sql`select e.event from chat_events e where e.conversation_id = ${conversationId} and e.kind = ${KIND.message} and not e.deleted
+		and e.seq > coalesce((select deleted_before from chat_members where conversation_id = ${conversationId} and user_id = ${viewerId}::bigint), 0)
+		and not exists (select 1 from chat_hidden_events h where h.user_id = ${viewerId}::bigint and h.seq = e.seq) order by e.seq desc limit 21`;
 	const keys = await sql`select event from chat_events where conversation_id = ${conversationId} and kind = ${KIND.keyChange} order by seq desc limit 5`;
 	const reads = await sql`select distinct on (sender_id) sender_id::text as id, event from chat_events
 		where conversation_id = ${conversationId} and kind = ${KIND.read} order by sender_id, seq desc`;
 	const [last] = await sql`select seq::text from chat_events where conversation_id = ${conversationId} order by seq desc limit 1`;
 	const b64 = (r: { event: Buffer }) => Buffer.from(r.event).toString("base64");
 	const direct = !!directMembers(conversationId);
+	const [state] = await sql`select muted, archived from chat_members where conversation_id = ${conversationId} and user_id = ${viewerId}::bigint`;
+	const [group] = direct ? [] : await sql`select creator_id::text, metadata from chat_conversations where id = ${conversationId}`;
+	const participants = await userResults(viewerId, all);
+	const notifiable = (row: { event: Buffer }) => thrift.fields(thrift.fields(thrift.decode(new Uint8Array(row.event))[7])?.[1])?.[102];
+	const latestNotifiable = latest.find((row: { event: Buffer }) => notifiable(row)?.v !== false);
+	const latestNonNotifiable = latest.find((row: { event: Buffer }) => notifiable(row)?.v === false);
 	return {
 		__typename: "XChatGetInboxPageConversationData",
 		conversation_detail: {
 			__typename: direct ? "XChatDirectConversationDetail" : "XChatGroupConversationDetail",
 			conversation_id: conversationId,
-			is_archived: false,
-			is_muted: false,
+			is_archived: !!state?.archived,
+			is_muted: !!state?.muted,
 			message_ttl_msec: null,
 			screen_capture_blocking_enabled: false,
 			is_grok_enabled: false,
-			participants_results: await userResults(viewerId, all),
+			participants_results: participants,
+			...(!direct && group ? {
+				group_metadata: { __typename: "XChatGroupMetadata", ...group.metadata,
+					admin_settings: { __typename: "XChatGroupAdminSettings", ...Object.fromEntries(
+						["add_member", "edit_group_info", "send_message", "start_call", "edit_message_ttl", "block_screen_capture"].map((field) => [field, typeof group.metadata.admin_settings?.[field] === "boolean" ? group.metadata.admin_settings[field] : !["send_message", "start_call"].includes(field)]),
+					) },
+				},
+				group_members_results: participants,
+				group_admins_results: (group.metadata.admins ?? [group.creator_id]).map((id: string) => ({ __typename: "UserResults", rest_id: id })),
+				group_created_by_user_results: participants.find((p) => p.rest_id === group.creator_id),
+				group_removed_users_results: [], latest_group_title_change_message_event: null,
+			} : {}),
 		},
-		latest_message_events: latest.map(b64),
+		latest_message_events: latest.slice(0, 20).reverse().map(b64),
 		latest_conversation_key_change_events: keys.map(b64),
-		latest_notifiable_message_create_event: latest[0] ? b64(latest[0]) : null,
-		latest_non_notifiable_message_create_event: null,
+		latest_notifiable_message_create_event: latestNotifiable ? b64(latestNotifiable) : null,
+		latest_non_notifiable_message_create_event: latestNonNotifiable ? b64(latestNonNotifiable) : null,
 		latest_read_events_per_participant: reads.map((r: { id: string; event: Buffer }) => ({
 			__typename: "XChatParticipantReadEvent",
 			participant_id_results: { __typename: "UserResults", rest_id: r.id },
@@ -347,7 +388,7 @@ async function conversationData(viewerId: string, conversationId: string) {
 		})),
 		latest_pinned_message_events: [],
 		pmk_bundle: [],
-		has_more: latest.length >= 20,
+		has_more: latest.length > 20,
 		latest_message_sequence_id: last?.seq ?? null,
 		is_deleted_by_viewer: false,
 	};
@@ -355,15 +396,18 @@ async function conversationData(viewerId: string, conversationId: string) {
 
 async function inbox(viewerId: string) {
 	const convs = await sql`select m.conversation_id as id from chat_members m
-		where m.user_id = ${viewerId}::bigint
+		where m.user_id = ${viewerId}::bigint and m.accepted and not m.archived
+		and exists (select 1 from chat_events e where e.conversation_id = m.conversation_id and e.seq > m.deleted_before)
 		order by (select max(seq) from chat_events e where e.conversation_id = m.conversation_id) desc nulls last limit 50`;
 	const [max] = await sql`select max(e.seq)::text as seq from chat_events e join chat_members m on m.conversation_id = e.conversation_id where m.user_id = ${viewerId}::bigint`;
+	const [pending] = await sql`select count(*)::int as count from chat_members m where user_id = ${viewerId}::bigint and not accepted
+		and exists (select 1 from chat_events e where e.conversation_id = m.conversation_id and e.kind = 1 and not e.deleted and e.seq > m.deleted_before)`;
 	return {
 		__typename: "XChatGetInboxPageResponse",
 		inboxCursor: { __typename: "XChatGetInboxPageEndCursor", inbox_exhausted: true, graph_snapshot_id: newId() },
 		items: await Promise.all(convs.map((c: { id: string }) => conversationData(viewerId, c.id))),
-		message_requests_count: 0,
-		message_requests_info: { __typename: "XChatMessageRequestInfo", priority_count: 0, hidden_count: 0, unseen_count: 0, relevant_users_results: [] },
+		message_requests_count: pending.count,
+		message_requests_info: { __typename: "XChatMessageRequestInfo", priority_count: pending.count, hidden_count: 0, unseen_count: pending.count, relevant_users_results: [] },
 		message_pull_version: 1,
 		max_user_sequence_id: max?.seq ?? "0",
 		latest_user_metadata_message_event: null,
@@ -376,7 +420,184 @@ async function inbox(viewerId: string) {
 const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && /^\d{1,19}$/.test(x)).slice(0, 100) : []);
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 
+function decodeBlob(value: unknown): Struct {
+	if (typeof value !== "string" || !value.length || value.length > 2_000_000) throw new ChatError("Invalid chat event.");
+	try { return thrift.decode(thrift.fromBase64(value)); } catch { throw new ChatError("Invalid chat event."); }
+}
+
+async function actionEvents(v: Viewer, conversationId: string, actions: any[], allowed: number[]) {
+	const all = await authorized(v.id, conversationId);
+	validateActions(actions, allowed);
+	const emitted: Uint8Array[] = [];
+	for (const action of actions ?? []) {
+		if (!action?.encoded_message_event_detail) throw new ChatError("Missing event detail.");
+		const detail = thrift.decode(thrift.fromBase64(action.encoded_message_event_detail));
+		if (!allowed.includes(Number(Object.keys(detail)[0]))) throw new ChatError("Unexpected event kind.");
+		const sig = action?.message_event_signature ?? {};
+		const ev: Struct = { 2: str(String(action.message_id ?? crypto.randomUUID())), 7: struct(detail),
+			9: struct({ 1: str(String(sig.signature ?? "")), 2: str(String(sig.public_key_version ?? "")), 3: str(String(sig.signature_version ?? "7")) }) };
+		const { seq } = await stamp(ev, v.id, conversationId);
+		emitted.push(await store(seq, ev, v.id, conversationId));
+	}
+	if (emitted.length) deliver(all, emitted);
+	return emitted.map((bytes) => thrift.text(thrift.decode(bytes)[1])!);
+}
+
+function validateActions(actions: any[], allowed: number[]) {
+	if (actions == null) return;
+	if (!Array.isArray(actions) || actions.length > 16) throw new ChatError("Invalid conversation actions.");
+	for (const action of actions) {
+		if (typeof action?.encoded_message_event_detail !== "string" || action.encoded_message_event_detail.length > 2_000_000)
+			throw new ChatError("Invalid event detail.");
+		let detail: Struct;
+		try { detail = thrift.decode(thrift.fromBase64(action.encoded_message_event_detail)); } catch { throw new ChatError("Invalid event detail."); }
+		if (Object.keys(detail).length !== 1 || !allowed.includes(Number(Object.keys(detail)[0]))) throw new ChatError("Unexpected event kind.");
+	}
+}
+
+async function groupAdmin(v: Viewer, conversationId: string) {
+	await authorized(v.id, conversationId);
+	const [group] = await sql`select creator_id::text, metadata from chat_conversations where id = ${conversationId} and created`;
+	if (!group || !(group.metadata.admins ?? [group.creator_id]).includes(v.id)) throw new ChatError("Group admin required.");
+	return group;
+}
+
+async function deleteMessages(v: Viewer, vars: Vars) {
+	const id = String(vars.conversation_id ?? "");
+	await authorized(v.id, id);
+	const seqs = ids(vars.sequence_ids);
+	if (!seqs.length) throw new ChatError("Choose a message.");
+	const rows = await sql`select seq::text, sender_id::text from chat_events where conversation_id = ${id} and seq = any(${sql.array(seqs, "INT8")}) and kind = 1`;
+	if (rows.length !== seqs.length) throw new ChatError("Message unavailable.");
+	const everyone = vars.delete_message_action === "DeleteForAll";
+	if (everyone && rows.some((r: any) => r.sender_id !== v.id)) throw new ChatError("You can only delete your own messages for everyone.");
+	if (everyone && vars.action_signatures?.length) {
+		for (const action of vars.action_signatures) {
+			const event = thrift.fields(thrift.decode(thrift.fromBase64(action.encoded_message_event_detail))[7]);
+			const targets = event?.[1]?.t === thrift.T.list ? event[1].v.map(thrift.text) : [];
+			if (thrift.int(event?.[2]) !== 2n || targets.length !== seqs.length || targets.some((id: string | undefined) => !id || !seqs.includes(id)))
+				throw new ChatError("Delete event does not match its targets.");
+		}
+		await actionEvents(v, id, vars.action_signatures, [7]);
+		await sql`update chat_events set deleted = true where conversation_id = ${id} and seq = any(${sql.array(seqs, "INT8")})`;
+		return { data: { xchat_delete_messages: { __typename: "DeleteMessageResponse", error_code: null } } };
+	}
+	if (!everyone) for (const seq of seqs) await sql`insert into chat_hidden_events (user_id, seq) values (${v.id}::bigint, ${seq}::bigint) on conflict do nothing`;
+	const ev: Struct = { 2: str(crypto.randomUUID()), 7: struct({ 7: struct({ 1: list(thrift.T.string, seqs.map(str)), 2: i32(everyone ? 2 : 1) }) }) };
+	const { seq } = await stamp(ev, v.id, id);
+	const bytes = await store(seq, ev, v.id, id, everyone ? null : v.id);
+	if (everyone) await sql`update chat_events set deleted = true where conversation_id = ${id} and seq = any(${sql.array(seqs, "INT8")})`;
+	deliver(everyone ? await members(id) : [v.id], [bytes]);
+	return { data: { xchat_delete_messages: { __typename: "DeleteMessageResponse", error_code: null } } };
+}
+
 export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promise<unknown> | unknown> = {
+	...media.handlers,
+	GetConversationEntryDetailsQuery: async (v, vars) => {
+		await authorized(v.id, String(vars.conversation_id));
+		return { data: { get_conversation_entry_details: { __typename: "XChatGetConversationEntryDetailsResponse", group_type: "Normal", read_only_reason: null } } };
+	},
+	InitializeGroupConversationMutation: async (v) => {
+		const id = `g${newId()}`;
+		await sql`insert into chat_conversations (id, creator_id) values (${id}, ${v.id}::bigint)`;
+		return { data: { xchat_initialize_group: { __typename: "XChatInitializeGroupResponse", error_code: null,
+			conversation_id: { __typename: "ConversationId", id, rest_id: id } } } };
+	},
+	CreateGroupConversationMutation: async (v, vars) => {
+		validateActions(vars.action_signatures, [3, 4]);
+		const id = String(vars.conversation_id ?? "");
+		const [draft] = await sql`select creator_id::text, created from chat_conversations where id = ${id}`;
+		if (!draft || draft.creator_id !== v.id || draft.created) throw new ChatError("Invalid group draft.");
+		const all = [...new Set([v.id, ...ids(vars.member_user_ids), ...ids(vars.admin_user_ids)])];
+		if (all.length < 2 || all.length > 100) throw new ChatError("Groups need 2–100 members.");
+		await writable(v.id, all);
+		const admins = [...new Set([v.id, ...ids(vars.admin_user_ids)])];
+		const now = String(Date.now());
+		const metadata = { group_name: vars.group_title ?? "", description: "", description_ckey_version: vars.conversation_key_version ?? "1",
+			created_at_msec: now, updated_at_msec: now, group_avatar_url: vars.avatar_url ?? null, message_ttl_msec: vars.ttl_msec ?? null,
+			classification: { __typename: "XChatGroupClassification", group_type: vars.group_type ?? "Normal" },
+			group_invite_details: null, screen_capture_blocking_enabled: false, is_grok_enabled: false,
+			admin_settings: { __typename: "XChatGroupAdminSettings", add_member: true, edit_group_info: true, send_message: false, start_call: false, edit_message_ttl: true, block_screen_capture: true }, admins };
+		await sql.begin(async (tx) => {
+			await tx`update chat_conversations set metadata = ${JSON.stringify(metadata)}::text::jsonb, created = true where id = ${id}`;
+			for (const member of all) await tx`insert into chat_members (conversation_id, user_id) values (${id}, ${member}::bigint)`;
+		});
+		const seqs = await actionEvents(v, id, vars.action_signatures, [3, 4]);
+		let keySeq = seqs[0] ?? null;
+		if (vars.conversation_participant_keys?.length && !(vars.action_signatures ?? []).some((action: any) => thrift.decode(thrift.fromBase64(action.encoded_message_event_detail))[3])) {
+			const key: any = await chatHandlers.AddEncryptedConversationKeysMutation(v, { ...vars, action_signatures: [] });
+			keySeq = key.data.xchat_add_encrypted_conversation_key.conversation_key_change_sequence_id;
+		}
+		return { data: { xchat_create_group: { __typename: "CreateGroupConversationResult", conversation_id: { __typename: "ConversationId", id, rest_id: id }, conversation_key_change_sequence_id: keySeq } } };
+	},
+	EditGroupConversationMutation: async (v, vars) => {
+		validateActions(vars.action_signatures, [3, 4]);
+		const id = String(vars.conversation_id ?? "");
+		const group = await groupAdmin(v, id);
+		const metadata = { ...group.metadata, updated_at_msec: String(Date.now()) };
+		for (const [input, output] of [["group_name", "group_name"], ["group_description", "description"], ["avatar_url", "group_avatar_url"]])
+			if (vars[input] != null) metadata[output] = String(vars[input]);
+		metadata.description_ckey_version = vars.conversation_key_version;
+		await sql`update chat_conversations set metadata = ${JSON.stringify(metadata)}::text::jsonb where id = ${id}`;
+		const seqs = await actionEvents(v, id, vars.action_signatures, [3, 4]);
+		return { data: { xchat_edit_group: { __typename: "EditGroupConversationResult", conversation_key_change_sequence_id: seqs[0] ?? null } } };
+	},
+	DeleteMessageMutation: deleteMessages,
+	ConversationDeleteMutation: async (v, vars) => {
+		const id = String(vars.conversation_id ?? "");
+		await authorized(v.id, id);
+		const [latest] = await sql`select max(seq)::text as seq from chat_events where conversation_id = ${id}`;
+		await sql`update chat_members set deleted_before = ${latest.seq ?? "0"}::bigint where conversation_id = ${id} and user_id = ${v.id}::bigint`;
+		return { data: { xchat_delete_conversation: { __typename: "DeleteConversationResponse", error_code: null } } };
+	},
+	MuteConversationMutation: async (v, vars) => {
+		for (const id of vars.conversationIds ?? []) { await authorized(v.id, String(id)); await sql`update chat_members set muted = true where conversation_id = ${String(id)} and user_id = ${v.id}::bigint`; }
+		return { data: { xchat_mute_conversation: { __typename: "MuteXChatConversationResponse", error_code: null } } };
+	},
+	ArchiveConversationMutation: async (v, vars) => {
+		const id = String(vars.conversationId ?? ""); await authorized(v.id, id);
+		await sql`update chat_members set archived = true where conversation_id = ${id} and user_id = ${v.id}::bigint`;
+		return { data: { xchat_archive_conversation: { __typename: "ArchiveXChatConversationResponse", error_code: null } } };
+	},
+	UnmuteConversationMutation: async (v, vars) => {
+		for (const id of vars.conversationIds ?? []) { await authorized(v.id, String(id)); await sql`update chat_members set muted = false where conversation_id = ${String(id)} and user_id = ${v.id}::bigint`; }
+		return { data: { xchat_unmute_conversation: { __typename: "MuteXChatConversationResponse", error_code: null } } };
+	},
+	UnarchiveConversationMutation: async (v, vars) => {
+		const id = String(vars.conversationId ?? ""); await authorized(v.id, id);
+		await sql`update chat_members set archived = false where conversation_id = ${id} and user_id = ${v.id}::bigint`;
+		return { data: { xchat_unarchive_conversation: { __typename: "ArchiveXChatConversationResponse", error_code: null } } };
+	},
+	AddGroupMembersMutation: async (v, vars) => {
+		validateActions(vars.action_signatures, [3, 4]);
+		const id = String(vars.conversation_id ?? "");
+		await groupAdmin(v, id);
+		const added = ids(vars.user_ids);
+		const all = [...new Set([...await members(id), ...added])];
+		if (all.length > 100) throw new ChatError("Group is full.");
+		await writable(v.id, all);
+		for (const member of added) await sql`insert into chat_members (conversation_id, user_id) values (${id}, ${member}::bigint) on conflict do nothing`;
+		const seqs = await actionEvents(v, id, vars.action_signatures, [3, 4]);
+		return { data: { xchat_add_group_members: { __typename: "AddGroupMembersResponse", error_code: null,
+			current_member_ids_results: all.map((user) => ({ __typename: "UserResults", id: user, rest_id: user })), conversation_key_change_sequence_id: seqs[0] ?? null } } };
+	},
+	RemoveFromGroupMutation: async (v, vars) => {
+		validateActions(vars.action_signatures, [3, 4, 14]);
+		const id = String(vars.conversation_id ?? "");
+		const removed = ids(vars.user_ids);
+		const self = removed.length === 1 && removed[0] === v.id;
+		const all = await authorized(v.id, id);
+		if (!self) await groupAdmin(v, id);
+		const seqs = await actionEvents(v, id, vars.action_signatures, [3, 4, 14]);
+		for (const member of removed) await sql`delete from chat_members where conversation_id = ${id} and user_id = ${member}::bigint`;
+		const [group] = await sql`select creator_id::text, metadata from chat_conversations where id = ${id}`;
+		if (group) {
+			group.metadata.admins = (group.metadata.admins ?? [group.creator_id]).filter((user: string) => !removed.includes(user));
+			if (!group.metadata.admins.length) group.metadata.admins = all.filter((user) => !removed.includes(user)).slice(0, 1);
+			await sql`update chat_conversations set metadata = ${JSON.stringify(group.metadata)}::text::jsonb where id = ${id}`;
+		}
+		return { data: { xchat_remove_group_members: { __typename: "RemoveGroupMembersResponse", error_code: null, conversation_key_change_sequence_id: seqs[0] ?? null } } };
+	},
 	xChatDmSettingsQuery: () => ({
 		data: {
 			dm_settings: {
@@ -454,14 +675,14 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 		const rows = q
 			? await sql`select id::text from users where status <> 'suspended' and (screen_name ilike ${`${q}%`} or name ilike ${`%${q}%`}) order by (lower(screen_name) = lower(${q})) desc, screen_name limit 10`
 			: await sql`select u.id::text from follows f join users u on u.id = f.followee_id where f.follower_id = ${v.id}::bigint and u.status <> 'suspended' order by f.created_at desc limit 10`;
-		const results = await userResults(v.id, rows.map((r: { id: string }) => r.id));
+		const results = await userResults(v.id, rows.map((r: { id: string }) => r.id), { keys: !!vars.include_user_public_keys, tokens: !!vars.include_juicebox_tokens });
 		return {
 			data: {
 				search_by_raw_query: {
 					__typename: "SearchQuery",
 					x_chat_users_typeahead: results.map((r) => ({
 						__typename: "TypeaheadXChatUserItem",
-						typeahead_user: { __typename: "TypeaheadUserItem", user_results: r },
+						typeahead_user: { __typename: "TypeaheadUserItem", user_results: r, metadata: { __typename: "TypeaheadMetadata", source: "Search" } },
 					})),
 				},
 			},
@@ -475,36 +696,67 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 		if (!(await members(id)).includes(v.id)) return { data: { get_inbox_page_conversation_data: null } };
 		return { data: { get_inbox_page_conversation_data: await conversationData(v.id, id) } };
 	},
-	GetMessageRequestsPageQuery: () => ({
-		data: {
-			get_message_requests_page: {
-				__typename: "XChatGetMessageRequestsPageResponse",
-				total_count: 0,
-				cursor: { __typename: "XChatGetMessageRequestsPageEndCursor" },
-				items: [],
-			},
-		},
-	}),
+	GetMessageRequestsPageQuery: async (v) => {
+		const rows = await sql`select conversation_id from chat_members m where user_id = ${v.id}::bigint and not accepted
+			and exists (select 1 from chat_events e where e.conversation_id = m.conversation_id and e.kind = 1 and not e.deleted and e.seq > m.deleted_before)
+			order by joined_at desc limit 100`;
+		const items = await Promise.all(rows.map(async (r: { conversation_id: string }) => {
+			const data = await conversationData(v.id, r.conversation_id);
+			const incoming = data.latest_message_events.filter((encoded: string) => {
+				const event = thrift.decode(thrift.fromBase64(encoded));
+				return thrift.text(event[3]) !== v.id && thrift.fields(thrift.fields(event[7])?.[1])?.[102]?.v !== false;
+			});
+			return { __typename: "XChatMessageRequestItem", conversation_id: r.conversation_id,
+				encoded_conversation_key_change_events: data.latest_conversation_key_change_events,
+				encoded_message_create_event: incoming.at(-1) ?? null,
+				latest_message_events: incoming, latest_read_events_per_participant: data.latest_read_events_per_participant,
+				message_request_type: "YouMayKnow", social_proof_users_results: [],
+			};
+		}));
+		return { data: { get_message_requests_page: { __typename: "XChatGetMessageRequestsPageResponse", total_count: items.length,
+			cursor: { __typename: "XChatGetMessageRequestsPageEndCursor", pull_finished: true }, message_request_items: items } } };
+	},
+	AcceptMessageRequestMutation: async (v, vars) => {
+		const target = String(vars.targetUserId ?? "");
+		if (!ids([target]).length || target === v.id) throw new ChatError("Invalid recipient.");
+		await writable(v.id, [v.id, target]);
+		await sql`insert into chat_trust (user_id, trusted_id) values (${v.id}::bigint, ${target}::bigint) on conflict do nothing`;
+		await sql`update chat_members m set accepted = true where user_id = ${v.id}::bigint
+			and exists (select 1 from chat_members peer where peer.conversation_id = m.conversation_id and peer.user_id = ${target}::bigint)`;
+		let key: any = null, sent: any = null;
+		if (vars.add_ckey) key = await chatHandlers.AddEncryptedConversationKeysMutation(v, vars.add_ckey);
+		if (vars.send_mce) sent = await chatHandlers.SendMessageCreateMutation(v, vars.send_mce);
+		return { data: { user_add_trust: { __typename: "XChatAddTrustResponse", error_code: null,
+			send_message_create_event_response: sent?.data?.xchat_send_create_message_event ?? null,
+			add_encrypted_conversation_key_response: key?.data?.xchat_add_encrypted_conversation_key ?? null } } };
+	},
 	GetConversationPageQuery: async (v, vars) => {
 		const id = String(vars.conversation_id ?? "");
 		const empty = { __typename: "XChatGetConversationPageResponse", encoded_message_events: [], missing_conversation_key_change_events: [], has_more: false, message_request_state: "None" };
 		if (!(await members(id)).includes(v.id)) return { data: { get_conversation_page: empty } };
+		const [state] = await sql`select accepted, deleted_before::text from chat_members where conversation_id = ${id} and user_id = ${v.id}::bigint`;
+		const [pendingPeer] = await sql`select 1 from chat_members where conversation_id = ${id} and user_id <> ${v.id}::bigint and not accepted limit 1`;
 		const limit = Math.min(Number(vars.query_settings?.conversation_event_limit) || 50, 100);
 		// older than what the client has (min_local_sequence_id is its oldest), newest first
 		const before = /^\d+$/.test(String(vars.min_local_sequence_id ?? "")) && vars.min_local_sequence_id !== "0" ? String(vars.min_local_sequence_id) : null;
 		const rows = before
-			? await sql`select event from chat_events where conversation_id = ${id} and seq < ${before}::bigint and kind <> ${KIND.keyChange} order by seq desc limit ${limit + 1}`
-			: await sql`select event from chat_events where conversation_id = ${id} and kind <> ${KIND.keyChange} order by seq desc limit ${limit + 1}`;
+			? await sql`select e.event from chat_events e where conversation_id = ${id} and seq < ${before}::bigint and seq > ${state?.deleted_before ?? "0"}::bigint and kind <> ${KIND.keyChange}
+				and not e.deleted and (e.audience_id is null or e.audience_id = ${v.id}::bigint)
+				and not exists (select 1 from chat_hidden_events h where h.user_id = ${v.id}::bigint and h.seq = e.seq) order by seq desc limit ${limit + 1}`
+			: await sql`select e.event from chat_events e where conversation_id = ${id} and seq > ${state?.deleted_before ?? "0"}::bigint and kind <> ${KIND.keyChange}
+				and not e.deleted and (e.audience_id is null or e.audience_id = ${v.id}::bigint)
+				and not exists (select 1 from chat_hidden_events h where h.user_id = ${v.id}::bigint and h.seq = e.seq) order by seq desc limit ${limit + 1}`;
 		const minKey = /^\d+$/.test(String(vars.min_conversation_key_version ?? "")) ? BigInt(vars.min_conversation_key_version) : 0n;
 		const keys = await sql`select event from chat_events where conversation_id = ${id} and kind = ${KIND.keyChange} order by seq`;
 		const missing = keys.filter((r: { event: Buffer }) => {
 			const version = thrift.text(thrift.fields(thrift.fields(thrift.decode(new Uint8Array(r.event))[7])?.[3])?.[1]);
-			return !version || BigInt(version) >= minKey;
+			return !version || minKey === 0n || BigInt(version) <= minKey;
 		});
 		return {
 			data: {
 				get_conversation_page: {
 					...empty,
+					message_request_state: state?.accepted === false ? "Received" : pendingPeer ? "Sent" : "None",
 					encoded_message_events: rows.slice(0, limit).map((r: { event: Buffer }) => b64(r.event)),
 					missing_conversation_key_change_events: missing.map((r: { event: Buffer }) => b64(r.event)),
 					has_more: rows.length > limit,
@@ -516,7 +768,8 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 		const seqs = ids(vars.sequence_ids);
 		const rows = seqs.length
 			? await sql`select e.seq::text, e.kind, e.event from chat_events e join chat_members m on m.conversation_id = e.conversation_id and m.user_id = ${v.id}::bigint
-				where e.seq = any(${sql.array(seqs, "INT8")})`
+				where e.seq = any(${sql.array(seqs, "INT8")}) and not e.deleted and (e.audience_id is null or e.audience_id = ${v.id}::bigint)
+				and e.seq > m.deleted_before and not exists (select 1 from chat_hidden_events h where h.user_id = ${v.id}::bigint and h.seq = e.seq)`
 			: [];
 		const found = new Set(rows.map((r: { seq: string }) => r.seq));
 		return {
@@ -535,7 +788,8 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 		const after = /^\d+$/.test(String(vars.continue_cursor?.max_local_sequence_id ?? "")) ? String(vars.continue_cursor.max_local_sequence_id) : "0";
 		const limit = 200;
 		const rows = await sql`select e.seq::text, e.event from chat_events e join chat_members m on m.conversation_id = e.conversation_id and m.user_id = ${v.id}::bigint
-			where e.seq > ${after}::bigint order by e.seq limit ${limit + 1}`;
+			where e.seq > ${after}::bigint and not e.deleted and e.seq > m.deleted_before and (e.audience_id is null or e.audience_id = ${v.id}::bigint)
+			and not exists (select 1 from chat_hidden_events h where h.user_id = ${v.id}::bigint and h.seq = e.seq) order by e.seq limit ${limit + 1}`;
 		const page = rows.slice(0, limit);
 		return {
 			data: {
@@ -559,11 +813,17 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 		const conversationId = String(vars.conversation_id ?? "");
 		const all = await joinable(v.id, conversationId);
 		const action = Array.isArray(vars.action_signatures) ? vars.action_signatures[0] : undefined;
-		if (!action?.encoded_message_event_detail) throw new ChatError("Missing the key change.");
-		const sig = action.message_event_signature ?? {};
+		const wrapped = Array.isArray(vars.conversation_participant_keys) ? vars.conversation_participant_keys : [];
+		if (!action?.encoded_message_event_detail && (!wrapped.length || all.some((id) => !wrapped.some((p: any) => p.user_id === id))))
+			throw new ChatError("Missing the key change.");
+		const sig = action?.message_event_signature ?? {};
 		const ev: Struct = {
-			2: str(String(action.message_id ?? crypto.randomUUID())),
-			7: struct(thrift.decode(thrift.fromBase64(action.encoded_message_event_detail))),
+			2: str(String(action?.message_id ?? crypto.randomUUID())),
+			7: struct(action?.encoded_message_event_detail ? decodeBlob(action.encoded_message_event_detail) : {
+				3: struct({ 1: str(String(vars.conversation_key_version)), 2: list(thrift.T.struct, wrapped.map((p: any) => struct({
+					1: str(String(p.user_id)), 2: str(String(p.encrypted_conversation_key)), 3: str(String(p.public_key_version)),
+				}))), 5: bool(!!vars.base64_encoded_key_rotation) }),
+			}),
 			9: struct({
 				1: str(String(sig.signature ?? "")),
 				2: str(String(sig.public_key_version ?? "")),
@@ -571,6 +831,7 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 				5: list(thrift.T.struct, [struct({ 1: str(v.id), 2: str(String(sig.public_key_version ?? "")) })]),
 			}),
 		};
+		if (kindOf(ev) !== KIND.keyChange) throw new ChatError("Expected a conversation key change.");
 		const { seq } = await stamp(ev, v.id, conversationId);
 		deliver(all, [await store(seq, ev, v.id, conversationId)]);
 		return { data: { xchat_add_encrypted_conversation_key: { __typename: "AddEncryptedConversationKeyResponse", conversation_key_change_sequence_id: seq } } };
@@ -578,14 +839,16 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	SendMessageCreateMutation: async (v, vars) => {
 		const conversationId = String(vars.conversation_id ?? "");
 		const all = await joinable(v.id, conversationId);
-		const mce = thrift.decode(thrift.fromBase64(String(vars.encoded_message_create_event ?? "")));
+		const mce = decodeBlob(vars.encoded_message_create_event);
 		mce[104] = i64(Date.now());
-		mce[109] ??= bool(false);
+		const [request] = await sql`select 1 from chat_members where conversation_id = ${conversationId} and user_id <> ${v.id}::bigint and not accepted`;
+		mce[109] = bool(!!request);
+		await sql`update chat_members set accepted = true, archived = false where conversation_id = ${conversationId} and user_id = ${v.id}::bigint`;
 		const ev: Struct = {
 			2: str(String(vars.message_id ?? crypto.randomUUID())),
 			...(vars.conversation_token ? { 5: str(String(vars.conversation_token)) } : {}),
 			7: struct({ 1: struct(mce) }),
-			...(vars.encoded_message_event_signature ? { 9: struct(thrift.decode(thrift.fromBase64(vars.encoded_message_event_signature))) } : {}),
+			...(vars.encoded_message_event_signature ? { 9: struct(decodeBlob(vars.encoded_message_event_signature)) } : {}),
 		};
 		const { seq } = await stamp(ev, v.id, conversationId);
 		const bytes = await store(seq, ev, v.id, conversationId);
@@ -594,9 +857,10 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	},
 	// any other event the client builds whole: read receipts, deletes, ...
 	SendMessageEventMutation: async (v, vars) => {
-		const ev = thrift.decode(thrift.fromBase64(String(vars.encoded_message_event ?? "")));
+		const ev = decodeBlob(vars.encoded_message_event);
 		const conversationId = thrift.text(ev[4]) ?? "";
 		const all = await joinable(v.id, conversationId);
+		if (![1, 6, 9, 12, 13, 17, 18, 19].includes(kindOf(ev))) throw new ChatError("Use the conversation action for this event.");
 		const { seq } = await stamp(ev, v.id, conversationId);
 		const bytes = await store(seq, ev, v.id, conversationId);
 		deliver(all, [bytes]);

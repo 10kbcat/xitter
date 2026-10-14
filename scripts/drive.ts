@@ -58,9 +58,48 @@ const consoleErrors = new Map<string, number>();
 // with EXCEPTIONS=1, exceptions the client catches itself are listed too (noise as in js-errors.ts)
 const exceptions = new Map<string, number>();
 const requests = new Map<string, string>();
+const chatRequests = new Set<string>();
+const chatActions = new Set<string>();
 const NOISE = /DetermineComponentFrameRoot|^\d*x? ?Promise|React error #460|Invalid URL|^Error  at/;
 ws.addEventListener("message", (ev) => {
 	const msg = JSON.parse(String(ev.data));
+	if (process.env.CHAT_NET && msg.method === "Network.responseReceived") {
+		const response = msg.params.response;
+		const url = new URL(response.url);
+		if (url.hostname === "localhost" && !url.pathname.startsWith("/abs/")) console.log(`chat-http ${response.status} ${url.pathname}`);
+		if (url.pathname.endsWith("/TypeaheadXChatQuery")) chatRequests.add(msg.params.requestId);
+		if (url.pathname.endsWith("/AcceptMessageRequestMutation") || url.pathname.endsWith("/DeleteMessageMutation")) chatActions.add(msg.params.requestId);
+	}
+	if (process.env.CHAT_NET && msg.method === "Network.requestWillBeSent" && msg.params.request.url.endsWith("/AcceptMessageRequestMutation")) {
+		try {
+			const body = JSON.parse(msg.params.request.postData);
+			const vars = typeof body.variables === "string" ? JSON.parse(body.variables) : body.variables;
+			console.log(`chat-accept-input ${JSON.stringify({ fields: Object.keys(vars), send: Object.keys(vars.send_mce ?? {}), key: Object.keys(vars.add_ckey ?? {}) })}`);
+		} catch {}
+	}
+	if (process.env.CHAT_NET && msg.method === "Network.requestWillBeSent" && msg.params.request.url.includes("/GetConversationPageQuery")) {
+		try {
+			const request = msg.params.request;
+			const url = new URL(request.url);
+			const input = request.postData ? JSON.parse(request.postData).variables : url.searchParams.get("variables");
+			const vars = typeof input === "string" ? JSON.parse(input) : input;
+			console.log(`chat-conversation-input ${JSON.stringify({ dash: vars.conversation_id.includes("-"), colon: vars.conversation_id.includes(":"), group: vars.conversation_id.startsWith("g") })}`);
+		} catch {}
+	}
+	if (process.env.CHAT_NET && msg.method === "Network.loadingFinished" && chatActions.delete(msg.params.requestId)) {
+		void call("Network.getResponseBody", { requestId: msg.params.requestId }).then((result) => {
+			try { const body = JSON.parse(result.body); console.log(`chat-action-result ${JSON.stringify({ errors: body.errors?.map((e: any) => e.message), resultTypes: Object.values(body.data ?? {}).map((v: any) => v?.__typename) })}`); } catch {}
+		});
+	}
+	if (process.env.CHAT_NET && msg.method === "Network.loadingFinished" && chatRequests.delete(msg.params.requestId)) {
+		void call("Network.getResponseBody", { requestId: msg.params.requestId }).then((result) => {
+			try {
+				const data = JSON.parse(result.body);
+				const items = data.data?.search_by_raw_query?.x_chat_users_typeahead;
+				console.log(`chat-typeahead ${JSON.stringify({ count: items?.length, errors: data.errors?.map((e: any) => e.message) })}`);
+			} catch {}
+		});
+	}
 	if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
 		const text = msg.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").split("\n").slice(0, 3).join(" | ").slice(0, 400);
 		consoleErrors.set(text, (consoleErrors.get(text) ?? 0) + 1);
@@ -105,7 +144,7 @@ const evaluate = async (expression: string) =>
 
 await call("Page.enable");
 await call("Runtime.enable");
-if (process.env.NET) await call("Network.enable");
+if (process.env.NET || process.env.CHAT_NET) await call("Network.enable");
 if (process.env.EXCEPTIONS) {
 	await call("Debugger.enable");
 	await call("Debugger.setPauseOnExceptions", { state: "all" });
@@ -141,6 +180,15 @@ for (const step of steps) {
 		exceptions.clear();
 		consoleErrors.clear();
 	} else if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
+	else if (kind === "hover" || kind === "context") {
+		const box = await evaluate(`(() => { ${DEEP} const matches = deepAll().filter((e) => e.innerText?.trim() === ${JSON.stringify(arg)} && e.getClientRects().length); const e = matches.reverse().find((e) => ![...e.children].some((c) => c.innerText?.trim() === ${JSON.stringify(arg)})); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+		if (box) await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...box });
+		if (box && kind === "context") {
+			await call("Input.dispatchMouseEvent", { type: "mousePressed", button: "right", clickCount: 1, ...box });
+			await call("Input.dispatchMouseEvent", { type: "mouseReleased", button: "right", clickCount: 1, ...box });
+		}
+		if (!box) console.log(`${kind} ${arg}: not found`);
+	}
 	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
 	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { ${DEEP} const e = deepQuery(${JSON.stringify(arg)}); if (!e) return "not found"; e.focus?.(); e.click(); return "clicked"; })()`)}`);
 	else if (kind === "type") await call("Input.insertText", { text: arg });
@@ -158,9 +206,8 @@ for (const step of steps) {
 	else if (kind === "file") {
 		const cut = arg.lastIndexOf("=");
 		const [selector, file] = [arg.slice(0, cut), arg.slice(cut + 1)];
-		const doc = await call("DOM.getDocument", { depth: -1, pierce: true });
-		const node = await call("DOM.querySelector", { nodeId: doc.root.nodeId, selector });
-		const r = await call("DOM.setFileInputFiles", { nodeId: node.nodeId, files: [resolve(file)] });
+		const node = await call("Runtime.evaluate", { expression: `(() => { ${DEEP} return deepQuery(${JSON.stringify(selector)}); })()` });
+		const r = await call("DOM.setFileInputFiles", { objectId: node.result?.objectId, files: [resolve(file)] });
 		console.log(`file ${selector}: ${r?.error ? JSON.stringify(r.error) : "set"}`);
 	} else if (kind === "shot") {
 		const r = await call("Page.captureScreenshot", { format: "png" });
