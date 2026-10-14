@@ -8,6 +8,7 @@
 //   css:<selector>         click the first element matching <selector>
 //   type:<text>            insert text at the focused element
 //   keys:<text>            type it key by key
+//   press:<key>            press one key (Enter, Escape, ...)
 //   file:<selector>=<path> put a local file into a file input
 //   shot:<name>            screenshot to .probe/<name>.png
 //   eval:<expression>      print the value of a JS expression
@@ -135,6 +136,10 @@ for (const step of steps) {
 	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
 	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { ${DEEP} const e = deepQuery(${JSON.stringify(arg)}); if (!e) return "not found"; e.focus?.(); e.click(); return "clicked"; })()`)}`);
 	else if (kind === "type") await call("Input.insertText", { text: arg });
+	else if (kind === "press") {
+		await call("Input.dispatchKeyEvent", { type: "keyDown", key: arg, code: arg, windowsVirtualKeyCode: arg === "Enter" ? 13 : 0, ...(arg === "Enter" ? { text: String.fromCharCode(13) } : {}) });
+		await call("Input.dispatchKeyEvent", { type: "keyUp", key: arg, code: arg, windowsVirtualKeyCode: arg === "Enter" ? 13 : 0 });
+	}
 	// key by key, for fields that take one character per box
 	else if (kind === "keys")
 		for (const ch of arg) {
