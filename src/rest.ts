@@ -7,6 +7,7 @@ import { isFlag } from "./flags";
 import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
+import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
 import { setFollow, userById, userByName, usersByIds } from "./users";
@@ -80,6 +81,12 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const user = await userById(viewer.id, target);
 		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
 		return Response.json(legacyUser(user));
+	}
+	// Report post / Report account
+	if (path === "/1.1/report/flow.json" && method === "POST") {
+		const body = await req.json().catch(() => ({}));
+		if (process.env.LOG_REQUESTS) console.log(`report flow ${JSON.stringify(body).slice(0, 600)}`);
+		return reportFlow(viewer, new URL(req.url), body);
 	}
 	const relation = /^\/1\.1\/(blocks|mutes\/users)\/(create|destroy)\.json$/.exec(path);
 	if (relation && method === "POST") {

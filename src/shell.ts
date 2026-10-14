@@ -115,7 +115,15 @@ const HIDE_CSS = [
 // does the Grok Imagine promo in the Edit profile dialog.
 const GONE_MENU_ITEMS = ["Add/remove from Lists", "Embed post", "Request Community Note"];
 const TIDY_SCRIPT = `var goneItems=${JSON.stringify(GONE_MENU_ITEMS)};
+// X's own sign-in and sign-up screens talk to its servers; ours are /login and /signup
+function ownScreens(){
+	var p=location.pathname;
+	if(p.indexOf("/i/jf/onboarding")===0||p.indexOf("/i/flow/login")===0)location.replace("/login");
+	else if(p.indexOf("/i/flow/signup")===0)location.replace("/signup");
+}
+ownScreens();
 new MutationObserver(function(){
+	ownScreens();
 	document.querySelectorAll('[role="dialog"] button').forEach(function(b){
 		if(b.innerText.trim()!=="Edit Photo")return;
 		var box=b;

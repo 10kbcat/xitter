@@ -11,6 +11,7 @@ import { sql } from "./db";
 import { isFlag } from "./flags";
 import { isId, newId } from "./ids";
 import { createInvite } from "./invites";
+import { REASONS } from "./reports";
 import { type SignupMode, allSettings, setSetting } from "./settings";
 
 type Role = "admin" | "moderator" | "support";
@@ -83,7 +84,8 @@ const ACTIONS: Record<string, Action> = {
 				(select count(*)::int from media) as media,
 				(select coalesce(sum(size), 0)::bigint::text from media) as media_bytes,
 				(select count(*)::int from media where state = 'processing') as videos_processing,
-				(select count(*)::int from invites where not revoked and uses < max_uses and (expires_at is null or expires_at > now())) as open_invites`;
+				(select count(*)::int from invites where not revoked and uses < max_uses and (expires_at is null or expires_at > now())) as open_invites,
+				(select count(*)::int from reports where status = 'open') as open_reports`;
 			const days = await sql`select to_char(d, 'YYYY-MM-DD') as day,
 				(select count(*)::int from posts p where p.created_at >= d and p.created_at < d + interval '1 day') as posts,
 				(select count(*)::int from users u where u.created_at >= d and u.created_at < d + interval '1 day') as signups
@@ -332,6 +334,41 @@ const ACTIONS: Record<string, Action> = {
 			await guard(a, p.user_id);
 			await sql`delete from posts where id = ${id}::bigint`;
 			await audit(a, "delete_post", p.user_id, { post: id, text: p.text.slice(0, 280) });
+			return {};
+		},
+	},
+
+	reports: {
+		role: "support",
+		run: async (_a, b) => {
+			const status = ["open", "dismissed", "actioned"].includes(b.status) ? b.status : "open";
+			const rows = await sql`select r.id::text as id, r.reason, r.details, r.status, r.note, r.created_at, r.handled_at,
+				r.post_id::text as post_id, p.text as post_text, p.created_at as post_created_at,
+				(select count(*)::int from media m where m.post_id = r.post_id) as post_media,
+				rep.screen_name as reporter, h.screen_name as handled_by,
+				u.id::text as user_id, u.screen_name, u.name, u.avatar_url, u.verified_type, u.flag, u.status as user_status, u.role,
+				(select count(*)::int from reports o where o.user_id = r.user_id and o.status = 'open' and o.id <> r.id) as other_open,
+				(select count(*)::int from reports o where o.user_id = r.user_id and o.status = 'actioned') as actioned_before
+				from reports r left join users u on u.id = r.user_id left join posts p on p.id = r.post_id
+				left join users rep on rep.id = r.reporter_id left join users h on h.id = r.handled_by
+				where r.status = ${status} order by r.id ${status === "open" ? sql`asc` : sql`desc`} limit 100`;
+			return { reports: rows, reasons: REASONS };
+		},
+	},
+
+	resolveReport: {
+		role: "moderator",
+		run: async (a, b) => {
+			const id = idOf(b.id, "report");
+			const status = b.status === "dismissed" ? "dismissed" : "actioned";
+			const note = String(b.note ?? "").slice(0, 1000);
+			const rows = await sql`update reports set status = ${status}, note = ${note}, handled_by = ${a.id}::bigint, handled_at = now()
+				where id = ${id}::bigint returning user_id::text as user_id`;
+			if (!rows.length) throw new AdminError("No such report.", 404);
+			// other open reports about the same post close with it
+			if (b.samePost) await sql`update reports set status = ${status}, note = ${note}, handled_by = ${a.id}::bigint, handled_at = now()
+				where status = 'open' and post_id = (select post_id from reports where id = ${id}::bigint)`;
+			await audit(a, status === "dismissed" ? "dismiss_report" : "action_report", rows[0].user_id, { report: id, note: note || undefined });
 			return {};
 		},
 	},

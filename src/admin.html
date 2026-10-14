@@ -66,6 +66,7 @@
 	.flags button.on { border-color: var(--blue); }
 	.chart { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin-top: 8px; }
 	.chart div { flex: 1; background: var(--blue); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+	nav .count { margin-left: auto; background: var(--blue); color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 12px; font-weight: 700; }
 	.code { font-family: ui-monospace, Consolas, monospace; }
 	.notice { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--blue); color: #fff; padding: 10px 18px; border-radius: 6px; z-index: 9; max-width: calc(100vw - 32px); }
 	.notice.err { background: var(--red); }
@@ -129,6 +130,7 @@ const person = (u) => '<div class="person"><img class="avatar" alt="" src="' + e
 
 const PAGES = {
 	overview: { icon: "monitoring", title: "Overview" },
+	reports: { icon: "flag", title: "Reports" },
 	users: { icon: "group", title: "Users" },
 	orgs: { icon: "domain", title: "Organisations" },
 	posts: { icon: "article", title: "Posts" },
@@ -161,12 +163,51 @@ const RENDER = {
 		const max = Math.max(1, ...s.days.map((d) => d.posts));
 		main.innerHTML = "<h1>Overview</h1>" +
 			'<div class="cards">' +
-			[["Accounts", s.users], ["Active this week", s.active_week], ["Sanctioned", s.sanctioned], ["Posts", s.posts], ["Posts today", s.posts_today], ["Likes", s.likes], ["Media files", s.media], ["Media stored", mb + " MB"], ["Videos converting", s.videos_processing], ["Open invites", s.open_invites]]
+			[["Open reports", s.open_reports], ["Accounts", s.users], ["Active this week", s.active_week], ["Sanctioned", s.sanctioned], ["Posts", s.posts], ["Posts today", s.posts_today], ["Likes", s.likes], ["Media files", s.media], ["Media stored", mb + " MB"], ["Videos converting", s.videos_processing], ["Open invites", s.open_invites]]
 				.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") +
 			"</div>" +
 			'<h2>Posts per day, last two weeks</h2><div class="box"><div class="chart">' +
 			s.days.map((d) => '<div title="' + esc(d.day) + ": " + d.posts + " posts, " + d.signups + ' sign-ups" style="height:' + (d.posts / max) * 100 + '%"></div>').join("") +
 			'</div><div class="row dim small" style="justify-content:space-between;margin-top:6px"><span>' + esc(s.days[0]?.day) + "</span><span>" + esc(s.days[s.days.length - 1]?.day) + "</span></div></div>";
+	},
+
+	async reports(main) {
+		const status = sessionStorage.getItem("reportStatus") || "open";
+		const { reports, reasons } = await api("reports", { status });
+		main.innerHTML = '<h1>Reports</h1><div class="bar">' +
+			["open", "actioned", "dismissed"].map((s) => '<button class="btn' + (s === status ? " primary" : "") + '" data-tab="' + s + '">' + s + "</button>").join("") + "</div>" +
+			(reports.length ? reports.map((r) => {
+				const reason = reasons[r.reason]?.text || r.reason;
+				const target = r.user_id ? person({ id: r.user_id, screen_name: r.screen_name, name: r.name, avatar_url: r.avatar_url, verified_type: r.verified_type, flag: r.flag, status: r.user_status, role: r.role }) : '<span class="dim">deleted account</span>';
+				return '<div class="box" style="margin-bottom:12px" data-report="' + esc(r.id) + '">' +
+					'<div class="row" style="justify-content:space-between"><div><b>' + esc(reason) + '</b> <span class="dim small">· reported by @' + esc(r.reporter ?? "?") + " · " + esc(when(r.created_at)) + "</span></div>" +
+					(r.other_open ? '<span class="pill suspended">' + r.other_open + " more open about this account</span>" : "") + "</div>" +
+					(r.details ? '<p style="white-space:pre-wrap">' + esc(r.details) + "</p>" : "") +
+					'<div style="margin:10px 0">' + target + (r.actioned_before ? '<div class="dim small" style="margin-top:4px">' + r.actioned_before + " earlier reports were acted on</div>" : "") + "</div>" +
+					(r.post_id ? (r.post_text !== null ? '<div class="box" style="background:var(--bg);border:1px solid var(--line)">' + esc(r.post_text || "(no text)") + (r.post_media ? ' <span class="dim small">· ' + r.post_media + " media</span>" : "") +
+						' <a class="small" target="_blank" href="/' + esc(r.screen_name) + "/status/" + esc(r.post_id) + '">open</a></div>' : '<p class="dim small">The post was deleted.</p>') : '<p class="dim small">Report about the account.</p>') +
+					(status === "open" && can("moderator") ? '<div class="field" style="margin-top:12px"><input data-note placeholder="Note for the audit log (optional)"></div><div class="row">' +
+						'<button class="btn" data-do="dismiss">Dismiss</button>' +
+						(r.post_id && r.post_text !== null ? '<button class="btn danger" data-do="delete">Delete post</button>' : "") +
+						(r.user_id ? '<button class="btn" data-do="restricted">Restrict author</button><button class="btn" data-do="limited">Limit author</button><button class="btn danger" data-do="suspended">Suspend author</button>' : "") +
+						(r.user_id ? '<a class="btn" href="#user/' + esc(r.user_id) + '">Open account</a>' : "") + "</div>"
+						: '<p class="dim small">' + esc(r.status) + (r.handled_by ? " by @" + esc(r.handled_by) : "") + (r.handled_at ? " · " + esc(when(r.handled_at)) : "") + (r.note ? " · " + esc(r.note) : "") + "</p>") +
+					"</div>";
+			}).join("") : '<div class="empty">' + (status === "open" ? "No open reports." : "Nothing here.") + "</div>");
+		main.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { sessionStorage.setItem("reportStatus", b.dataset.tab); route(); });
+		main.querySelectorAll("[data-report]").forEach((box) => {
+			const r = reports.find((x) => x.id === box.dataset.report);
+			box.querySelectorAll("[data-do]").forEach((b) => b.onclick = () => act(async () => {
+				const what = b.dataset.do;
+				const note = box.querySelector("[data-note]").value;
+				if (what === "suspended" && !confirm("Suspend @" + r.screen_name + "?")) return;
+				if (what === "delete") await api("deletePost", { id: r.post_id });
+				if (["restricted", "limited", "suspended"].includes(what)) await api("setStatus", { id: r.user_id, status: what, reason: note || "report: " + r.reason });
+				await api("resolveReport", { id: r.id, status: what === "dismiss" ? "dismissed" : "actioned", note, samePost: true });
+				await route();
+				refreshCounts();
+			}, "Report closed"));
+		});
 	},
 
 	async users(main) {
@@ -269,6 +310,15 @@ const RENDER = {
 	},
 };
 
+// the number of open reports beside Reports in the menu
+async function refreshCounts() {
+	const s = await api("stats").catch(() => null);
+	const b = $('nav [data-page="reports"]');
+	if (!s || !b) return;
+	b.querySelector(".count")?.remove();
+	if (s.open_reports) b.insertAdjacentHTML("beforeend", '<span class="count">' + s.open_reports + "</span>");
+}
+
 function userTable(users, orgs = false) {
 	const html = '<table class="table"><tr><th>Account</th><th>' + (orgs ? "Affiliates" : "Posts") + "</th><th>Followers</th><th>Joined</th><th>Last sign-in</th></tr>" +
 		users.map((u) => '<tr class="click" data-id="' + esc(u.id) + '"><td>' + person(u) + (u.org ? '<div class="dim small">affiliate of @' + esc(u.org) + "</div>" : "") + "</td><td>" + (orgs ? u.affiliates : u.posts) + "</td><td>" + u.followers +
@@ -356,6 +406,7 @@ async function renderUser(main, id) {
 		'<button onclick="location.href=\'/home\'"><span class="icon">arrow_back</span>Back to Xitter</button>' +
 		'<div class="who">@' + esc(me.screen_name) + " · " + esc(me.role) + "</div>");
 	document.querySelectorAll("nav [data-page]").forEach((b) => b.onclick = () => go(b.dataset.page));
+	refreshCounts();
 	route();
 })();
 </script>

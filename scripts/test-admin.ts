@@ -25,7 +25,7 @@ async function session(username: string, pw = password) {
 	const get = async (op: string, variables: object) =>
 		(await fetch(`${origin}/i/api/graphql/q/${op}?variables=${encodeURIComponent(JSON.stringify(variables))}`, { headers })).json();
 	const page = async (path: string) => fetch(`${origin}${path}`, { headers, redirect: "manual" });
-	return { admin, gql, get, page };
+	return { admin, gql, get, page, headers };
 }
 
 let failures = 0;
@@ -102,6 +102,25 @@ const { codes: [revoked] } = await a.admin("createInvite", {});
 await a.admin("revokeInvite", { code: revoked });
 check("a revoked code is refused", (await signup({ code: revoked, username: `${name}r` })).status === 400);
 check("invites are listed with who used them", (await a.admin("invites")).invites?.find((i: any) => i.code === codes[0])?.used_by?.includes(name));
+
+// reports: the client's report flow, then the queue
+const reportFlow = async (s: any, body: object, start = false) =>
+	(await fetch(`${origin}/i/api/1.1/report/flow.json${start ? "?flow_name=report-flow" : ""}`, { method: "POST", headers: { ...s.headers, "content-type": "application/json" }, body: JSON.stringify(body) })).json();
+const reported = (await o.gql("CreateTweet", { tweet_text: "admin test: reported" })).data.create_tweet.tweet_results.result.rest_id;
+const step1 = await reportFlow(t, { input_flow_data: { requested_variant: JSON.stringify({ reported_tweet_id: reported, source: "reporttweet" }) } }, true);
+check("the report flow asks for a reason", step1.subtasks?.[0]?.choice_selection?.choices?.length > 3, step1.subtasks?.[0]?.subtask_id);
+const step2 = await reportFlow(t, { flow_token: step1.flow_token, subtask_inputs: [{ subtask_id: "report_reason", choice_selection: { link: "next_link", selected_choices: ["spam"] } }] });
+check("then for details", !!step2.subtasks?.[0]?.enter_text);
+const step3 = await reportFlow(t, { flow_token: step1.flow_token, subtask_inputs: [{ subtask_id: "report_details", enter_text: { link: "next_link", text: "test details" } }] });
+check("then thanks", !!step3.subtasks?.[0]?.cta);
+const open = (await a.admin("reports")).reports ?? [];
+const report = open.find((r: any) => r.post_id === reported);
+check("the report is in the queue", report?.reason === "spam" && report?.details === "test details" && report?.screen_name?.toLowerCase() === orgName.toLowerCase(), report);
+check("non-staff can't close reports", (await t.admin("resolveReport", { id: report?.id })).status === 403);
+await a.admin("resolveReport", { id: report?.id, status: "dismissed", note: "test" });
+check("closing moves it out of the open queue", !(await a.admin("reports")).reports?.some((r: any) => r.id === report?.id));
+await o.gql("DeleteTweet", { tweet_id: reported });
+await sql`delete from reports where id = ${report?.id ?? 0}::bigint`;
 
 // posts, passwords, audit
 check("posts can be found", (await a.admin("posts", { author: targetName })).posts?.some((p: any) => p.id === post));

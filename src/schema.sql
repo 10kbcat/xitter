@@ -201,3 +201,21 @@ create table if not exists settings (
 );
 alter table invites add column if not exists org_id bigint references users (id) on delete set null;
 alter table invites add column if not exists revoked boolean not null default false;
+
+-- reports from the client's Report post / Report account flow, for staff
+create table if not exists reports (
+	id bigint primary key,
+	reporter_id bigint references users (id) on delete set null,
+	-- what was reported: a post (and its author), or an account
+	post_id bigint references posts (id) on delete set null,
+	user_id bigint references users (id) on delete cascade,
+	reason text not null,
+	details text not null default '',
+	-- open, dismissed or actioned
+	status text not null default 'open',
+	handled_by bigint references users (id) on delete set null,
+	handled_at timestamptz,
+	note text not null default '',
+	created_at timestamptz not null default now()
+);
+create index if not exists reports_status_idx on reports (status, created_at desc);
