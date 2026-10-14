@@ -7,13 +7,13 @@ import { isFlag } from "./flags";
 import { newId } from "./ids";
 import { getSetting, settings } from "./settings";
 
-// no 0/O or 1/I/L, so a code read aloud or typed from a screenshot comes out right
-const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+// Eight digits ("4821-0937"): X's sign-up dialog takes the code in digit boxes,
+// and digits are easy to read out and type on a phone.
+export const CODE_DIGITS = 8;
 
 export function newCode(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(12));
-	const chars = [...bytes].map((b) => ALPHABET[b % ALPHABET.length]).join("");
-	return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8)}`;
+	const digits = [...crypto.getRandomValues(new Uint32Array(CODE_DIGITS))].map((n) => n % 10).join("");
+	return `${digits.slice(0, 4)}-${digits.slice(4)}`;
 }
 
 export const normalizeCode = (code: string) => code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/(.{4})(?=.)/g, "$1-");

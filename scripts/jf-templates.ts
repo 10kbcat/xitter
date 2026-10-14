@@ -16,6 +16,10 @@ const SOURCES: Record<string, string> = {
 	// "Forgot password?": where to send the code
 	recovery: "samples/add-account/add-account/011-POST-web_actions_begin_password_recovery.json",
 	password: "samples/login/017-POST-web_actions_begin_login.json",
+	// sign-up: "We sent you a security code" (reused for the invite code) and
+	// "Set up your account" (name, username, password)
+	code: "samples/signup/signup/063-POST-web_actions_begin_login.json",
+	setup: "samples/signup/signup/071-POST-web_actions_verify_age.json",
 	success: "samples/login/019-POST-web_actions_login_enter_password.json",
 	passkey: "samples/login/014-GET-web_remotes_passkey_one_fa.json",
 };
@@ -29,6 +33,9 @@ for (const [name, file] of Object.entries(SOURCES)) {
 	messages = mapStrings(messages, (s) => {
 		if (s.toLowerCase() === capturedName.toLowerCase()) return "{{username}}";
 		if (UUID.test(s)) return "{{session_token}}";
+		// the capture's birth date and age, kept in hidden fields
+		if (/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(s)) return "";
+		if (name === "setup" && /^\d{1,3}$/.test(s)) return "";
 		if (/^\d{15,20}$/.test(s)) return "{{user_id}}";
 		// masked contact details on the recovery screen
 		if (/^[^*\s]{0,4}\*{3,}[^\s]*@/.test(s)) return "{{email_masked}}";
