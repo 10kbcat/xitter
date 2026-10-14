@@ -10,7 +10,8 @@ import { loadSettings } from "./settings";
 import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
-import { patchFile } from "./patch";
+import { patchFile, patchText } from "./patch";
+import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
 import { livePipeline, restRoute } from "./rest";
@@ -136,6 +137,13 @@ const server = Bun.serve({
 		const url = new URL(req.url);
 		const p = url.pathname;
 		if (p.startsWith("/abs/")) return serveClient(req, p);
+		// Chat's manifest: the pinned chat build's own, its addresses ours
+		if (p === "/xchat/embed-v1.json") {
+			const base = loadBuild()?.build.meta.xchatEmbedBuild as string | undefined;
+			const raw = base && (await getClientFile(`${new URL(base).pathname}mf-manifest.json`));
+			if (!raw) return new Response("no pinned chat build", { status: 404 });
+			return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
+		}
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login" && req.method === "POST") return handleLogin(req);
 		if (p === "/rules" || p === "/tos" || p === "/privacy") return rulesPage();

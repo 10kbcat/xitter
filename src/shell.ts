@@ -186,7 +186,8 @@ export function shell(user: User | null, multi = false): string | undefined {
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
 	runtimePatched ??= patchText(runtime);
-	const meta = { ...build.meta, sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
+	// the chat build's address, like every other address, is ours
+	const meta = { ...JSON.parse(patchText(JSON.stringify(build.meta))), sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
 	const scripts = build.scripts
 		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}"></script>`)
 		.join("");

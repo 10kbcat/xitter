@@ -8,7 +8,15 @@ import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 // domain at runtime, which would turn an unpatched api.twitter.com into api.<our host>.
 const API_HOSTS = ["api", "upload", "caps", "jf"].flatMap((s) => [`${s}.x.com`, `${s}.twitter.com`]);
 
+// an address as it appears inside a regular expression literal: /https:\/\/a\.b/
+const inRegex = (url: string) => url.replace(/[/.]/g, (c) => "\\" + c);
+
 const RULES: [RegExp, string][] = [
+	// Chat is a separate app (module federation): its manifest comes from
+	// chat.x.com, its files from abs.twimg.com, and both are checked by pattern
+	[/https:\/\/chat\.x\.com\/embed-v1\.json/g, `${PUBLIC_ORIGIN}/xchat/embed-v1.json`],
+	[new RegExp(String.raw`https:\\\/\\\/chat(\(-staging\)\?)?\\\.x\\\.com\\\/embed-v1\\\.json`, "g"), inRegex(`${PUBLIC_ORIGIN}/xchat/embed-v1.json`)],
+	[new RegExp(String.raw`https:\\\/\\\/abs\\\.twimg\\\.com`, "g"), inRegex(`${PUBLIC_ORIGIN}/abs`)],
 	[/https:\/\/abs\.twimg\.com/g, `${PUBLIC_ORIGIN}/abs`],
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`https://${h.replace(/\./g, "\\.")}`, "g"), PUBLIC_ORIGIN]),
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`"${h.replace(/\./g, "\\.")}"`, "g"), `"${PUBLIC_HOSTNAME}"`]),
