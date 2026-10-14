@@ -9,8 +9,7 @@
 //        right password: "complete" plus session cookies; wrong: the same
 //        screen again with the error under the field
 //
-// The first screen is X's signed-out landing page, laid out for x.com's front
-// page rather than the dialog; a capture of the dialog's own screen would fit better.
+// The first screen is the signed-in client's own sign-in dialog.
 
 import { login, sessionCookies } from "./auth";
 import { sql } from "./db";
@@ -19,30 +18,32 @@ import { fromJson } from "./jetfuel-json";
 import { settings } from "./settings";
 
 const load = async (name: string): Promise<Message[]> => fromJson(await Bun.file(new URL(`./jf/${name}.json`, import.meta.url)).json());
-// Takes out of a screen the parts that hold any of these texts: the nearest
-// enclosing element of type `part` (a button is 7140).
-function without(messages: Message[], texts: string[], part = 7140): Message[] {
+// Takes out of a screen the parts that hold any of these texts. With `part` (a
+// button is 7140) the nearest element of that type goes; otherwise the branch
+// that sits beside the username field, i.e. the child of the nearest element
+// that also holds the field.
+function without(messages: Message[], texts: string[], part?: number): Message[] {
 	const [, root] = messages[0];
 	const parentOf = new Map<number, number>();
 	root.els.forEach((e: any, i: number) => e.children.forEach((c: number) => parentOf.set(c, i)));
-	const textOf = (e: any) => [...e.props.values()].map((p: number) => root.props[p]).filter((p: any) => p[0] === 0).map((p: any) => p[1]);
+	const strings = (e: any) => [...e.props.values()].map((p: number) => root.props[p]).filter((p: any) => p[0] === 0).map((p: any) => p[1]);
+	const holdsField = (i: number): boolean => strings(root.els[i]).includes("username_or_email") || root.els[i].children.some(holdsField);
 	for (const text of texts) {
-		let n = root.els.findIndex((e: any) => textOf(e).includes(text));
-		// a container type means "the child of that container"; otherwise the element of that type
-		if (part === 22167) while (n >= 0 && parentOf.has(n) && root.els[parentOf.get(n)!].type !== part) n = parentOf.get(n)!;
-		else while (n >= 0 && parentOf.has(n) && root.els[n].type !== part) n = parentOf.get(n)!;
-		const container = parentOf.get(n);
-		if (n < 0 || container === undefined) continue;
-		root.els[container].children = root.els[container].children.filter((c: number) => c !== n);
+		let n = root.els.findIndex((e: any) => strings(e).includes(text));
+		if (part !== undefined) while (n >= 0 && parentOf.has(n) && root.els[n].type !== part) n = parentOf.get(n)!;
+		else while (n >= 0 && parentOf.has(n) && !holdsField(parentOf.get(n)!)) n = parentOf.get(n)!;
+		const parent = parentOf.get(n);
+		if (n < 0 || parent === undefined) continue;
+		root.els[parent].children = root.els[parent].children.filter((c: number) => c !== n);
 	}
 	return messages;
 }
 
 const templates = {
 	// no password reset by email yet
-	password: without(await load("password"), ["Forgot password?"]),
+	password: without(await load("password"), ["Forgot password?"], 7140),
 	// no phone numbers, Google or Apple accounts here
-	landing: without(await load("landing"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"], 22167),
+	landing: without(await load("landing"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	success: await load("success"),
 	passkey: await load("passkey"),
 };
@@ -58,6 +59,9 @@ const TEXTS: Record<string, () => string> = {
 	"Privacy Policy": () => "privacy",
 	"Cookie Use": () => "cookies",
 	Login: () => `Sign in to ${settings().instance_name}`,
+	"See what's happening": () => `Sign in to ${settings().instance_name}`,
+	"Select an option below:": () => "Enter your username to continue.",
+	"Email or username": () => "Username",
 };
 
 function fill(messages: Message[], values: Record<string, string>): Message[] {

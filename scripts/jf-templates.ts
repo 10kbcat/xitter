@@ -11,7 +11,10 @@ const [capturedName] = process.argv.slice(2);
 if (!capturedName) throw new Error("usage: bun scripts/jf-templates.ts <username in the capture>");
 
 const SOURCES: Record<string, string> = {
-	landing: "samples/login/013-GET-onboarding_web_landing.json",
+	// the sign-in dialog of the signed-in client (/i/jfapi/onboarding/web?mode=login)
+	landing: "samples/add-account/add-account/055-GET-jfapi_onboarding_web.json",
+	// "Forgot password?": where to send the code
+	recovery: "samples/add-account/add-account/011-POST-web_actions_begin_password_recovery.json",
 	password: "samples/login/017-POST-web_actions_begin_login.json",
 	success: "samples/login/019-POST-web_actions_login_enter_password.json",
 	passkey: "samples/login/014-GET-web_remotes_passkey_one_fa.json",
@@ -27,6 +30,9 @@ for (const [name, file] of Object.entries(SOURCES)) {
 		if (s.toLowerCase() === capturedName.toLowerCase()) return "{{username}}";
 		if (UUID.test(s)) return "{{session_token}}";
 		if (/^\d{15,20}$/.test(s)) return "{{user_id}}";
+		// masked contact details on the recovery screen
+		if (/^[^*\s]{0,4}\*{3,}[^\s]*@/.test(s)) return "{{email_masked}}";
+		if (/^\*{4,}\d{1,4}$/.test(s)) return "{{phone_masked}}";
 		return s;
 	});
 	writeFileSync(`src/jf/${name}.json`, JSON.stringify(toJson(messages)));

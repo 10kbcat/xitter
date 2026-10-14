@@ -71,11 +71,16 @@ export function settingsFor(user: User): Record<string, unknown> {
 const LOGO = 'header h1 a[aria-label="X"]';
 const DARK = 'html[style*="color-scheme: dark"]';
 const WIDE = "html[data-wide-nav]";
+// the X drawn at the top of the sign-in dialog, known by its path
+const DIALOG_LOGO = '[role="dialog"] span:has(> svg > path[d^="M21.742 21.75l-7.563-11.179"])';
 const LOGO_CSS = `${LOGO} svg{opacity:0}
 ${LOGO}{background:url(/public/icon-light.png) center/36px no-repeat}
 ${DARK} ${LOGO}{background-image:url(/public/icon-dark.png)}
 ${WIDE} ${LOGO}{width:150px;background-image:url(/public/logo-light.png);background-size:128px auto;background-position:10px center}
-${WIDE}${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}`;
+${WIDE}${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}
+${DIALOG_LOGO}{background:url(/public/icon-light.png) center/contain no-repeat}
+${DARK} ${DIALOG_LOGO}{background-image:url(/public/icon-dark.png)}
+${DIALOG_LOGO} svg{opacity:0}`;
 
 // Paid features the client gates on a per-account claim. Nothing is paid for
 // here, so every account holds them.
