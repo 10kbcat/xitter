@@ -3,6 +3,7 @@
 
 import type { User } from "./auth";
 import { loadBuild } from "./build";
+import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
 import { patchText } from "./patch";
@@ -92,6 +93,7 @@ const GONE_TESTIDS = [
 	"GrokDrawer",
 	"grokImgGen",
 	"contentDisclosureButton",
+	"ProfessionalButton_Switch_To_Professional",
 	"premium-signup-tab",
 	"AppTabBar_Calls_Link",
 ];
@@ -103,15 +105,23 @@ const HIDE_CSS = [
 	'[role="menu"] a[href$="/lists"]',
 	'[data-testid="sidebarColumn"] div:has(> aside[aria-label="Subscribe to Premium"])',
 	'aside[aria-label="Subscribe to Premium"]',
+	'[role="dialog"] [aria-label="Edit with Imagine"]',
 	'[data-testid="sidebarColumn"] nav[aria-label="Footer"]',
 ].join(",") + "{display:none!important}";
 
 // Upsell banners with nothing stable to select: the box around a Premium link,
 // up to just below whatever else shares its column.
-// Menu entries for missing features carry no link or id, only their text.
+// Menu entries for missing features carry no link or id, only their text; so
+// does the Grok Imagine promo in the Edit profile dialog.
 const GONE_MENU_ITEMS = ["Add/remove from Lists", "Embed post", "Request Community Note"];
 const TIDY_SCRIPT = `var goneItems=${JSON.stringify(GONE_MENU_ITEMS)};
 new MutationObserver(function(){
+	document.querySelectorAll('[role="dialog"] button').forEach(function(b){
+		if(b.innerText.trim()!=="Edit Photo")return;
+		var box=b;
+		while(box.parentElement&&box.parentElement.innerText.indexOf("Imagine")>=0&&!box.parentElement.querySelector("input"))box=box.parentElement;
+		box.style.display="none";
+	});
 	document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
 		if(goneItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
 	});
@@ -221,10 +231,13 @@ export function shell(user: User): string | undefined {
 <meta name="theme-color" content="#000000" /><title>Xitter</title>
 <link rel="icon" type="image/png" href="/public/favicon.png" /><link rel="apple-touch-icon" href="/public/icon-light.png" />
 <style>html,body{height:100%}body{margin:0;background-color:#000;overflow-y:scroll}${LOGO_CSS}
-${HIDE_CSS}</style>
+${HIDE_CSS}
+${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
-<script>${TIDY_SCRIPT}</script>
+<script>${TIDY_SCRIPT}
+window.__XITTER__=${inline(flagPickerData(user.flag))};
+${FLAG_PICKER_SCRIPT}</script>
 <script id="nonce-csp"></script>
 <script>${runtimePatched}</script>
 ${scripts}

@@ -47,6 +47,16 @@ check("the chosen flag shows as the badge", /flag-trans\.svg$/.test(user?.affili
 const home = await (await fetch(`${origin}/home`, { headers: { cookie: cookies.join("; ") } })).text();
 check("new accounts get Edit profile, not the onboarding flow", home.includes('"default_profile_image":false'));
 
+// the flag picker in the Edit profile dialog posts here
+const setFlag = (flag: string) =>
+	fetch(`${origin}/i/api/1.1/account/update_flag.json`, { method: "POST", headers: { cookie: cookies.join("; "), "x-csrf-token": csrf }, body: new URLSearchParams({ flag }) });
+check("an unknown flag is refused", (await setFlag("nope")).status === 403);
+check("the flag can be changed", (await setFlag("pan")).ok);
+const relabelled = (await (await fetch(`${origin}/i/api/graphql/q/UserByScreenName?variables=${vars}`, { headers: { cookie: cookies.join("; "), "x-csrf-token": csrf } })).json()).data
+	?.user?.result;
+check("and shows the new badge", /flag-pan\.svg$/.test(relabelled?.affiliates_highlighted_label?.label?.badge?.url ?? ""));
+check("and can be removed", (await setFlag("")).ok);
+
 r = await post(form({ code, username: `${name}b` }));
 check("a used-up code is refused", r.status === 400 && /used up/.test(await errorOf(r)));
 

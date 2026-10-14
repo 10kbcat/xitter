@@ -3,6 +3,7 @@
 import { type Viewer, clearedCookies, logout } from "./auth";
 import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKeyword } from "./blocks";
 import { sql } from "./db";
+import { isFlag } from "./flags";
 import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
@@ -21,9 +22,10 @@ async function form(req: Request): Promise<Record<string, string>> {
 
 const changedUser = async (viewer: Viewer) => Response.json(legacyUser((await userById(viewer.id, viewer.id))!));
 
-// account/update_profile, update_profile_image, update_profile_banner, remove_profile_banner
+// account/update_profile, update_profile_image, update_profile_banner, remove_profile_banner,
+// and our own update_flag (the pride flag badge, from the picker shell.ts adds to the dialog)
 async function profileRoute(path: string, viewer: Viewer, req: Request): Promise<Response | undefined> {
-	const m = /^\/1\.1\/account\/(update_profile|update_profile_image|update_profile_banner|remove_profile_banner)\.json$/.exec(path);
+	const m = /^\/1\.1\/account\/(update_profile|update_profile_image|update_profile_banner|remove_profile_banner|update_flag)\.json$/.exec(path);
 	if (!m || req.method !== "POST") return undefined;
 	const f = await form(req);
 
@@ -37,6 +39,12 @@ async function profileRoute(path: string, viewer: Viewer, req: Request): Promise
 			if (field === "url" && value && !/^https?:\/\/\S+$/.test(value)) return profileError("Website must be an http or https address.");
 			await sql`update users set ${sql({ [column]: value })} where id = ${viewer.id}::bigint`;
 		}
+		return changedUser(viewer);
+	}
+	if (m[1] === "update_flag") {
+		const flag = f.flag || null;
+		if (flag !== null && !isFlag(flag)) return profileError("Unknown flag.");
+		await sql`update users set flag = ${flag} where id = ${viewer.id}::bigint`;
 		return changedUser(viewer);
 	}
 	if (m[1] === "remove_profile_banner") {
