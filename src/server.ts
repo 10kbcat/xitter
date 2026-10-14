@@ -28,6 +28,16 @@ const MIME: Record<string, string> = {
 // measurement). Requests from the page may only reach this instance.
 const PAGE_CSP = "connect-src 'self' blob: data:";
 
+// the instance's own files (logo, icons), open to everyone since the sign-in page uses them
+const PUBLIC_DIR = process.env.PUBLIC_DIR ?? "public";
+async function servePublic(p: string): Promise<Response> {
+	const name = p.slice("/public/".length);
+	if (!/^[\w.-]+\.(png|svg|ico|webp)$/.test(name)) return new Response("not found", { status: 404 });
+	const file = Bun.file(`${PUBLIC_DIR}/${name}`);
+	if (!(await file.exists())) return new Response("not found", { status: 404 });
+	return new Response(file, { headers: { "cache-control": "public, max-age=3600" } });
+}
+
 const API_PREFIX = /^\/(i\/api\/|i\/jfapi\/|i\/media\/|1\.1\/|2\/|graphql\/|fleets\/|live_pipeline\/)/;
 // calls no handler exists for yet, most frequent first
 const unknown = new Map<string, number>();
@@ -110,7 +120,9 @@ const server = Bun.serve({
 		if (p.startsWith("/abs/")) return serveClient(req, p);
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
-		if (p === "/sw.js" || p === "/favicon.ico" || p === "/manifest.json") return new Response(null, { status: 404 });
+		if (p.startsWith("/public/")) return servePublic(p);
+		if (p === "/favicon.ico") return servePublic("/public/favicon.png");
+		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });
 
 		const viewer = await getViewer(req);
 		// uploads stay inside the instance: only signed-in users get them

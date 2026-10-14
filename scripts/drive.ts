@@ -100,7 +100,9 @@ if (process.env.EXCEPTIONS) {
 	await call("Debugger.setPauseOnExceptions", { state: "all" });
 }
 await call("DOM.enable");
-await call("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1600, deviceScaleFactor: 1, mobile: false });
+// WIDTH=<px> tries other layouts (the side bar narrows under 1265, phones under 500)
+const width = Number(process.env.WIDTH ?? 1280);
+await call("Emulation.setDeviceMetricsOverride", { width, height: 1600, deviceScaleFactor: 1, mobile: width < 500 });
 await call("Page.navigate", { url: origin + page });
 await Bun.sleep(6000);
 

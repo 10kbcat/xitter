@@ -11,8 +11,10 @@ const page = (error = "", name = "") => `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in</title>
+<title>Sign in · Xitter</title>
+<link rel="icon" type="image/png" href="/public/favicon.png">
 <style>
+	.logo { width: 200px; margin: 0 0 16px; }
 	body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #000; color: #e7e9ea; font: 15px system-ui, sans-serif; }
 	form { width: min(320px, calc(100vw - 32px)); display: grid; gap: 12px; }
 	h1 { margin: 0 0 8px; font-size: 28px; }
@@ -24,6 +26,7 @@ const page = (error = "", name = "") => `<!doctype html>
 </head>
 <body>
 <form method="post" action="/login">
+	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
 	<h1>Sign in</h1>
 	${error ? `<p>${esc(error)}</p>` : ""}
 	<input name="username" placeholder="Username" autocomplete="username" value="${esc(name)}" required autofocus>
