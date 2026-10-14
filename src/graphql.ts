@@ -401,7 +401,6 @@ const handlers: Record<string, Handler> = {
 	PinnedTimelines: () => ({ data: { pinned_timelines: { pinned_timelines: [] } } }),
 	CreatorStudioTabBarItemQuery: () => ({ data: { xpayments_audience_rewards_tasks: [] } }),
 	SidebarUserRecommendations: () => ({ data: { sidebar_user_recommendations: [] } }),
-	ExploreSidebar: () => ({ data: { explore_sidebar: { timeline: { instructions: [], responseObjects: { feedbackActions: [] } } } } }),
 	useStoryTopicQuery: () => ({ data: { story_topic: { id: globalId("StoryTopic", "For You"), stories: { items: [] } } } }),
 	useFetchProductSubscriptionsQuery: () => ({ data: { viewer_v2: { list_product_subscriptions: [] } } }),
 	useSubscriptionsPaymentFailureQuery: (v) => ({
@@ -557,6 +556,15 @@ async function search(viewer: Viewer, vars: Vars) {
 	return searchTimeline([{ type: "TimelineAddEntries", entries }]);
 }
 
+const trendItem = (t: { tag: string; posts: number }, i: number) => ({
+	__typename: "TimelineTrend",
+	itemType: "TimelineTrend",
+	name: t.tag,
+	rank: String(i + 1),
+	trend_url: { url: `twitter://search/?query=${encodeURIComponent(t.tag)}&src=trend_click&vertical=trends`, urlType: "DeepLink" },
+	trend_metadata: { domain_context: "Trending", meta_description: `${t.posts} post${t.posts === 1 ? "" : "s"}` },
+});
+
 // Explore: hashtags used most in the last week, as trends
 async function explorePage() {
 	const trends = await trendingHashtags(7, 20);
@@ -564,26 +572,40 @@ async function explorePage() {
 	const entries = trends.map((t, i) => ({
 		entryId: `trend-${t.tag.slice(1)}`,
 		sortIndex: (base - BigInt(i)).toString(),
-		content: {
-			__typename: "TimelineTimelineItem",
-			entryType: "TimelineTimelineItem",
-			itemContent: {
-				__typename: "TimelineTrend",
-				itemType: "TimelineTrend",
-				name: t.tag,
-				rank: String(i + 1),
-				trend_url: { url: `twitter://search/?query=${encodeURIComponent(t.tag)}&src=trend_click&vertical=trends`, urlType: "DeepLink" },
-				trend_metadata: { domain_context: "Trending", meta_description: `${t.posts} post${t.posts === 1 ? "" : "s"}` },
-			},
-		},
+		content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: trendItem(t, i) },
 	}));
 	const timeline = { instructions: [{ type: "TimelineAddEntries", entries }] };
 	return { data: { explore_page: { id: globalId("ExplorePage", "explore"), body: { __typename: "Timeline", timeline } } } };
 }
 
+// the "What's happening" box beside every page: the top few trends
+async function exploreSidebar() {
+	const trends = await trendingHashtags(7, 5);
+	const id = newId();
+	const entries = trends.length
+		? [
+				{
+					entryId: `trend-${id}`,
+					sortIndex: id,
+					content: {
+						__typename: "TimelineTimelineModule",
+						entryType: "TimelineTimelineModule",
+						displayType: "Vertical",
+						header: { displayType: "Classic", text: "What’s happening" },
+						footer: { displayType: "Classic", text: "Show more", landingUrl: { url: "twitter://explore", urlType: "DeepLink" } },
+						items: trends.map((t, i) => ({ entryId: `trend-${id}-trend-${t.tag}`, item: { itemContent: trendItem(t, i) } })),
+					},
+				},
+			]
+		: [];
+	const instructions = [{ type: "TimelineClearCache" }, { type: "TimelineAddEntries", entries }];
+	return { data: { explore_sidebar: { timeline: { instructions, responseObjects: { feedbackActions: [] } } } } };
+}
+
 Object.assign(handlers, {
 	SearchTimeline: (v: Viewer, vars: Vars) => search(v, vars),
 	ExplorePage: () => explorePage(),
+	ExploreSidebar: () => exploreSidebar(),
 } satisfies Record<string, Handler>);
 
 export const knownOperation = (name: string) => name in handlers;
