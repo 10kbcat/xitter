@@ -32,8 +32,19 @@ function urlEntities(u: User) {
 	return { url: { urls: [{ display_url: display, expanded_url: u.website, url: u.website, indices: [0, u.website.length] }] } };
 }
 
-// the badge after the name; X uses it for an affiliate's organisation
-function flagLabel(u: User) {
+// The badge after the name: an affiliate's organisation, which links to the
+// organisation, or else the account's pride flag. There is room for one.
+function badgeLabel(u: User) {
+	if (u.org)
+		return {
+			label: {
+				badge: { url: absolute(u.org.avatar_url) ?? DEFAULT_AVATAR },
+				description: u.org.name,
+				url: { url: `twitter://user?screen_name=${u.org.screen_name}`, urlType: "DeepLink" },
+				userLabelType: "BusinessLabel",
+				userLabelDisplayType: "Badge",
+			},
+		};
 	if (!u.flag || !FLAGS[u.flag]) return {};
 	return {
 		label: {
@@ -49,7 +60,8 @@ export function userResult(u: User) {
 	return {
 		__typename: "User",
 		action_counts: { favorites_count: u.stats?.likes ?? 0 },
-		affiliates_highlighted_label: flagLabel(u),
+		affiliates_highlighted_label: badgeLabel(u),
+		...(u.verified_type === "business" ? { business_account: { affiliates_count: u.affiliates ?? 0 } } : {}),
 		avatar: { image_url: absolute(u.avatar_url) ?? DEFAULT_AVATAR },
 		...(u.banner_url ? { banner: { image_url: absolute(u.banner_url) } } : {}),
 		core: { created_at: apiDate(u.created_at), name: u.name, screen_name: u.screen_name },

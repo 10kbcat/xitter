@@ -5,6 +5,7 @@
 import { sql } from "./db";
 import { isFlag } from "./flags";
 import { newId } from "./ids";
+import { getSetting } from "./settings";
 
 // no 0/O or 1/I/L, so a code read aloud or typed from a screenshot comes out right
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -17,10 +18,10 @@ export function newCode(): string {
 
 export const normalizeCode = (code: string) => code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/(.{4})(?=.)/g, "$1-");
 
-export async function createInvite(opts: { createdBy?: string; maxUses?: number; expiresAt?: Date } = {}): Promise<string> {
+export async function createInvite(opts: { createdBy?: string; maxUses?: number; expiresAt?: Date; orgId?: string } = {}): Promise<string> {
 	const code = newCode();
-	await sql`insert into invites (code, created_by, max_uses, expires_at)
-		values (${code}, ${opts.createdBy ?? null}::bigint, ${opts.maxUses ?? 1}, ${opts.expiresAt ?? null})`;
+	await sql`insert into invites (code, created_by, max_uses, expires_at, org_id)
+		values (${code}, ${opts.createdBy ?? null}::bigint, ${opts.maxUses ?? 1}, ${opts.expiresAt ?? null}, ${opts.orgId ?? null}::bigint)`;
 	return code;
 }
 
@@ -40,16 +41,25 @@ export async function signUp(f: { code: string; screenName: string; name: string
 	if ([...name].length > 50) throw new SignupError("Names are at most 50 characters.");
 	if (f.password.length < 8) throw new SignupError("Passwords are at least 8 characters.");
 	const flag = isFlag(f.flag) ? f.flag : null;
+	const mode = await getSetting("signup_mode");
+	if (mode === "closed") throw new SignupError("Sign-up is closed on this instance.");
 	const hash = await Bun.password.hash(f.password);
 	const code = normalizeCode(f.code);
 	const id = newId();
 	await sql.begin(async (tx) => {
 		const [taken] = await tx`select 1 from users where lower(screen_name) = lower(${screenName})`;
 		if (taken) throw new SignupError("That username is taken.");
-		const [invite] = await tx`update invites set uses = uses + 1
-			where code = ${code} and uses < max_uses and (expires_at is null or expires_at > now()) returning code`;
-		if (!invite) throw new SignupError("That invite code is not valid or has been used up.");
-		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag) values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${code}, ${flag})`;
+		// with open sign-up a code is optional, but one that is given must be good
+		const [invite] =
+			mode === "open" && !code
+				? [undefined]
+				: await tx`update invites set uses = uses + 1
+					where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now()) returning code, org_id`;
+		if (!invite && !(mode === "open" && !code)) throw new SignupError("That invite code is not valid or has been used up.");
+		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag)
+			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag})`;
+		// an organisation's invite makes the new account its affiliate
+		if (invite?.org_id) await tx`insert into affiliations (org_id, user_id) values (${invite.org_id}::bigint, ${id}::bigint)`;
 	});
 	return id;
 }

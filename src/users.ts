@@ -7,8 +7,11 @@ import { sql } from "./db";
 // same account never reaches the client in two different states.
 export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
-	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.flag as a_flag, u.created_at as a_created_at,
+	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.flag as a_flag, u.status as a_status, u.created_at as a_created_at,
 	(select count(*)::int from posts x where x.user_id = u.id) as a_posts,
+	(select json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', o.avatar_url)
+		from affiliations af join users o on o.id = af.org_id where af.user_id = u.id) as a_org,
+	(select count(*)::int from affiliations af where af.org_id = u.id) as a_affiliates,
 	(select count(distinct m.post_id)::int from media m join posts x on x.id = m.post_id where x.user_id = u.id) as a_media_posts,
 	(select count(*)::int from likes x where x.user_id = u.id) as a_likes,
 	(select count(*)::int from posts x where x.user_id = u.id and x.article_id is not null) as a_articles,
@@ -33,6 +36,9 @@ export function toUser(r: any): User {
 		pinned_post_id: r.a_pinned_post_id,
 		verified_type: r.a_verified_type,
 		flag: r.a_flag,
+		status: r.a_status,
+		org: r.a_org ?? null,
+		affiliates: r.a_affiliates,
 		created_at: r.a_created_at,
 		stats: {
 			posts: r.a_posts,
@@ -82,4 +88,11 @@ export async function usersByIds(viewerId: string, ids: string[]): Promise<Map<s
 	if (!ids.length) return new Map();
 	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = any(${sql.array(ids, "INT8")})`;
 	return new Map(rows.map((r: any) => [r.a_id as string, toUser(r)]));
+}
+
+// an organisation's affiliates, newest first
+export async function affiliatesOf(viewerId: string, orgId: string, limit = 200): Promise<User[]> {
+	const rows = await sql`select ${userCols(viewerId)} from affiliations af join users u on u.id = af.user_id
+		where af.org_id = ${orgId}::bigint and u.status <> 'suspended' order by af.created_at desc limit ${limit}`;
+	return rows.map(toUser);
 }

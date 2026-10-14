@@ -13,7 +13,7 @@
 //   filter:follows                   authors the viewer follows
 //   lang:xx, near:, other operators  accepted and ignored
 
-import { blockedFor } from "./blocks";
+import { blockedFor, outOfView } from "./blocks";
 import { sql } from "./db";
 
 type Clause = ReturnType<typeof sql>;
@@ -96,7 +96,7 @@ export async function searchPosts(
 	const cond = postCondition(query, opts.viewerId);
 	if (!cond) return [];
 	const media = opts.media ? sql`and exists (select 1 from media fm where fm.post_id = p.id)` : sql``;
-	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)}`;
+	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)} and p.user_id not in ${outOfView(opts.viewerId)}`;
 	if (opts.top) {
 		const rows = await sql`select p.id from posts p where ${cond} ${media} ${hidden}
 			order by ((select count(*) from likes x where x.post_id = p.id) + 2 * (select count(*) from reposts x where x.post_id = p.id)

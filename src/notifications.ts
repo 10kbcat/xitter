@@ -4,7 +4,7 @@
 // posts themselves). Entries sort by time in milliseconds, which is also what
 // the cursors and the read marker hold.
 
-import { blockedFor, hasMutedWord, mutedFor } from "./blocks";
+import { blockedFor, hasMutedWord, mutedFor, suspendedFor } from "./blocks";
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
@@ -29,7 +29,8 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 	const hi = opts.before ? new Date(opts.before) : new Date(8.64e15);
 	const out: Item[] = [];
 	// nothing from blocked or muted accounts, nor posts holding a muted word
-	const hidden = sql`(select x.id from ${blockedFor(viewerId)} as x(id) union all select x.id from ${mutedFor(viewerId)} as x(id))`;
+	const hidden = sql`(select x.id from ${blockedFor(viewerId)} as x(id) union all select x.id from ${mutedFor(viewerId)} as x(id)
+		union all select x.id from ${suspendedFor(viewerId)} as x(id))`;
 
 	if (!opts.mentionsOnly) {
 		for (const kind of ["like", "repost"] as const) {

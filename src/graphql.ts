@@ -27,7 +27,7 @@ import {
 	setPinned,
 	unrepost,
 } from "./posts";
-import { followList, userById, userByName, usersByIds } from "./users";
+import { affiliatesOf, followList, userById, userByName, usersByIds } from "./users";
 
 type Vars = Record<string, any>;
 type Handler = (viewer: Viewer, vars: Vars) => Promise<unknown> | unknown;
@@ -325,7 +325,9 @@ const handlers: Record<string, Handler> = {
 	UserByScreenName: async (v, vars) => {
 		const user = typeof vars.screen_name === "string" ? await userByName(v.id, vars.screen_name) : undefined;
 		// an empty answer makes the client show "this account doesn't exist"
-		return { data: user ? { user: { result: userResult(user) } } : {} };
+		if (!user) return { data: {} };
+		if (user.status === "suspended" && !v.role) return { data: { user: { result: { __typename: "UserUnavailable", reason: "Suspended", message: "This account is suspended." } } } };
+		return { data: { user: { result: userResult(user) } } };
 	},
 	UserByRestId: async (v, vars) => {
 		const user = await userById(v.id, userId(vars));
@@ -353,6 +355,12 @@ const handlers: Record<string, Handler> = {
 	BlockedAccountsAll: relationList("blocks"),
 	BlockedAccountsImported: relationList("none"),
 	MutedAccounts: relationList("mutes"),
+	// an organisation's Affiliates tab
+	UserBusinessProfileTeamTimeline: async (viewer, vars) => {
+		const users = vars.cursor ? [] : await affiliatesOf(viewer.id, userId(vars));
+		const base = BigInt(newId());
+		return userTimeline(wholeList(users.map((u, i) => userEntry(u, (base - BigInt(i) - 1n).toString())), base));
+	},
 	Following: follows("following"),
 	Followers: follows("followers"),
 	UserMedia: userMedia("any"),

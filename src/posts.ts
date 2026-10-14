@@ -3,7 +3,7 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
-import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor } from "./blocks";
+import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, suspendedFor } from "./blocks";
 import { mediaForPosts } from "./media";
 import { toUser, userCols, usersByIds } from "./users";
 
@@ -110,10 +110,12 @@ export type FeedQuery = {
 // A profile stays readable to the one who blocked it ("View posts"), never to the blocked.
 const originalAuthor = () => sql`(select x.user_id from posts x where x.id = f.post_id)`;
 export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blockedFor(viewerId)} and ${originalAuthor()} not in ${blockedFor(viewerId)}
+	and f.author_id not in ${outOfView(viewerId)} and ${originalAuthor()} not in ${outOfView(viewerId)}
 	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
 	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}`;
 const blockedBy = (viewerId: string) => sql`(select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
-const profileHidden = (viewerId: string) => sql`f.author_id not in ${blockedBy(viewerId)} and ${originalAuthor()} not in ${blockedBy(viewerId)}`;
+const profileHidden = (viewerId: string) => sql`f.author_id not in ${blockedBy(viewerId)} and ${originalAuthor()} not in ${blockedBy(viewerId)}
+	and f.author_id not in ${suspendedFor(viewerId)} and ${originalAuthor()} not in ${suspendedFor(viewerId)}`;
 
 export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	const authorFilter =
@@ -172,7 +174,7 @@ export async function ancestors(viewerId: string, replyToId: string): Promise<Po
 }
 
 export async function replies(viewerId: string, id: string, limit = 100): Promise<PostRow[]> {
-	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.user_id not in ${blockedFor(viewerId)}
+	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
 		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)} order by p.id asc limit ${limit}`;
 	return hydrate(viewerId, rows.map(toRow));
 }
@@ -192,6 +194,8 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 }
 
 export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string } = {}): Promise<string> {
+	const [author] = await sql`select status from users where id = ${userId}::bigint`;
+	if (author?.status === "restricted") throw new PostError("Your account can't post right now.", 326);
 	const id = newId();
 	let conversationId = id;
 	if (opts.replyToId) {

@@ -168,3 +168,36 @@ create table if not exists invites (
 alter table users add column if not exists invite_code text references invites (code) on delete set null;
 -- a pride flag shown next to the name (see flags.ts), picked at sign-up
 alter table users add column if not exists flag text;
+
+-- Admin panel. Staff roles: admin (everything), moderator (users' standing and
+-- posts), support (read, password resets, sign-outs). Every staff action is logged.
+alter table users add column if not exists role text check (role in ('admin', 'moderator', 'support'));
+-- active; restricted (can read, not post); limited (only followers see their
+-- posts); suspended (can't sign in, hidden everywhere)
+alter table users add column if not exists status text not null default 'active'
+	check (status in ('active', 'restricted', 'limited', 'suspended'));
+alter table users add column if not exists last_seen_at timestamptz;
+create table if not exists audit_log (
+	id bigint primary key,
+	actor_id bigint references users (id) on delete set null,
+	action text not null,
+	target text,
+	detail jsonb,
+	created_at timestamptz not null default now()
+);
+create index if not exists audit_log_created_idx on audit_log (created_at desc);
+-- organisations are business accounts; affiliates show the org's badge
+create table if not exists affiliations (
+	org_id bigint not null references users (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (org_id, user_id)
+);
+create unique index if not exists affiliations_user_idx on affiliations (user_id);
+-- instance-wide settings as key/value (sign-up mode, ...)
+create table if not exists settings (
+	key text primary key,
+	value jsonb not null
+);
+alter table invites add column if not exists org_id bigint references users (id) on delete set null;
+alter table invites add column if not exists revoked boolean not null default false;

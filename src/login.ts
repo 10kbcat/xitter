@@ -5,6 +5,7 @@
 import { login, sessionCookies } from "./auth";
 import { FLAGS } from "./flags";
 import { SignupError, signUp } from "./invites";
+import { type SignupMode, getSetting } from "./settings";
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -72,14 +73,24 @@ const flagPicker = (chosen = "") =>
 		.join("")}
 </fieldset>`;
 
-const signUpPage = (message = "", f: SignupFields = {}) =>
+const closedPage = () =>
+	layout(
+		"Sign-up closed",
+		`<form>
+	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
+	<h1>Sign-up is closed</h1>
+	<p class="alt">This instance isn't taking new accounts right now. <a href="/login">Sign in</a></p>
+</form>`,
+	);
+
+const signUpPage = (message = "", f: SignupFields = {}, mode: SignupMode = "invite") =>
 	layout(
 		"Create your account",
 		`<form method="post" action="/signup">
 	<img class="logo" src="/public/logo-dark.png" alt="Xitter">
 	<h1>Create your account</h1>
 	${error(message)}
-	<input name="code" placeholder="Invite code" value="${esc(f.code ?? "")}" autocomplete="off" required ${f.code ? "" : "autofocus"}>
+	<input name="code" placeholder="Invite code${mode === "open" ? " (optional)" : ""}" value="${esc(f.code ?? "")}" autocomplete="off" ${mode === "open" ? "" : "required"} ${f.code ? "" : "autofocus"}>
 	<input name="username" placeholder="Username" autocomplete="username" value="${esc(f.username ?? "")}" required minlength="4" maxlength="15" pattern="@?[A-Za-z0-9_]{4,15}" ${f.code ? "autofocus" : ""}>
 	<p class="hint">4 to 15 letters, digits or underscores. This is your @handle.</p>
 	<input name="name" placeholder="Display name" autocomplete="name" value="${esc(f.name ?? "")}" maxlength="50">
@@ -118,16 +129,20 @@ export async function handleLogin(req: Request): Promise<Response> {
 	return signedIn(session);
 }
 
-export const signupPage = (url: URL) => html(signUpPage("", { code: url.searchParams.get("code") ?? "" }));
+export async function signupPage(url: URL): Promise<Response> {
+	const mode = await getSetting("signup_mode");
+	if (mode === "closed") return html(closedPage());
+	return html(signUpPage("", { code: url.searchParams.get("code") ?? "" }, mode));
+}
 
 export async function handleSignup(req: Request): Promise<Response> {
 	const f = await fields(req);
 	const kept = { code: f.code, username: f.username, name: f.name, flag: f.flag };
-	if ((f.password ?? "") !== (f.confirm ?? "")) return html(signUpPage("The passwords don't match.", kept), 400);
+	if ((f.password ?? "") !== (f.confirm ?? "")) return html(signUpPage("The passwords don't match.", kept, await getSetting("signup_mode")), 400);
 	try {
 		await signUp({ code: f.code ?? "", screenName: f.username ?? "", name: f.name ?? "", password: f.password ?? "", flag: f.flag });
 	} catch (e) {
-		if (e instanceof SignupError) return html(signUpPage(e.message, kept), 400);
+		if (e instanceof SignupError) return html(signUpPage(e.message, kept, await getSetting("signup_mode")), 400);
 		throw e;
 	}
 	const session = await login((f.username ?? "").trim().replace(/^@/, ""), f.password ?? "");

@@ -14,6 +14,14 @@ export type User = {
 	pinned_post_id?: string | null;
 	verified_type: "blue" | "business" | "government" | null;
 	flag?: string | null;
+	// see schema.sql: active, restricted, limited or suspended
+	status?: "active" | "restricted" | "limited" | "suspended";
+	// staff only: admin, moderator or support
+	role?: "admin" | "moderator" | "support" | null;
+	// the organisation this account is an affiliate of
+	org?: { id: string; name: string; screen_name: string; avatar_url: string | null } | null;
+	// for organisations: how many affiliates they have
+	affiliates?: number;
 	created_at: Date;
 	// present when the row was loaded through users.ts
 	stats?: {
@@ -48,13 +56,14 @@ export async function createUser(screenName: string, name: string, password: str
 }
 
 export async function login(screenName: string, password: string): Promise<{ token: string; csrf: string; userId: string } | undefined> {
-	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName})`;
+	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName}) and status <> 'suspended'`;
 	// verify against a dummy hash when the user is unknown so timing does not reveal it
 	const ok = await Bun.password.verify(password, u?.password_hash ?? DUMMY_HASH).catch(() => false);
 	if (!u || !ok) return undefined;
 	const token = randomHex(20);
 	const csrf = randomHex(32);
 	await sql`insert into sessions (token, user_id, csrf) values (${token}, ${u.id}::bigint, ${csrf})`;
+	await sql`update users set last_seen_at = now() where id = ${u.id}::bigint`;
 	return { token, csrf, userId: u.id };
 }
 
@@ -77,9 +86,9 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
 	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.created_at, s.csrf, s.token
+		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.created_at, s.csrf, s.token
 		from sessions s join users u on u.id = s.user_id
-		where s.token = ${token}`;
+		where s.token = ${token} and u.status <> 'suspended'`;
 	return row as Viewer | undefined;
 }
 

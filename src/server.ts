@@ -4,6 +4,8 @@ import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { handleLogin, handleSignup, loginPage, signupPage } from "./login";
+import { adminApi } from "./admin";
+import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { patchFile } from "./patch";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
@@ -134,6 +136,11 @@ const server = Bun.serve({
 		const viewer = await getViewer(req);
 		// uploads stay inside the instance: only signed-in users get them
 		if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });
+		// the admin panel: staff only; everyone else gets the client's not-found page
+		if (p.startsWith("/admin/api/")) return adminApi(req, p.slice("/admin/api/".length), viewer);
+		if (p === "/admin/flags.json" && viewer?.role) return Response.json(flagPickerData(null).flags);
+		if ((p === "/admin" || p === "/admin/") && viewer?.role)
+			return new Response(Bun.file(new URL("./admin.html", import.meta.url)), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 		if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
 		if (API_PREFIX.test(p) || req.method !== "GET") {
 			// the event stream must outlive the default idle timeout
