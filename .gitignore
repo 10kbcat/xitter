@@ -11,4 +11,5 @@ server.log*
 # uploaded files
 media/
 CLAUDE.md
+AGENTS.md
 data/
