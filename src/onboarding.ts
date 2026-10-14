@@ -11,7 +11,8 @@
 //
 // The first screen is the signed-in client's own sign-in dialog.
 
-import { login, sessionCookies } from "./auth";
+import { signInCookies } from "./accounts";
+import { login } from "./auth";
 import { sql } from "./db";
 import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
@@ -223,7 +224,7 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		await sql`delete from signup_sessions where token = ${token}::uuid`;
 		const session = await login(String(f.username ?? s.username), String(f.password ?? ""));
 		const headers = new Headers();
-		for (const c of sessionCookies(session!)) headers.append("set-cookie", c);
+		for (const c of await signInCookies(req, session!)) headers.append("set-cookie", c);
 		headers.append("set-cookie", "xitter_invite=; Path=/; Max-Age=0");
 		return respond(fill(templates.success, { user_id: session!.userId, username: String(f.username ?? s.username) }), false, headers);
 	}
@@ -234,7 +235,7 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		if (!session) return respond(fieldError("password", "Wrong username or password."));
 		const [user] = await sql`select screen_name from users where id = ${session.userId}::bigint`;
 		const headers = new Headers();
-		for (const c of sessionCookies(session)) headers.append("set-cookie", c);
+		for (const c of await signInCookies(req, session)) headers.append("set-cookie", c);
 		return respond(fill(templates.success, { user_id: session.userId, username: user.screen_name }), false, headers);
 	}
 	return undefined;

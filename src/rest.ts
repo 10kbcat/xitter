@@ -1,6 +1,7 @@
 // The few REST endpoints the client still uses next to GraphQL.
 
-import { type Viewer, clearedCookies, logout } from "./auth";
+import { accountsRoute } from "./accounts";
+import type { Viewer } from "./auth";
 import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKeyword } from "./blocks";
 import { sql } from "./db";
 import { isFlag } from "./flags";
@@ -70,6 +71,8 @@ const EMPTY_LIST = { users: [], next_cursor: 0, next_cursor_str: "0", previous_c
 
 // `path` has no /i/api prefix
 export async function restRoute(method: string, path: string, viewer: Viewer, req: Request): Promise<Response | undefined> {
+	const accounts = await accountsRoute(method, path, viewer, req);
+	if (accounts) return accounts;
 	const profile = await profileRoute(path, viewer, req);
 	if (profile) return profile;
 	const friendship = /^\/1\.1\/friendships\/(create|destroy)\.json$/.exec(path);
@@ -151,12 +154,6 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		});
 	}
 	if (path === "/1.1/account/settings.json") return Response.json(settingsFor(viewer) ?? {});
-	if (path === "/1.1/account/logout.json" && method === "POST") {
-		await logout(viewer.token);
-		const headers = new Headers({ "content-type": "application/json" });
-		for (const c of clearedCookies()) headers.append("set-cookie", c);
-		return new Response(JSON.stringify({ status: "ok" }), { headers });
-	}
 	if (path === "/1.1/hashflags.json") return Response.json([]);
 	if (path === "/fleets/v1/fleetline") return Response.json({ threads: [], hydrated_threads: [], refresh_delay_secs: 300 });
 	if (path === "/fleets/v1/avatar_content") return Response.json({ users: {}, refresh_delay_secs: 0 });

@@ -179,12 +179,14 @@ const inline = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 let runtimePatched: string | undefined;
 
 // With no user the client boots signed out, for the sign-in dialog.
-export function shell(user: User | null): string | undefined {
+// `multi`: other accounts are signed in too (auth_multi), so the account menu
+// asks for them.
+export function shell(user: User | null, multi = false): string | undefined {
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
 	runtimePatched ??= patchText(runtime);
-	const meta = { ...build.meta, sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, serverDate: Date.now() };
+	const meta = { ...build.meta, sha: build.sha, isLoggedIn: !!user, userId: user?.id ?? null, hasMultiAccountCookie: !!user && multi, serverDate: Date.now() };
 	const scripts = build.scripts
 		.map((p) => `<script defer charset="utf-8" crossorigin="anonymous" src="${PUBLIC_ORIGIN}/abs${p}"></script>`)
 		.join("");

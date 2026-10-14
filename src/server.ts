@@ -1,4 +1,4 @@
-import { type Viewer, getViewer } from "./auth";
+import { type Viewer, getViewer, parseCookies } from "./auth";
 import { getClientFile } from "./client-cache";
 import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
@@ -174,7 +174,7 @@ const server = Bun.serve({
 
 		// signed out: X's own home page with its sign-in form, and the dialog
 		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
-		const page = shell(viewer ?? null);
+		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi);
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP } });
 	},

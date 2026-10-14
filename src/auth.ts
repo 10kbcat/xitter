@@ -42,7 +42,7 @@ export type User = {
 
 export type Viewer = User & { csrf: string; token: string };
 
-const SECURE = PUBLIC_ORIGIN.startsWith("https:") ? "; Secure" : "";
+export const SECURE = PUBLIC_ORIGIN.startsWith("https:") ? "; Secure" : "";
 const YEAR = 60 * 60 * 24 * 365;
 const randomHex = (bytes: number) => Buffer.from(crypto.getRandomValues(new Uint8Array(bytes))).toString("hex");
 

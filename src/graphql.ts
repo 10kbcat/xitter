@@ -369,6 +369,12 @@ const handlers: Record<string, Handler> = {
 		const users = await Promise.all(ids.filter(isId).map((id) => userById(v.id, id)));
 		return { data: { users: users.filter((u) => u !== undefined).map((u) => ({ result: userResult(u) })) } };
 	},
+	// the account menu's badges and avatars for the other signed-in accounts
+	UsersVerifiedAvatars: async (v, vars) => {
+		const ids: unknown[] = Array.isArray(vars.userIds) ? vars.userIds.slice(0, 10) : [];
+		const users = await Promise.all(ids.filter(isId).map((id) => userById(v.id, id)));
+		return { data: { usersResults: users.filter((u) => u !== undefined).map((u) => ({ result: userResult(u) })) } };
+	},
 	UserTweets: profileFeed(false, "both"),
 	UserRepostsTimeline: profileFeed(false, "reposts"),
 	PinTweet: async (v, vars) => {
