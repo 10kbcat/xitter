@@ -3,7 +3,7 @@ import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { blockedFor, isBlockedEitherWay, outOfView } from "./blocks";
 import { getPost, postsByIds, PostError } from "./posts";
-import { tweetEntry, tweetResult } from "./model";
+import { noteText, tweetEntry, tweetResult } from "./model";
 
 function id(value: unknown): string {
 	if (!isId(value)) throw new PostError("Invalid note or post id.", 144);
@@ -61,19 +61,11 @@ async function notesMany(v: Viewer, postIds: string[], noteIds?: string[]) {
 	return result;
 }
 
-function richText(text: string) {
-	const entities = [...text.matchAll(/https?:\/\/[^\s<>"']+/g)].map(m => {
-		const url = m[0].replace(/[.,;!?]+$/, "");
-		return { fromIndex: m.index!, toIndex: m.index! + url.length, ref: { type: "TimelineUrl", url, expandedUrl: url, urlType: "ExternalUrl" } };
-	});
-	return { text, entities };
-}
-
 const entity = (n: any, post?: any) => ({
 	__typename: "BirdwatchNote", rest_id: n.id, tweet_id: n.post_id, alias: n.alias,
 	created_at: new Date(n.created_at).getTime(), status: n.status,
 	rating_status: n.status === "Helpful" ? "CurrentlyRatedHelpful" : n.status === "NotHelpful" ? "CurrentlyRatedNotHelpful" : "NeedsMoreRatings",
-	data_v1: { ...n.data_v1, summary: richText(n.text), classification: n.classification === "Misleading" ? "MisinformedOrPotentiallyMisleading" : "NotMisleading" },
+	data_v1: { ...n.data_v1, summary: noteText(n.text), classification: n.classification === "Misleading" ? "MisinformedOrPotentiallyMisleading" : "NotMisleading" },
 	rating: n.viewer_rating ? { __typename: "BirdwatchNoteRating", data_v2: { ...n.viewer_data, helpfulness_level: n.viewer_rating } } : null,
 	birdwatch_profile: { alias: n.alias, notes_count: { awaiting_more_ratings: 0, currently_rated_helpful: 0, currently_rated_not_helpful: 0, last_updated_at: Date.now() }, ratings_count: { last_updated_at: Date.now(), successful: {}, unsuccessful: {} } },
 	above_pcrh_threshold: false, appeal_status: "NotAppealed", can_appeal: false, decided_by: "XitterLocalRatings", fully_visible_model: true,
@@ -110,7 +102,7 @@ export const noteHandlers = {
 	XitterPostContext: async (v: Viewer, vars: any) => {
 		const ids = [...new Set((Array.isArray(vars.ids) ? vars.ids : []).filter(isId))].slice(0, 20) as string[];
 		if (!ids.length) return { data: { xitter_post_context: [] } };
-		const posts = await sql`select id::text, source from posts where id = any(${sql.array(ids, "INT8")}) and user_id not in ${blockedFor(v.id)} and user_id not in ${outOfView(v.id)}`;
+		const posts = await sql`select id::text, source from posts where id = any(${sql.array(ids, "INT8")}) and (not hidden or exists (select 1 from users staff where staff.id = ${v.id}::bigint and staff.role is not null)) and user_id not in ${blockedFor(v.id)} and user_id not in ${outOfView(v.id)}`;
 		const visibleIds = posts.map((p: any) => p.id);
 		const notes = await notesMany(v, visibleIds);
 		const requests = visibleIds.length ? await sql`select post_id::text, count(*)::int as count, bool_or(user_id = ${v.id}::bigint) as own from community_note_requests where post_id = any(${sql.array(visibleIds, "INT8")}) group by post_id` : [];

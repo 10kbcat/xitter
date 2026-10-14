@@ -4,7 +4,8 @@
 import { ChatError, chatHandlers } from "./chat";
 import { noteHandlers } from "./notes";
 import { sql } from "./db";
-import { blockedIds } from "./blocks";
+import { blockedIds, blockedFor, outOfView } from "./blocks";
+import { settings } from "./settings";
 import { rankedFeed } from "./ranking";
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
@@ -64,6 +65,17 @@ const homeResponse = (entries: unknown[]) => ({
 	},
 });
 
+// the post an admin pinned for everyone, on top of the first page
+async function globalPin(viewer: Viewer, entries: unknown[], first: boolean) {
+	const id = settings().operations.global_pin;
+	if (!first || !id) return;
+	const [visible] = await sql`select id from posts where id = ${id}::bigint and not hidden and user_id not in ${blockedFor(viewer.id)} and user_id not in ${outOfView(viewer.id)}`;
+	const post = visible && (await getPost(viewer.id, id));
+	if (!post) return;
+	for (let i = entries.length - 1; i >= 0; i--) if ((entries[i] as any).entryId === `tweet-${id}`) entries.splice(i, 1);
+	entries.unshift(pinnedEntry(post, newId()));
+}
+
 // "For you" is ranked (ranking.ts) and takes in everyone; "Following" is the
 // viewer and the accounts they follow, newest first.
 // A ranked page's bottom cursor is "r<offset>.<asOf>", where asOf is the item id
@@ -82,6 +94,7 @@ const forYou: Handler = async (viewer, vars) => {
 	const entries: unknown[] = page.items.map((item, i) => feedEntry(item, (base - BigInt(offset + i) - 1n).toString()));
 	if (!ranked) entries.unshift(cursorEntry("Top", `t${asOf}`, inc(asOf)));
 	if (page.next !== undefined) entries.push(cursorEntry("Bottom", `r${page.next}.${asOf}`, (base - BigInt(page.next) - 1n).toString()));
+	await globalPin(viewer,entries,!cursor);
 	return homeResponse(entries);
 };
 
@@ -104,6 +117,7 @@ const home =
 	// a poll for newer posts only moves the top cursor
 	entries.unshift(cursorEntry("Top", `t${newest}`, inc(newest)));
 	if (!newer) entries.push(cursorEntry("Bottom", `b${oldest}`, dec(oldest)));
+	await globalPin(viewer,entries,!vars.cursor);
 
 	return {
 		data: {
@@ -665,7 +679,18 @@ export async function runOperation(name: string, viewer: Viewer, vars: Vars): Pr
 	try {
 		return Response.json(await handlers[name](viewer, vars));
 	} catch (e) {
-		if (e instanceof PostError || e instanceof articles.ArticleError || e instanceof ChatError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
+		// the chat app reads these as they are
+		if (e instanceof ChatError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
+		// the main client takes the code from extensions and shows the message
+		// after its first ": ", as in X's "_Missing: No status found with that ID."
+		if (e instanceof PostError || e instanceof articles.ArticleError) {
+			const missing = e.code === 144;
+			return Response.json({
+				errors: [{ message: `${missing ? "_Missing" : "Error"}: ${e.message}`, code: e.code, kind: missing ? "NotFound" : "Validation",
+					extensions: { name: "GenericError", source: "Server", code: e.code, kind: missing ? "NotFound" : "Validation" } }],
+				data: {},
+			});
+		}
 		throw e;
 	}
 }

@@ -4,9 +4,9 @@
 import { login, sessionCookies } from "./auth";
 import { settings } from "./settings";
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-const layout = (title: string, body: string) => `<!doctype html>
+export const layout = (title: string, body: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -21,6 +21,20 @@ const layout = (title: string, body: string) => `<!doctype html>
 	.alt { margin: 8px 0 0; color: #71767b; }
 	.rules { margin: 0 0 4px; white-space: pre-wrap; line-height: 1.45; }
 	a { color: #1d9bf0; text-decoration: none; }
+	label { color: #71767b; font-size: 13px; }
+	input, textarea { padding: 12px; border: 1px solid #333639; border-radius: 4px; background: #000; color: inherit; font: inherit; }
+	input:focus, textarea:focus { outline: 2px solid #1d9bf0; border-color: transparent; }
+	textarea { min-height: 120px; resize: vertical; }
+	button { padding: 12px 20px; border: 0; border-radius: 999px; background: #eff3f4; color: #0f1419; font: inherit; font-weight: 700; cursor: pointer; }
+	button.ghost { justify-self: start; padding: 6px 16px; background: none; border: 1px solid #536471; color: #eff3f4; }
+	button:disabled { opacity: .5; cursor: default; }
+	.item { border: 1px solid #2f3336; border-radius: 16px; padding: 16px; display: grid; gap: 8px; }
+	.item p { margin: 0; white-space: pre-wrap; line-height: 1.45; }
+	.item .meta { color: #71767b; font-size: 13px; }
+	.item.strike { border-color: rgba(244,33,46,.5); }
+	.item.warning { border-color: rgba(255,212,0,.4); }
+	.error { color: #f4212e; margin: 0; }
+	[hidden] { display: none !important; }
 	.source { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; color: #71767b; font-size: 13px; }
 </style>
 </head>
@@ -30,7 +44,7 @@ ${body}
 </body>
 </html>`;
 
-const html = (body: string, status = 200) =>
+export const html = (body: string, status = 200) =>
 	new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
 function signedIn(session: { token: string; csrf: string; userId: string }): Response {
@@ -54,6 +68,21 @@ export async function handleLogin(req: Request): Promise<Response> {
 	const session = username && password ? await login(username, password) : undefined;
 	if (!session) return new Response("Wrong username or password.", { status: 401 });
 	return signedIn(session);
+}
+
+// shown to signed-in accounts while an admin has maintenance mode on
+export function maintenancePage(): Response {
+	return html(
+		layout(
+			"Maintenance",
+			`<form>
+	<img class="logo" src="/public/logo-dark.png" alt="${esc(settings().instance_name)}">
+	<h1>Back soon</h1>
+	<p class="rules">${esc(settings().operations.message)}</p>
+</form>`,
+		),
+		503,
+	);
 }
 
 // the instance's rules, as written in the admin panel: blank lines split paragraphs

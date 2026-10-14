@@ -15,11 +15,12 @@ import { REASONS } from "./reports";
 import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 import { createPlatform } from "./platforms";
+import { toolActions } from "./admin-tools";
 
 type Role = "admin" | "moderator" | "support";
 const RANK: Record<Role, number> = { support: 1, moderator: 2, admin: 3 };
 
-class AdminError extends Error {
+export class AdminError extends Error {
 	constructor(
 		message: string,
 		public status = 400,
@@ -29,16 +30,16 @@ class AdminError extends Error {
 }
 
 type Body = Record<string, any>;
-type Action = { role: Role; run: (actor: Viewer, b: Body) => Promise<unknown> };
+export type Action = { role: Role; run: (actor: Viewer, b: Body) => Promise<unknown> };
 
-async function audit(actor: Viewer, action: string, target: string | null, detail: unknown = null) {
+export async function audit(actor: Viewer, action: string, target: string | null, detail: unknown = null) {
 	await sql`insert into audit_log (id, actor_id, action, target, detail)
 		values (${newId()}::bigint, ${actor.id}::bigint, ${action}, ${target}, ${detail === null ? null : JSON.stringify(detail)}::text::jsonb)`;
 }
 
-const idOf = (v: unknown, what = "id") => {
+export const idOf = (v: unknown, what = "id") => {
 	if (typeof v === "number") v = String(v);
-	if (!isId(v)) throw new AdminError(`Missing or bad ${what}.`);
+	if (!isId(v) || BigInt(v) > 9223372036854775807n) throw new AdminError(`Missing or bad ${what}.`);
 	return v as string;
 };
 
@@ -49,7 +50,7 @@ async function userRow(id: string) {
 }
 
 // nobody acts on an account ranked at or above their own, except on themselves
-async function guard(actor: Viewer, targetId: string) {
+export async function guard(actor: Viewer, targetId: string) {
 	const u = await userRow(targetId);
 	if (targetId !== actor.id && u.role && RANK[u.role as Role] >= RANK[actor.role as Role])
 		throw new AdminError("That account is staff at your level or above.", 403);
@@ -138,7 +139,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (_a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer,
+			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer, u.custom_badge_id::text, u.org_badge_id::text, u.status_until,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
 				from users u where u.id = ${id}::bigint`;
@@ -219,7 +220,7 @@ const ACTIONS: Record<string, Action> = {
 			if (!["active", "restricted", "limited", "suspended"].includes(status)) throw new AdminError("Unknown standing.");
 			if (id === a.id) throw new AdminError("You can't change your own standing.");
 			await guard(a, id);
-			await sql`update users set status = ${status} where id = ${id}::bigint`;
+			await sql`update users set status = ${status}, status_until = null, status_restore = null where id = ${id}::bigint`;
 			if (status === "suspended") await sql`delete from sessions where user_id = ${id}::bigint`;
 			await audit(a, "set_status", id, { status, reason: String(b.reason ?? "").slice(0, 500) || undefined });
 			return {};
@@ -345,7 +346,7 @@ const ACTIONS: Record<string, Action> = {
 		run: async (_a, b) => {
 			const q = String(b.q ?? "").trim();
 			const author = String(b.author ?? "").trim().replace(/^@/, "");
-			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.reply_to_id::text as reply_to_id, u.screen_name, u.name,
+			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.hidden, p.sensitive, p.reply_to_id::text as reply_to_id, u.screen_name, u.name,
 				(select count(*)::int from likes l where l.post_id = p.id) as likes,
 				(select count(*)::int from media m where m.post_id = p.id) as media
 				from posts p join users u on u.id = p.user_id
@@ -536,6 +537,8 @@ const ACTIONS: Record<string, Action> = {
 		}),
 	},
 };
+
+Object.assign(ACTIONS, toolActions);
 
 export async function adminApi(req: Request, action: string, viewer: Viewer | undefined): Promise<Response> {
 	const fail = (message: string, status: number) => Response.json({ error: message }, { status });

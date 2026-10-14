@@ -1,6 +1,7 @@
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { newId } from "./ids";
+import { expireSanctions } from "./moderation";
 
 export type User = {
 	id: string;
@@ -14,6 +15,7 @@ export type User = {
 	pinned_post_id?: string | null;
 	verified_type: "blue" | "business" | "government" | null;
 	flag?: string | null;
+	customBadge?: { id: string; name: string } | null;
 	// see schema.sql: active, restricted, limited or suspended
 	status?: "active" | "restricted" | "limited" | "suspended";
 	// staff only: admin, moderator or support
@@ -56,6 +58,7 @@ export async function createUser(screenName: string, name: string, password: str
 }
 
 export async function login(screenName: string, password: string): Promise<{ token: string; csrf: string; userId: string } | undefined> {
+	await expireSanctions();
 	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName}) and status <> 'suspended'`;
 	// verify against a dummy hash when the user is unknown so timing does not reveal it
 	const ok = await Bun.password.verify(password, u?.password_hash ?? DUMMY_HASH).catch(() => false);
@@ -86,9 +89,14 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
 	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.created_at, s.csrf, s.token
+		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.created_at, s.csrf, s.token,
+		(select json_build_object('id',b.id::text,'name',b.name) from custom_badges b where b.id=u.custom_badge_id) as "customBadge"
 		from sessions s join users u on u.id = s.user_id
 		where s.token = ${token} and u.status <> 'suspended'`;
+	// for the admin panel's session list; written at most once a minute
+	if (row)
+		await sql`update sessions set last_seen_at = now(), user_agent = ${(req.headers.get("user-agent") ?? "").slice(0, 500)}
+			where token = ${token} and (last_seen_at < now() - interval '1 minute' or user_agent is null)`;
 	return row as Viewer | undefined;
 }
 

@@ -9,6 +9,7 @@ import { isId, newId } from "./ids";
 import { type MediaRow, mediaUrl, posterUrl } from "./media";
 import { userResult } from "./model";
 import { userById } from "./users";
+import { hasBlockedPhrase } from "./settings";
 
 export const MAX_TITLE = 100;
 const MAX_CONTENT_BYTES = 512 * 1024;
@@ -35,9 +36,10 @@ type ArticleRow = {
 	modified_at: Date;
 	first_published_at: Date | null;
 	post_id: string | null;
+	hidden: boolean;
 };
 
-const columns = sql`a.id, a.user_id, a.title, a.content_state, a.plain_text, a.cover_media_id, a.state, a.created_at, a.modified_at, a.first_published_at,
+const columns = sql`a.id, a.user_id, a.title, a.content_state, a.plain_text, a.cover_media_id, a.state, a.hidden, a.created_at, a.modified_at, a.first_published_at,
 	(select p.id from posts p where p.article_id = a.id order by p.id desc limit 1) as post_id`;
 
 const secs = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : undefined);
@@ -172,6 +174,8 @@ async function load(id: string): Promise<ArticleRow | undefined> {
 export async function getArticle(viewerId: string, id: string, withContent = true): Promise<ArticleEntity | undefined> {
 	const row = await load(id);
 	if (!row || (row.state !== "Published" && String(row.user_id) !== viewerId)) return undefined;
+	// hidden by staff: only its author and staff see it
+	if (row.hidden && String(row.user_id) !== viewerId && !(await sql`select 1 from users where id = ${viewerId}::bigint and role is not null`).length) return undefined;
 	return entity(row, await userById(viewerId, String(row.user_id)), withContent);
 }
 
@@ -222,6 +226,8 @@ export async function publish(viewerId: string, id: string, tweetText: unknown, 
 	const row = await own(viewerId, id);
 	if (!row.title) throw new ArticleError("Give the article a title before publishing.");
 	if (!row.plain_text.trim()) throw new ArticleError("The article is empty.");
+	if (row.hidden) throw new ArticleError("Staff have hidden this article.");
+	if (hasBlockedPhrase(row.plain_text)) throw new ArticleError("The article contains a phrase this instance doesn't allow.");
 	if (row.state !== "Published") {
 		await createPost(typeof tweetText === "string" ? tweetText : "", id);
 		await sql`update articles set state = 'Published', first_published_at = coalesce(first_published_at, now()) where id = ${id}::bigint`;
@@ -248,7 +254,7 @@ export async function slice(viewerId: string, userId: string, lifecycle: string,
 	if (userId !== viewerId && lifecycle !== "Published") return { items: [], next: undefined };
 	const before = typeof cursor === "string" && isId(cursor) ? cursor : undefined;
 	const rows = await sql`select ${columns} from articles a where a.user_id = ${userId}::bigint and a.state = ${lifecycle === "Published" ? "Published" : "Draft"}
-		${before ? sql`and a.id < ${before}::bigint` : sql``} order by a.id desc limit ${count}`;
+		and (not a.hidden or a.user_id = ${viewerId}::bigint or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null)) ${before ? sql`and a.id < ${before}::bigint` : sql``} order by a.id desc limit ${count}`;
 	const author = await userById(viewerId, userId);
 	// in full: the editor opens an article from this list without fetching it again
 	const items = await Promise.all(rows.map((r: any) => entity(r as ArticleRow, author, true)));
@@ -259,7 +265,7 @@ export async function slice(viewerId: string, userId: string, lifecycle: string,
 export async function articlesByIds(viewerId: string, ids: string[]): Promise<Map<string, ArticleEntity>> {
 	const out = new Map<string, ArticleEntity>();
 	if (!ids.length) return out;
-	const rows = await sql`select ${columns} from articles a where a.id = any(${sql.array(ids, "INT8")}) and a.state = 'Published'`;
+	const rows = await sql`select ${columns} from articles a where a.id = any(${sql.array(ids, "INT8")}) and a.state = 'Published' and (not a.hidden or a.user_id = ${viewerId}::bigint or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))`;
 	for (const r of rows) out.set(String(r.id), await entity(r as ArticleRow, undefined, true));
 	return out;
 }

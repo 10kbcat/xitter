@@ -31,6 +31,49 @@ create table if not exists posts (
 create index if not exists posts_reply_to_idx on posts (reply_to_id);
 create index if not exists posts_user_idx on posts (user_id, id desc);
 
+create table if not exists custom_badges (
+	id bigint primary key, name text not null check(char_length(name) between 1 and 60),
+	image bytea not null, mime text not null, created_at timestamptz not null default now()
+);
+alter table users add column if not exists custom_badge_id bigint references custom_badges(id) on delete set null;
+create index if not exists users_custom_badge_idx on users(custom_badge_id);
+alter table users add column if not exists status_until timestamptz;
+alter table users add column if not exists status_restore text;
+alter table posts add column if not exists hidden boolean not null default false;
+alter table posts add column if not exists sensitive boolean not null default false;
+alter table sessions add column if not exists id uuid not null default gen_random_uuid();
+create unique index if not exists sessions_id_key on sessions(id);
+alter table sessions add column if not exists last_seen_at timestamptz not null default now();
+alter table sessions add column if not exists user_agent text;
+
+create table if not exists staff_notes (
+	id bigint primary key, user_id bigint not null references users(id) on delete cascade,
+	actor_id bigint references users(id) on delete set null, body text not null check(char_length(body) between 1 and 2000),
+	created_at timestamptz not null default now()
+);
+create index if not exists staff_notes_user_idx on staff_notes(user_id,id desc);
+create index if not exists staff_notes_actor_idx on staff_notes(actor_id);
+create table if not exists staff_messages (
+	id bigint primary key, user_id bigint not null references users(id) on delete cascade,
+	actor_id bigint references users(id) on delete set null,
+	kind text not null check(kind in ('message','warning','strike')),
+	body text not null check(char_length(body) between 1 and 2000),
+	created_at timestamptz not null default now(), read_at timestamptz, revoked_at timestamptz
+);
+create index if not exists staff_messages_user_idx on staff_messages(user_id,id desc);
+create index if not exists staff_messages_actor_idx on staff_messages(actor_id);
+create table if not exists moderation_appeals (
+	id bigint primary key, user_id bigint not null references users(id) on delete cascade,
+	message_id bigint references staff_messages(id) on delete set null, body text not null,
+	status text not null default 'open' check(status in ('open','accepted','rejected')),
+	staff_reply text, reviewer_id bigint references users(id) on delete set null,
+	created_at timestamptz not null default now(), resolved_at timestamptz
+);
+create index if not exists moderation_appeals_user_idx on moderation_appeals(user_id,id desc);
+create index if not exists moderation_appeals_message_idx on moderation_appeals(message_id);
+create index if not exists moderation_appeals_reviewer_idx on moderation_appeals(reviewer_id);
+create unique index if not exists moderation_appeals_open_user_idx on moderation_appeals(user_id) where status='open';
+
 alter table posts add column if not exists source text not null default 'Xitter for Web';
 alter table users add column if not exists notes_writer boolean not null default false;
 alter table users add column if not exists notes_alias text not null default ('Contributor-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12));
@@ -351,3 +394,7 @@ create index if not exists chat_uploads_uploader_idx on chat_uploads (uploader_i
 alter table chat_events add column if not exists audience_id bigint references users(id) on delete cascade;
 create index if not exists chat_events_audience_idx on chat_events (audience_id);
 alter table chat_events add column if not exists deleted boolean not null default false;
+alter table articles add column if not exists hidden boolean not null default false;
+alter table users add column if not exists org_badge_id bigint references custom_badges(id) on delete set null;
+create index if not exists users_org_badge_idx on users(org_badge_id);
+create index if not exists users_status_until_idx on users(status_until) where status_until is not null;

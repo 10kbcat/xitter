@@ -15,6 +15,7 @@
 
 import { blockedFor, outOfView } from "./blocks";
 import { sql } from "./db";
+import { settings } from "./settings";
 
 type Clause = ReturnType<typeof sql>;
 
@@ -142,5 +143,9 @@ export async function trendingHashtags(days: number, limit: number): Promise<{ t
 			select p.id, lower((regexp_matches(p.text, ${HASHTAG_RE}, 'g'))[1]) as tag from posts p
 			where p.created_at > now() - make_interval(days => ${days})) t
 		group by tag order by n desc, tag limit ${limit}`;
-	return rows.map((r: any) => ({ tag: `#${r.tag}`, posts: r.n }));
+	// an admin can hide hashtags and put others first (Settings, Trends)
+	const { hidden_trends: hidden, promoted_trends: promoted } = settings().operations;
+	const found = rows.filter((r: any) => !hidden.includes(r.tag)).map((r: any) => ({ tag: `#${r.tag}`, posts: r.n }));
+	const first = promoted.filter((tag) => !hidden.includes(tag)).map((tag) => found.find((t) => t.tag === `#${tag}`) ?? { tag: `#${tag}`, posts: 0 });
+	return [...first, ...found.filter((t) => !promoted.includes(t.tag.slice(1)))].slice(0, limit);
 }

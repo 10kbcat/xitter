@@ -1,6 +1,7 @@
 import type { User } from "./auth";
 import { sql } from "./db";
 import { newId } from "./ids";
+import { hasBlockedPhrase } from "./settings";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
 import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, suspendedFor } from "./blocks";
@@ -14,7 +15,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -26,7 +27,7 @@ const select = (viewerId: string) => sql`
 		exists (select 1 from reposts x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as reposted,
 		exists (select 1 from bookmarks x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as bookmarked
 	from posts p
-	join users u on u.id = p.user_id
+	join users u on u.id = p.user_id and (not p.hidden or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))
 	left join posts rp on rp.id = p.reply_to_id
 	left join users ru on ru.id = rp.user_id`;
 
@@ -35,6 +36,7 @@ function toRow(r: any): PostRow {
 		id: r.id,
 		text: r.text,
 		source: r.source,
+		sensitive: r.sensitive,
 		reply_to_id: r.reply_to_id,
 		conversation_id: r.conversation_id,
 		quote_id: r.quote_id,
@@ -200,6 +202,7 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 }
 
 export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string } = {}): Promise<string> {
+	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	const [author] = await sql`select status from users where id = ${userId}::bigint`;
 	if (author?.status === "restricted") throw new PostError("Your account can't post right now.", 326);
 	const id = newId();

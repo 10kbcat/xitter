@@ -5,7 +5,7 @@ import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { settings } from "./settings";
 import { TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
-import { POST_CONTEXT_CSS, POST_CONTEXT_SCRIPT } from "./post-context";
+import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
@@ -202,8 +202,7 @@ export function shell(user: User | null, multi = false): string | undefined {
 <link rel="icon" type="image/png" href="/public/favicon.png" /><link rel="apple-touch-icon" href="/public/icon-light.png" />
 <style>html,body{height:100%}body{margin:0;background-color:#000;overflow-y:scroll}${LOGO_CSS}
 ${hideCss()}
-${FLAG_PICKER_CSS}
-${POST_CONTEXT_CSS}</style>
+${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};

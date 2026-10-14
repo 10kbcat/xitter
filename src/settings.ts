@@ -53,6 +53,15 @@ const DEFAULTS = {
 	rules: "",
 	// AGPL-3.0: people using an instance can get its source here
 	source_url: process.env.SOURCE_URL ?? "https://github.com/Xittered/xitter",
+	// admin panel, Settings: maintenance mode, blocked phrases, trend controls, pinned post
+	operations: {
+		maintenance: false,
+		message: "The instance is undergoing maintenance.",
+		blocked_phrases: [] as string[],
+		hidden_trends: [] as string[],
+		promoted_trends: [] as string[],
+		global_pin: null as string | null,
+	},
 };
 export type Settings = typeof DEFAULTS;
 type Key = keyof Settings;
@@ -72,6 +81,11 @@ export async function loadSettings() {
 
 export const settings = (): Settings => current;
 export const feature = (f: Feature) => current.features[f] !== false;
+// the admin's blocked phrases, matched in any case
+export const hasBlockedPhrase = (text: string) => {
+	const lower = text.toLowerCase();
+	return current.operations.blocked_phrases.some((phrase) => lower.includes(phrase));
+};
 
 export async function setSetting<K extends Key>(key: K, value: Settings[K]) {
 	await sql`insert into settings (key, value) values (${key}, ${JSON.stringify(value)}::text::jsonb)

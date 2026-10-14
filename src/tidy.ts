@@ -87,6 +87,13 @@ export const TIDY_SCRIPT = `(function(){
 		a.setAttribute("data-xitter-source","");
 		c.appendChild(a);
 	}
+	// the client opens links outside x.com in a new tab; our own pages outside
+	// the app (messages from staff) open in this one
+	var open=window.open;
+	window.open=function(u){
+		try{var a=new URL(u,location.href);if(a.origin===location.origin&&a.pathname.indexOf("/account/")===0){location.assign(a.href);return null}}catch(e){}
+		return open.apply(window,arguments);
+	};
 	// the code boxes cut a paste to their length before dropping what isn't a
 	// digit, so "1234-5678" would lose its last digit: paste only the digits
 	document.addEventListener("paste",function(e){

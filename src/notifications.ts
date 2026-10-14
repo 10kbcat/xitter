@@ -11,6 +11,7 @@ import { sql } from "./db";
 import { tweetResult, userResult } from "./model";
 import type { PostRow } from "./model";
 import { postsByIds } from "./posts";
+import { settings } from "./settings";
 import { usersByIds } from "./users";
 
 // how many names a grouped notification lists before "and N others"
@@ -18,7 +19,9 @@ const SHOWN_USERS = 3;
 
 type Group = { kind: "like" | "repost" | "follow"; key: string; at: number; users: string[]; total: number; postId?: string };
 type Mention = { kind: "post"; postId: string; at: number; reason: "reply" | "quote" | "mention" };
-type Item = Group | Mention;
+// a message, warning or strike from staff, or the decision on an appeal
+type Staff = { kind: "staff"; key: string; at: number; text: string };
+type Item = Group | Mention | Staff;
 
 const ms = (d: Date) => d.getTime();
 
@@ -54,6 +57,18 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			having max(f.created_at) >= ${lo} and max(f.created_at) < ${hi}
 			order by at desc limit ${opts.limit}`;
 		for (const r of follows) out.push({ kind: "follow", key: `follow-${ms(r.day)}`, at: ms(r.at), users: r.users.map(String), total: r.total });
+
+		const team = `the ${settings().instance_name} team`;
+		const messages = await sql`select id, kind, body, created_at as at from staff_messages
+			where user_id = ${viewerId}::bigint and revoked_at is null and created_at >= ${lo} and created_at < ${hi} order by created_at desc limit ${opts.limit}`;
+		for (const r of messages) {
+			const what = r.kind === "strike" ? "A strike" : r.kind === "warning" ? "A warning" : "A message";
+			out.push({ kind: "staff", key: `staff-${r.id}`, at: ms(r.at), text: `${what} from ${team}: ${clip(r.body)}` });
+		}
+		const appeals = await sql`select id, status, resolved_at as at from moderation_appeals
+			where user_id = ${viewerId}::bigint and resolved_at >= ${lo} and resolved_at < ${hi} order by resolved_at desc limit ${opts.limit}`;
+		for (const r of appeals)
+			out.push({ kind: "staff", key: `appeal-${r.id}`, at: ms(r.at), text: `${team[0].toUpperCase()}${team.slice(1)} ${r.status === "accepted" ? "accepted" : "turned down"} your appeal.` });
 	}
 
 	const posts = await sql`
@@ -115,7 +130,9 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 	const from = g.users.map((id) => users.get(id)).filter((u): u is User => !!u);
 	const post = g.postId ? posts.get(g.postId) : undefined;
 	if (!from.length || (g.postId && !post)) return undefined;
-	const url = post ? `${PUBLIC_ORIGIN}/${viewer.screen_name}/status/${post.id}` : `${PUBLIC_ORIGIN}/${from[0].screen_name}`;
+	// the client opens only x.com and twitter.com addresses inside the app (as
+	// their path); any other address, ours included, opens in a new tab
+	const url = post ? `${IN_APP}/${viewer.screen_name}/status/${post.id}` : `${IN_APP}/${from[0].screen_name}`;
 	return {
 		entryId: `notification-${g.key}`,
 		sortIndex: String(g.at),
@@ -128,7 +145,6 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 				id: g.key,
 				notification_icon: ICON[g.kind],
 				rich_message: message(from, g.total, VERB[g.kind]),
-				// an address on this instance opens inside the app; DeepLink would want twitter:// URLs
 				notification_url: { url, urlType: "ExternalUrl" },
 				template: {
 					__typename: "TimelineNotificationAggregateUserActions",
@@ -139,6 +155,34 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 				timestamp_ms: g.at,
 			},
 			clientEventInfo: { component: "urt", element: `user_${g.kind === "follow" ? "followed" : g.kind === "like" ? "liked_tweet" : "retweeted_tweet"}` },
+		},
+	};
+}
+
+const clip = (text: string) => ([...text].length > 200 ? `${[...text].slice(0, 199).join("")}…` : text);
+
+const IN_APP = "https://x.com";
+
+// shown like X's own account notices: a shield, the text, and a link to the
+// full message (a page of ours, outside the app: tidy.ts opens it in this tab)
+function staffEntry(s: Staff) {
+	return {
+		entryId: `notification-${s.key}`,
+		sortIndex: String(s.at),
+		content: {
+			__typename: "TimelineTimelineItem",
+			entryType: "TimelineTimelineItem",
+			itemContent: {
+				__typename: "TimelineNotification",
+				itemType: "TimelineNotification",
+				id: s.key,
+				notification_icon: "shield_icon",
+				rich_message: { rtl: false, text: s.text, entities: [] },
+				notification_url: { url: `${PUBLIC_ORIGIN}/account/notices`, urlType: "ExternalUrl" },
+				template: { __typename: "TimelineNotificationAggregateUserActions", target_objects: [], from_users: [] },
+				timestamp_ms: s.at,
+			},
+			clientEventInfo: { component: "urt", element: "generic_notification" },
 		},
 	};
 }
@@ -172,10 +216,12 @@ export async function notificationsTimeline(viewer: User, opts: { type: string; 
 		mentionsOnly: opts.type === "Mentions",
 		...(c?.[1] === "t" ? { after: Number(c[2]) } : c?.[1] === "b" ? { before: Number(c[2]) } : {}),
 	});
-	const userIds = [...new Set(list.flatMap((i) => (i.kind === "post" ? [] : i.users)))];
-	const postIds = [...new Set(list.map((i) => i.postId).filter((id): id is string => !!id))];
+	const userIds = [...new Set(list.flatMap((i) => (i.kind === "post" || i.kind === "staff" ? [] : i.users)))];
+	const postIds = [...new Set(list.map((i) => (i.kind === "staff" ? undefined : i.postId)).filter((id): id is string => !!id))];
 	const [users, posts] = await Promise.all([usersByIds(viewer.id, userIds), postsByIds(viewer.id, postIds)]);
-	const entries = list.map((i) => (i.kind === "post" ? postEntry(i, posts) : notificationEntry(i, users, posts, viewer))).filter((e) => !!e);
+	const entries = list
+		.map((i) => (i.kind === "post" ? postEntry(i, posts) : i.kind === "staff" ? staffEntry(i) : notificationEntry(i, users, posts, viewer)))
+		.filter((e) => !!e);
 
 	const [{ seen }] = await sql`select notifications_seen_at as seen from users where id = ${viewer.id}::bigint`;
 	const newest = list[0]?.at ?? (c?.[1] === "t" ? Number(c[2]) : Date.now());

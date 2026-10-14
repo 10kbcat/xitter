@@ -6,6 +6,16 @@ import { PUBLIC_ORIGIN } from "./config";
 import type { ArticleEntity } from "./articles";
 import { FLAGS } from "./flags";
 import { type MediaRow, absolute, mediaEntity } from "./media";
+import { settings } from "./settings";
+
+// a note's text with its links marked, as the note box and the note page expect
+export function noteText(text: string) {
+	const entities = [...text.matchAll(/https?:\/\/[^\s<>"']+/g)].map((m) => {
+		const url = m[0].replace(/[.,;!?]+$/, "");
+		return { fromIndex: m.index!, toIndex: m.index! + url.length, ref: { type: "TimelineUrl", url, expandedUrl: url, urlType: "ExternalUrl" } };
+	});
+	return { text, entities };
+}
 
 const DEFAULT_AVATAR = `${PUBLIC_ORIGIN}/abs/sticky/default_profile_images/default_profile_normal.png`;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -45,6 +55,7 @@ function badgeLabel(u: User) {
 				userLabelDisplayType: "Badge",
 			},
 		};
+	if (u.customBadge) return { label: { badge: { url: `${PUBLIC_ORIGIN}/public/badge-${u.customBadge.id}.png` }, description: u.customBadge.name, userLabelType: "BusinessLabel", userLabelDisplayType: "Badge" } };
 	if (!u.flag || !FLAGS[u.flag]) return {};
 	return {
 		label: {
@@ -166,6 +177,7 @@ export type PostRow = {
 	created_at: Date;
 	source?: string;
 	communityNote?: { id: string; text: string };
+	sensitive?: boolean;
 	reply_user_id: string | null;
 	reply_screen_name: string | null;
 	like_count: number;
@@ -224,9 +236,9 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		...(withTypename ? { __typename: "Tweet" } : {}),
 		...(p.communityNote ? { has_birdwatch_notes: true, birdwatch_pivot: {
 			title: "Readers added context they thought people might want to know", shorttitle: "Readers added context",
-			subtitle: { text: p.communityNote.text, entities: [] }, iconType: "BirdwatchLevelHigh", footerIconType: "BirdwatchLevelHigh", visualStyle: "Default",
+			subtitle: noteText(p.communityNote.text), iconType: "BirdwatchLevelHigh", footerIconType: "BirdwatchLevelHigh", visualStyle: "Default",
 			destinationUrl: `/i/birdwatch/n/${p.communityNote.id}`, note: { rest_id: p.communityNote.id, language: "en", is_community_note_translatable: false, grok_translated_community_note_with_availability: { is_available: false } },
-			footer: { text: "Xitter: at least 3 ratings, with two thirds Helpful. This is a local rating rule.", entities: [] },
+			footer: { text: `Context is written by people who use ${settings().instance_name}, and appears when rated helpful by others.`, entities: [] },
 			callToAction: { destinationUrl: `/i/birdwatch/n/${p.communityNote.id}`, prompt: "Is this note helpful?", title: "Rate it" },
 		} } : {}),
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
@@ -259,6 +271,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 			favorite_count: p.like_count,
 			favorited: p.liked,
 			full_text: p.text,
+			possibly_sensitive: !!p.sensitive,
 			source: (p.source ?? "Xitter for Web").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
 			id_str: p.id,
 			...(p.reply_to_id && p.reply_user_id

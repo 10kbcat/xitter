@@ -4,9 +4,9 @@ import { PORT, PUBLIC_ORIGIN } from "./config";
 import { migrate } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
-import { handleLogin, rulesPage } from "./login";
+import { handleLogin, maintenancePage, rulesPage } from "./login";
 import { adminApi } from "./admin";
-import { loadSettings } from "./settings";
+import { loadSettings, settings } from "./settings";
 import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
@@ -18,6 +18,8 @@ import { resumeVideos } from "./video";
 import { livePipeline, restRoute } from "./rest";
 import { shell } from "./shell";
 import { platformSource } from "./platforms";
+import { badgeImage, expireSanctions } from "./moderation";
+import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -41,6 +43,8 @@ const PAGE_CSP = "connect-src 'self' blob: data:";
 const PUBLIC_DIR = process.env.PUBLIC_DIR ?? "public";
 async function servePublic(p: string): Promise<Response> {
 	const name = p.slice("/public/".length);
+	const badge = /^badge-(\d{1,19})\.png$/.exec(name);
+	if (badge) return badgeImage(badge[1]);
 	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
 	if (flag) {
 		const svg = flagSvg(flag[1]);
@@ -106,6 +110,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		return apiError(403, 353, "This request requires a matching csrf cookie and header.");
 
 	const path = url.pathname.replace(/^\/i\/(jf)?api/, "");
+	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	const parts = path.split("/").filter(Boolean);
 	const gql = parts.indexOf("graphql");
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
@@ -137,6 +142,9 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 }
 
 await migrate();
+await expireSanctions();
+// temporary sanctions end on their own
+setInterval(() => expireSanctions().catch((e) => console.error("sanction expiry failed", e.message)), 30_000).unref();
 await loadSettings();
 await resumeVideos(MEDIA_DIR);
 
@@ -183,6 +191,14 @@ const server = Bun.serve({
 		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });
 
 		const viewer = await getViewer(req);
+		// a suspended account can't sign in, so it appeals here with its password
+		if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
+		// maintenance: staff carry on, everyone else signed in waits
+		if (viewer && !viewer.role && settings().operations.maintenance) {
+			if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
+			return maintenancePage();
+		}
+		if (p === "/account/notices" && viewer) return noticesPage(viewer);
 		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 		// uploads stay inside the instance: only signed-in users get them
 		if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });

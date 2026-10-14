@@ -131,16 +131,16 @@ record stores: starting a server realm does not transfer local backups.
 
 ## Development
 
-### Client platforms and Community Notes
+### Client apps and Community Notes
 
-Admins can create and revoke client bearer tokens under **Client platforms**.
-Choose a label such as `Xitter for Web`, `Xitter for Android`, or `Xitter for UFO`.
-The token is shown once; the database stores its SHA-256 hash. Send it as
-`Authorization: Bearer <token>` alongside the user's session cookies and CSRF
-header. It identifies the client, not the user, and grants no account access.
-The source is saved on new posts, replies, quotes and article posts. Revoking
-a token rejects subsequent API requests using it; historic labels stay intact.
-Requests from the pinned browser client default to `Xitter for Web`.
+A post's page shows the app it came from after its time ("11:21 PM · Oct 14,
+2026 · Xitter for Web"). Admins create and revoke app tokens under **Client
+apps**, with a label such as `Xitter for Android`. The token is shown once; the
+database stores its SHA-256 hash. The app sends it as `Authorization: Bearer
+<token>` alongside the user's session cookies and CSRF header. It names the app,
+not the user, and grants no account access. Revoking a token rejects later
+requests using it; posts made with it keep their label. Requests from the
+browser client are `Xitter for Web`.
 
 Community Notes use the pinned client's native viewing, writing and rating
 screens. Admins grant or revoke **Community Notes writing access** under a
@@ -159,6 +159,19 @@ system. Media-match notes, automated translation and appeals are not implemented
 Run `bun scripts/test-notes.ts` against the development server with the existing
 `pozo`/`goldcorp` test accounts. It creates temporary posts, tokens and voters,
 restores writing access, and removes its fixtures.
+
+### Moderation
+
+Besides reports and standings, staff can send an account a message, warning or
+strike. It arrives in the account's Notifications tab and opens a page where a
+warning or strike can be appealed; a suspended account appeals at `/appeal`
+with its password. Standings can be temporary (they lift on their own). Staff
+keep private notes on accounts, see and end sessions, hide posts and articles
+(staff still see them), mark media sensitive (X's content warning), give
+accounts custom badges and delete uploads. Settings also hold maintenance mode
+(everyone but staff sees a message), blocked phrases, hidden and promoted
+trends, and a post pinned to the top of every home timeline.
+`bun scripts/test-admin-extra.ts` checks these.
 
 - `GET /_debug/unknown` lists the client calls no handler answers yet, most
   frequent first. Start there when a screen is empty.
