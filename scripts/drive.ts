@@ -1,0 +1,133 @@
+// Drives the real client in headless Edge over the DevTools protocol: opens a
+// page, then runs steps in order. Uses the signed-in profile left by probe.sh.
+// usage: bun scripts/drive.ts <path> <step>...
+// steps:
+//   wait:<seconds>         let the page work
+//   click:<text>           click the innermost visible element whose text is exactly <text>
+//   css:<selector>         click the first element matching <selector>
+//   type:<text>            insert text at the focused element
+//   file:<selector>=<path> put a local file into a file input
+//   shot:<name>            screenshot to .probe/<name>.png
+//   eval:<expression>      print the value of a JS expression
+// Console errors are printed at the end.
+// Git Bash rewrites an argument that starts with "/", so the path's slash is optional.
+
+import { spawn } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const [pathArg = "home", ...steps] = process.argv.slice(2);
+const page = `/${pathArg.replace(/^\/+/, "")}`;
+const origin = `http://localhost:${process.env.PORT ?? 3000}`;
+const debugPort = 9378;
+const EDGE = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+if (!EDGE) throw new Error("Edge not found");
+
+const edge = spawn(EDGE, [
+	"--headless=new",
+	"--disable-gpu",
+	"--no-first-run",
+	"--window-size=1280,1600",
+	`--remote-debugging-port=${debugPort}`,
+	`--user-data-dir=${resolve(".probe/profile")}`,
+	"about:blank",
+]);
+
+async function target(): Promise<string> {
+	for (let i = 0; i < 50; i++) {
+		try {
+			const list: any[] = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+			const t = list.find((t) => t.type === "page");
+			if (t) return t.webSocketDebuggerUrl;
+		} catch {}
+		await Bun.sleep(200);
+	}
+	throw new Error("browser did not start");
+}
+
+const ws = new WebSocket(await target());
+await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+let nextId = 0;
+const waiting = new Map<number, (v: any) => void>();
+const consoleErrors = new Map<string, number>();
+// with EXCEPTIONS=1, exceptions the client catches itself are listed too (noise as in js-errors.ts)
+const exceptions = new Map<string, number>();
+const NOISE = /DetermineComponentFrameRoot|^\d*x? ?Promise|React error #460|Invalid URL|^Error  at/;
+ws.addEventListener("message", (ev) => {
+	const msg = JSON.parse(String(ev.data));
+	if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
+		const text = msg.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").split("\n").slice(0, 3).join(" | ").slice(0, 400);
+		consoleErrors.set(text, (consoleErrors.get(text) ?? 0) + 1);
+	}
+	if (msg.method === "Debugger.paused") {
+		const { reason, data, callFrames } = msg.params;
+		if (reason === "exception" || reason === "promiseRejection") {
+			const text = String(data?.description ?? data?.value ?? "?").split("\n")[0];
+			const frames = (callFrames as any[]).slice(0, 3).map((c) => `${c.functionName || "(anonymous)"} ${String(c.url).split("/").pop()}:${c.location.lineNumber + 1}:${c.location.columnNumber}`).join(" < ");
+			const key = `${text}  at ${frames}`;
+			if (!NOISE.test(key)) exceptions.set(key, (exceptions.get(key) ?? 0) + 1);
+		}
+		ws.send(JSON.stringify({ id: ++nextId, method: "Debugger.resume" }));
+	}
+	if (msg.id && waiting.has(msg.id)) {
+		waiting.get(msg.id)!(msg.error ? { error: msg.error } : msg.result);
+		waiting.delete(msg.id);
+	}
+});
+const call = (method: string, params: object = {}): Promise<any> =>
+	new Promise((r) => {
+		const id = ++nextId;
+		waiting.set(id, r);
+		ws.send(JSON.stringify({ id, method, params }));
+	});
+const evaluate = async (expression: string) =>
+	(await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
+
+await call("Page.enable");
+await call("Runtime.enable");
+if (process.env.EXCEPTIONS) {
+	await call("Debugger.enable");
+	await call("Debugger.setPauseOnExceptions", { state: "all" });
+}
+await call("DOM.enable");
+await call("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1600, deviceScaleFactor: 1, mobile: false });
+await call("Page.navigate", { url: origin + page });
+await Bun.sleep(6000);
+
+// the innermost visible element with exactly this text, clicked like a user would
+const clickText = (text: string) => `(() => {
+	const want = ${JSON.stringify(text)};
+	const all = [...document.querySelectorAll("body *")].filter((e) => e.innerText?.trim() === want && e.getClientRects().length);
+	const el = all.find((e) => ![...e.children].some((c) => c.innerText?.trim() === want)) ?? all[0];
+	if (!el) return "not found";
+	const target = el.closest("a,button,[role=button],[role=menuitem],[role=tab],[role=link]") ?? el;
+	target.click();
+	return "clicked " + target.tagName + (target.getAttribute("role") ? "[" + target.getAttribute("role") + "]" : "");
+})()`;
+
+for (const step of steps) {
+	const i = step.indexOf(":");
+	const [kind, arg] = [step.slice(0, i), step.slice(i + 1)];
+	if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
+	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
+	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(arg)}); if (!e) return "not found"; e.click(); return "clicked"; })()`)}`);
+	else if (kind === "type") await call("Input.insertText", { text: arg });
+	else if (kind === "file") {
+		const [selector, file] = arg.split("=");
+		const doc = await call("DOM.getDocument", { depth: -1, pierce: true });
+		const node = await call("DOM.querySelector", { nodeId: doc.root.nodeId, selector });
+		const r = await call("DOM.setFileInputFiles", { nodeId: node.nodeId, files: [resolve(file)] });
+		console.log(`file ${selector}: ${r?.error ? JSON.stringify(r.error) : "set"}`);
+	} else if (kind === "shot") {
+		const r = await call("Page.captureScreenshot", { format: "png" });
+		writeFileSync(`.probe/${arg}.png`, Buffer.from(r.data, "base64"));
+		console.log(`shot .probe/${arg}.png`);
+	} else if (kind === "eval") console.log(`eval: ${JSON.stringify(await evaluate(arg))}`);
+	else console.log(`unknown step ${step}`);
+}
+
+for (const [text, n] of exceptions) console.log(`exception ${n}x: ${text}`);
+for (const [text, n] of consoleErrors) console.log(`console error ${n}x: ${text}`);
+ws.close();
+edge.kill();
+process.exit(0);

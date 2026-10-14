@@ -4,7 +4,7 @@
 import type { Viewer } from "./auth";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
-import { cursorEntry, feedEntry, pinnedEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
+import { cursorEntry, feedEntry, gridAppend, gridEntry, pinnedEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
 import {
 	MAX_POST_LENGTH,
 	PostError,
@@ -159,13 +159,13 @@ function userId(vars: Vars): string {
 // Profile tabs: posts and reposts, with or without replies, or reposts only.
 // The pinned post leads the posts tab on the first page.
 const profileFeed =
-	(withReplies: boolean, kinds: "both" | "reposts"): Handler =>
+	(withReplies: boolean, kinds: "both" | "posts" | "reposts", onlyReplies = false): Handler =>
 	async (viewer, vars) => {
 		const { count, at, newer } = pageOf(vars);
 		// profile tabs only page downwards
 		if (newer) return userTimeline([]);
 		const owner = userId(vars);
-		const items = await feed({ viewerId: viewer.id, authors: { user: owner }, replies: withReplies, kinds, limit: count, before: at });
+		const items = await feed({ viewerId: viewer.id, authors: { user: owner }, replies: withReplies, onlyReplies, kinds, limit: count, before: at });
 		let pinned: Awaited<ReturnType<typeof getPost>>;
 		if (!at && !withReplies && kinds === "both") {
 			const user = await userById(viewer.id, owner);
@@ -180,6 +180,26 @@ const profileFeed =
 			entries.push(cursorEntry("Bottom", `b${last}`, dec(last)));
 		}
 		return userTimeline(entries);
+	};
+
+// the Media tabs: the account's own posts with media, as a grid
+const userMedia =
+	(media: "any" | "photo" | "video"): Handler =>
+	async (viewer, vars) => {
+		const { count, at, newer } = pageOf(vars);
+		if (newer) return userTimeline([]);
+		const items = await feed({ viewerId: viewer.id, authors: { user: userId(vars) }, replies: true, kinds: "posts", media, limit: count, before: at });
+		const posts = items.map((i) => i.post);
+		const cursors: unknown[] = [];
+		if (items.length) {
+			if (!at) cursors.push(cursorEntry("Top", `t${items[0].id}`, inc(items[0].id)));
+			const last = items[items.length - 1].id;
+			cursors.push(cursorEntry("Bottom", `b${last}`, dec(last)));
+		}
+		if (!at) return userTimeline([...(posts.length ? [gridEntry(posts, items[0].id)] : []), ...cursors]);
+		const result = userTimeline(cursors);
+		if (posts.length) result.data.user.result.timeline.timeline.instructions.unshift(gridAppend(posts) as any);
+		return result;
 	};
 
 // lists that are returned whole: a cursor request has nothing more
@@ -276,7 +296,10 @@ const handlers: Record<string, Handler> = {
 	Likes: likes,
 	Following: follows("following"),
 	Followers: follows("followers"),
-	UserMedia: () => userTimeline([]),
+	UserMedia: userMedia("any"),
+	UserPhotoTimeline: userMedia("photo"),
+	UserVideoTimeline: userMedia("video"),
+	UserRepliesTimeline: profileFeed(true, "posts", true),
 	UserHighlightsTweets: () => userTimeline([]),
 
 	// features that do not exist here: valid empty answers so the client stays quiet

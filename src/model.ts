@@ -23,6 +23,13 @@ function verification(u: User) {
 	return { verified: false };
 }
 
+// the profile header shows the website from the bio's url entity
+function urlEntities(u: User) {
+	if (!u.website) return {};
+	const display = u.website.replace(/^https?:\/\//, "").replace(/\/$/, "");
+	return { url: { urls: [{ display_url: display, expanded_url: u.website, url: u.website, indices: [0, u.website.length] }] } };
+}
+
 export function userResult(u: User) {
 	return {
 		__typename: "User",
@@ -42,7 +49,7 @@ export function userResult(u: User) {
 		pinned_items: u.pinned_post_id ? { tweet_ids_str: [u.pinned_post_id] } : {},
 		possibly_sensitive: false,
 		privacy: { protected: false },
-		profile_bio: { description: u.bio, entities: { description: {} } },
+		profile_bio: { description: u.bio, entities: { description: {}, ...urlEntities(u) } },
 		profile_image_shape: u.verified_type === "business" ? "Square" : "Circle",
 		profile_metadata: { profile_interstitial_type: "" },
 		profile_translation: { translator_type: "none" },
@@ -59,7 +66,7 @@ export function userResult(u: User) {
 		super_follow_eligible: false,
 		super_followed_by: false,
 		super_following: false,
-		tweet_counts: { media_tweets: 0, tweets: u.stats?.posts ?? 0 },
+		tweet_counts: { media_tweets: u.stats?.mediaPosts ?? 0, tweets: u.stats?.posts ?? 0 },
 		verification: verification(u),
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
 		website: { url: u.website ?? "" },
@@ -78,14 +85,14 @@ export function legacyUser(u: User) {
 		location: u.location,
 		notifications: false,
 		possibly_sensitive: false,
-		entities: { description: {} },
+		entities: { description: {}, ...urlEntities(u) },
 		profile_image_shape: u.verified_type === "business" ? "Square" : "Circle",
 		profile_interstitial_type: "",
 		is_translator: false,
 		translator_type: "none",
 		followers_count: u.stats?.followers ?? 0,
 		friends_count: u.stats?.following ?? 0,
-		media_count: 0,
+		media_count: u.stats?.mediaPosts ?? 0,
 		statuses_count: u.stats?.posts ?? 0,
 		url: u.website ?? "",
 		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
@@ -255,10 +262,10 @@ export function repostResult(id: string, by: User, createdAt: Date, original: Po
 
 type SocialContext = { type: "TimelineGeneralContext"; contextType: string; text: string };
 
-const tweetItem = (result: unknown, socialContext?: SocialContext) => ({
+const tweetItem = (result: unknown, socialContext?: SocialContext, displayType = "Tweet") => ({
 	__typename: "TimelineTweet",
 	itemType: "TimelineTweet",
-	tweetDisplayType: "Tweet",
+	tweetDisplayType: displayType,
 	tweet_results: { result },
 	...(socialContext ? { socialContext } : {}),
 });
@@ -278,6 +285,22 @@ export const pinnedEntry = (p: PostRow, sortIndex: string) =>
 // a post or a repost from feed(); entry ids are item ids, so both fit in one timeline
 export const feedEntry = (item: { id: string; post: PostRow; repost?: { by: User; created_at: Date } }, sortIndex: string) =>
 	item.repost ? itemEntry(item.id, repostResult(item.id, item.repost.by, item.repost.created_at, item.post), sortIndex) : tweetEntry(item.post, sortIndex);
+
+// the Media tab: one grid module, later pages append to it
+const GRID = "profile-grid-0";
+const gridItems = (posts: PostRow[]) =>
+	posts.map((p) => ({ entryId: `${GRID}-tweet-${p.id}`, item: { itemContent: tweetItem(tweetResult(p), undefined, "MediaGrid") } }));
+export const gridEntry = (posts: PostRow[], sortIndex: string) => ({
+	content: {
+		__typename: "TimelineTimelineModule",
+		displayType: "VerticalGrid",
+		entryType: "TimelineTimelineModule",
+		items: gridItems(posts),
+	},
+	entryId: GRID,
+	sortIndex,
+});
+export const gridAppend = (posts: PostRow[]) => ({ type: "TimelineAddToModule", moduleEntryId: GRID, moduleItems: gridItems(posts) });
 
 // one reply shown as its own thread under the opened post
 export const replyEntry = (p: PostRow, sortIndex: string) => ({

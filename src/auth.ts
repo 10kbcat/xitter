@@ -17,6 +17,7 @@ export type User = {
 	// present when the row was loaded through users.ts
 	stats?: {
 		posts: number;
+		mediaPosts: number;
 		likes: number;
 		followers: number;
 		following: number;

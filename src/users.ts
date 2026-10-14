@@ -8,6 +8,7 @@ export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
 	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.created_at as a_created_at,
 	(select count(*)::int from posts x where x.user_id = u.id) as a_posts,
+	(select count(distinct m.post_id)::int from media m join posts x on x.id = m.post_id where x.user_id = u.id) as a_media_posts,
 	(select count(*)::int from likes x where x.user_id = u.id) as a_likes,
 	(select count(*)::int from follows x where x.followee_id = u.id) as a_followers,
 	(select count(*)::int from follows x where x.follower_id = u.id) as a_following,
@@ -29,6 +30,7 @@ export function toUser(r: any): User {
 		created_at: r.a_created_at,
 		stats: {
 			posts: r.a_posts,
+			mediaPosts: r.a_media_posts,
 			likes: r.a_likes,
 			followers: r.a_followers,
 			following: r.a_following,

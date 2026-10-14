@@ -81,6 +81,10 @@ export type FeedQuery = {
 	authors: { all: true } | { following: true } | { user: string };
 	replies: boolean;
 	kinds: "both" | "posts" | "reposts";
+	// only posts with attached media of this kind
+	media?: "any" | "photo" | "video";
+	// replies and nothing else
+	onlyReplies?: boolean;
 	limit: number;
 	// exclusive item ids
 	before?: string;
@@ -95,11 +99,18 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				? sql`(f.author_id = ${q.viewerId}::bigint or f.author_id in (select followee_id from follows where follower_id = ${q.viewerId}::bigint))`
 				: sql`true`;
 	const kindFilter = q.kinds === "posts" ? sql`f.reposter_id is null` : q.kinds === "reposts" ? sql`f.reposter_id is not null` : sql`true`;
-	const replyFilter = q.replies ? sql`true` : sql`not f.is_reply`;
+	const replyFilter = q.onlyReplies ? sql`f.is_reply` : q.replies ? sql`true` : sql`not f.is_reply`;
+	const mediaFilter = !q.media
+		? sql`true`
+		: q.media === "any"
+			? sql`exists (select 1 from media m where m.post_id = f.post_id)`
+			: q.media === "video"
+				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
+				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
 	const rows = q.after
-		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and f.item_id > ${q.after}::bigint
+		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
-		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
+		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
 			order by f.item_id desc limit ${q.limit}`;
 	if (q.after) rows.reverse();
 
