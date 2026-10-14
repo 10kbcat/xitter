@@ -33,6 +33,15 @@ const RESERVED = new Set(
 
 export class SignupError extends Error {}
 
+// for the check while typing: same rules as signUp below
+export async function usernameState(raw: string): Promise<"available" | "taken" | "invalid"> {
+	const screenName = raw.trim().replace(/^@/, "");
+	if (!/^[A-Za-z0-9_]{4,15}$/.test(screenName)) return "invalid";
+	if (RESERVED.has(screenName.toLowerCase())) return "taken";
+	const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${screenName})`;
+	return taken ? "taken" : "available";
+}
+
 export async function signUp(f: { code: string; screenName: string; name: string; password: string; flag?: string }): Promise<string> {
 	const screenName = f.screenName.trim().replace(/^@/, "");
 	const name = f.name.trim() || screenName;

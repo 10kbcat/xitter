@@ -16,7 +16,7 @@ import { login } from "./auth";
 import { sql } from "./db";
 import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
-import { CODE_DIGITS, SignupError, normalizeCode, signUp } from "./invites";
+import { CODE_DIGITS, SignupError, normalizeCode, signUp, usernameState } from "./invites";
 import { settings } from "./settings";
 
 const load = async (name: string): Promise<Message[]> => fromJson(await Bun.file(new URL(`./jf/${name}.json`, import.meta.url)).json());
@@ -55,23 +55,21 @@ function codeLength(messages: Message[], length: number): Message[] {
 	return without(messages, ["Didn't receive a code? Retry in  "], 25739);
 }
 
-// The setup screen enables Continue only once its username check (the
-// suggest_username remote) has set an "available" flag. How a reply sets that
-// flag isn't in any capture, so the rule drops the flags (the either-of, 13)
-// and the username is checked on submit instead.
-function withoutUsernameCheck(messages: Message[]): Message[] {
-	const [, root] = messages[0];
-	const drop = (c: any): any => {
-		// "and" holds exactly two; with one side gone the other stands alone
-		if (c[0] === 12) {
-			const [a, b] = c[1].map(drop);
-			return a && b ? [12, [a, b]] : (a ?? b);
-		}
-		if (c[0] === 13) return undefined;
-		return c;
-	};
-	for (const p of root.props) if (p[0] === 22 && p[1][0] === 12 && JSON.stringify(p[1], (_, v) => (typeof v === "bigint" ? `${v}` : v)).includes("__$anyFieldErrors")) p[1] = drop(p[1]);
-	return messages;
+// The setup screen checks the username as it's typed: its
+// Input2.RemoteAsYouType posts the form to suggest_username and draws the
+// reply. "Username is available" shows, and Continue enables, while the
+// state AVAILABLE is true; "Username already taken" while TAKEN is. A reply
+// sets them with state props that aren't defaults (the client then
+// overwrites the page's value, states being shared by id); it draws nothing.
+const AVAILABLE = 5843147273490502584n;
+const TAKEN = 1165880133285406392n;
+function usernameReply(state: "available" | "taken" | "invalid"): Message[] {
+	const set = (id: bigint, on: boolean) => [18, { ref: [0, { id }], prop_ref: on ? 0 : 1, is_default: false }];
+	const el = { type: nameId("View"), props: new Map([[nameId("available"), 2], [nameId("taken"), 3]]), children: [], id: null, extend: null };
+	return [
+		[0, { els: [el], props: [[6, true], [6, false], set(AVAILABLE, state === "available"), set(TAKEN, state === "taken")], ts: Math.floor(Date.now() / 1000) }],
+		[1, { ref: 0, t: null }],
+	] as Message[];
 }
 
 const templates = {
@@ -83,7 +81,7 @@ const templates = {
 	page: without(await load("page"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	// sign-up: X's emailed-code screen asks for the invite code instead
 	code: codeLength(without(await load("code"), ["Send again"], 7140), INVITE_LENGTH),
-	setup: withoutUsernameCheck(await load("setup")),
+	setup: await load("setup"),
 	success: await load("success"),
 	passkey: await load("passkey"),
 };
@@ -178,7 +176,7 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 	if (path === "/onboarding/web/landing") return respond(fill(templates.page, {}), true);
 	if (path === "/onboarding/web/remotes/passkey_one_fa") return respond(templates.passkey, true);
 	// "Username is available": the setup screen asks while typing
-	if (path.startsWith("/onboarding/web/remotes/suggest_username")) return respond(templates.passkey, true);
+	if (path.startsWith("/onboarding/web/remotes/suggest_username")) return respond(usernameReply(await usernameState(String((await form(req)).username ?? ""))));
 	if (req.method !== "POST") return undefined;
 
 	// One field for both: a known username goes on to its password; an unknown

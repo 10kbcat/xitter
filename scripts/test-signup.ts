@@ -66,6 +66,22 @@ check("an unknown code is refused", /not valid/.test(s.errors.code ?? ""), s.err
 s = await step("finish_verification", { session_token: token, code: digits(code) });
 check("a good one opens account setup with the username filled in", shows(s, "Set up your account") && s.fields.username === name, s.fields);
 
+// the check while typing: its reply sets the screen's "available" or "taken" state
+const AVAILABLE = 5843147273490502584n, TAKEN = 1165880133285406392n;
+async function typing(username: string) {
+	const r = await fetch(`${origin}/i/jfapi/onboarding/web/remotes/suggest_username?form_atom_id=x`, { method: "POST", body: new URLSearchParams({ username, name: "", session_token: token }) });
+	const states = new Map<bigint, boolean>();
+	for (const [tag, m] of decode(new Uint8Array(await r.arrayBuffer())))
+		if (tag === 0) for (const p of m.props) if (p[0] === 18 && !p[1].is_default) states.set(p[1].ref[1].id, m.props[p[1].prop_ref][1]);
+	return states;
+}
+let states = await typing(name);
+check("while typing, a free name shows as available", states.get(AVAILABLE) === true && states.get(TAKEN) === false);
+states = await typing("Pozo");
+check("and a taken one as taken", states.get(AVAILABLE) === false && states.get(TAKEN) === true);
+states = await typing("ab");
+check("and one too short as neither", states.get(AVAILABLE) === false && states.get(TAKEN) === false);
+
 const setup = (o: Record<string, string>) => step("verify_signup", { session_token: token, name: "Signup Test", username: name, password: "testpass123", ...o });
 s = await setup({ username: "settings" });
 check("reserved names are refused", /reserved/.test(s.errors.username ?? ""), s.errors);
