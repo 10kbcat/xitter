@@ -28,15 +28,27 @@ const unknown = new Map<string, number>();
 
 const apiError = (status: number, code: number, message: string) => Response.json({ errors: [{ code, message }] }, { status });
 
-async function serveClient(pathname: string): Promise<Response> {
+const etags = new Map<string, string>();
+
+async function serveClient(req: Request, pathname: string): Promise<Response> {
 	const cdnPath = pathname.slice("/abs".length);
 	const raw = await getClientFile(cdnPath);
 	if (!raw) return new Response("not found", { status: 404 });
 	const ext = cdnPath.split(".").pop() ?? "";
-	const body = ext === "js" || ext === "css" ? patchFile(cdnPath, raw) : raw;
-	return new Response(new Uint8Array(body), {
-		headers: { "content-type": MIME[ext] ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" },
-	});
+	const type = MIME[ext] ?? "application/octet-stream";
+	if (ext !== "js" && ext !== "css")
+		return new Response(new Uint8Array(raw), { headers: { "content-type": type, "cache-control": "public, max-age=31536000, immutable" } });
+
+	// The file name stays the same when our patches change, so patched files are
+	// revalidated against a hash of what we actually serve.
+	const body = patchFile(cdnPath, raw);
+	let etag = etags.get(cdnPath);
+	if (!etag) {
+		etag = `"${Bun.hash(body).toString(36)}"`;
+		etags.set(cdnPath, etag);
+	}
+	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
+	return new Response(new Uint8Array(body), { headers: { "content-type": type, "cache-control": "no-cache", etag } });
 }
 
 function parseJson(text: string | null): any {
@@ -87,7 +99,7 @@ const server = Bun.serve({
 	async fetch(req) {
 		const url = new URL(req.url);
 		const p = url.pathname;
-		if (p.startsWith("/abs/")) return serveClient(p);
+		if (p.startsWith("/abs/")) return serveClient(req, p);
 		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 		if (p === "/login") return req.method === "POST" ? handleLogin(req) : loginPage();
 		if (p === "/sw.js" || p === "/favicon.ico" || p === "/manifest.json") return new Response(null, { status: 404 });

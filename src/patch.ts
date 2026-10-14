@@ -12,8 +12,11 @@ const RULES: [RegExp, string][] = [
 	[/https:\/\/abs\.twimg\.com/g, `${PUBLIC_ORIGIN}/abs`],
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`https://${h.replace(/\./g, "\\.")}`, "g"), PUBLIC_ORIGIN]),
 	...API_HOSTS.map((h): [RegExp, string] => [new RegExp(`"${h.replace(/\./g, "\\.")}"`, "g"), `"${PUBLIC_HOSTNAME}"`]),
-	[/"https:\/\/x\.com"/g, `"${PUBLIC_ORIGIN}"`],
-	[/https:\/\/x\.com\/i\/(jf)?api/g, `${PUBLIC_ORIGIN}/i/$1api`],
+	// the site's own links, also when the address is the start of a longer string
+	// or template (profile hrefs, share links); subdomains are not matched
+	[/https:\/\/x\.com(?=["'`$/?#])/g, PUBLIC_ORIGIN],
+	// the upload host is assembled from a variable, which would force https and drop the port
+	[/`https:\/\/\$\{(\w+)\}\/i\/media\//g, "`${location.origin}/i/media/"],
 	[/"x\.com"/g, `"${PUBLIC_HOSTNAME}"`],
 	// cookie domain; a cookie scoped to the original domain is dropped by the browser
 	[/"\.x\.com"/g, `"${PUBLIC_HOSTNAME}"`],
