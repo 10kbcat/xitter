@@ -116,3 +116,15 @@ create table if not exists articles (
 );
 create index if not exists articles_user_idx on articles (user_id, state, modified_at desc);
 alter table posts add column if not exists article_id bigint references articles (id) on delete set null;
+
+-- accounts named with @ in a post; they get a notification and the name becomes a link
+create table if not exists post_mentions (
+	post_id bigint not null references posts (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	primary key (post_id, user_id)
+);
+create index if not exists post_mentions_user_idx on post_mentions (user_id);
+create index if not exists posts_quote_idx on posts (quote_id) where quote_id is not null;
+create index if not exists posts_reply_idx on posts (reply_to_id) where reply_to_id is not null;
+-- notifications newer than this are unread
+alter table users add column if not exists notifications_seen_at timestamptz not null default now();

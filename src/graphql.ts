@@ -3,6 +3,7 @@
 
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
+import { notificationsTimeline, unreadCount } from "./notifications";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
 import { cursorEntry, feedEntry, gridAppend, gridEntry, pinnedEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
@@ -262,6 +263,8 @@ const handlers: Record<string, Handler> = {
 		return { data: { unretweet: { source_tweet_results: { result: { rest_id: id } } } } };
 	},
 
+	NotificationsTimeline: (v, vars) =>
+		notificationsTimeline(v, { type: String(vars.timeline_type ?? "All"), count: Number(vars.count) || 20, cursor: typeof vars.cursor === "string" ? vars.cursor : undefined }),
 	TweetResultsByRestIds: async (v, vars) => {
 		const ids = Array.isArray(vars.tweetIds) ? (vars.tweetIds as unknown[]).map(String).filter(isId).slice(0, 100) : [];
 		const posts = await Promise.all(ids.map((id) => getPost(v.id, id)));
@@ -329,13 +332,16 @@ const handlers: Record<string, Handler> = {
 	isEligibleForVoButtonUpsellQuery: () => ({ data: {} }),
 	usePremiumPaywallOnLoadMutation: () => ({ data: {} }),
 	BookmarkFoldersSlice: () => viewerUser({ bookmark_collections_slice: { items: [], slice_info: {} } }),
-	ViewerBadgeCounts: () => ({
+	ViewerBadgeCounts: async (v) => ({
 		data: {
 			viewer_v2: {
 				user_results: {
 					result: {
 						__typename: "User",
-						badge_counts: { dm_unread_count: 0, is_from_urt: true, ntab_unread_count: 0, total_unread_count: 0, xchat_unread_count: 0 },
+						badge_counts: await (async () => {
+							const n = await unreadCount(v.id);
+							return { dm_unread_count: 0, is_from_urt: true, ntab_unread_count: n, total_unread_count: n, xchat_unread_count: 0 };
+						})(),
 					},
 				},
 			},

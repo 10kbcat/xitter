@@ -4,6 +4,7 @@ import { type Viewer, clearedCookies, logout } from "./auth";
 import { sql } from "./db";
 import { isId } from "./ids";
 import { legacyUser } from "./model";
+import { markSeen } from "./notifications";
 import { settingsFor } from "./shell";
 import { setFollow, userById } from "./users";
 
@@ -69,6 +70,18 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const user = await userById(viewer.id, target);
 		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
 		return Response.json(legacyUser(user));
+	}
+	// the notifications page reports the newest entry it has shown
+	if (/^\/2\/notifications\/\w+\/last_seen_cursor(\.json)?$/.test(path) && method === "POST") {
+		const body = await req.text();
+		let cursor: string | null = null;
+		try {
+			cursor = JSON.parse(body).cursor ?? null;
+		} catch {
+			cursor = new URLSearchParams(body).get("cursor");
+		}
+		await markSeen(viewer.id, cursor);
+		return Response.json({ cursor });
 	}
 	if (path === "/1.1/account/settings.json") return Response.json(settingsFor(viewer) ?? {});
 	if (path === "/1.1/account/logout.json" && method === "POST") {

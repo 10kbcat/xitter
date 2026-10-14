@@ -147,6 +147,8 @@ export type PostRow = {
 	author: User;
 	media?: MediaRow[];
 	article_id?: string | null;
+	// accounts named with @ in the text
+	mentions?: { id: string; screen_name: string; name: string }[];
 	// the published article this post carries
 	article?: ArticleEntity;
 	// the post this one quotes, when it still exists
@@ -157,8 +159,23 @@ const EDIT_WINDOW_MS = 60 * 60 * 1000;
 
 const permalink = (p: PostRow) => `${PUBLIC_ORIGIN}/${p.author.screen_name}/status/${p.id}`;
 
+// @names in the text that belong to an account, with code point offsets as the client expects
+function userMentions(p: PostRow) {
+	if (!p.mentions?.length) return [];
+	const byName = new Map(p.mentions.map((m) => [m.screen_name.toLowerCase(), m]));
+	const out = [];
+	for (const m of p.text.matchAll(/(?<![\w@])@(\w{1,15})/g)) {
+		const user = byName.get(m[1].toLowerCase());
+		if (!user) continue;
+		const start = [...p.text.slice(0, m.index)].length;
+		out.push({ id_str: user.id, indices: [start, start + 1 + m[1].length], name: user.name, screen_name: user.screen_name });
+	}
+	return out;
+}
+
 export function tweetResult(p: PostRow, withTypename = true): Record<string, unknown> {
 	const textLength = [...p.text].length;
+	const mentions = userMentions(p);
 	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
 	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
@@ -184,7 +201,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 			conversation_id_str: p.conversation_id,
 			created_at: apiDate(p.created_at),
 			display_text_range: [0, [...p.text].length],
-			entities: media.length ? { media } : {},
+			entities: { ...(media.length ? { media } : {}), ...(mentions.length ? { user_mentions: mentions } : {}) },
 			...(media.length ? { extended_entities: { media } } : {}),
 			favorite_count: p.like_count,
 			favorited: p.liked,

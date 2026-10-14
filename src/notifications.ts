@@ -1,0 +1,214 @@
+// Notifications, worked out from what already happened instead of being
+// stored: likes and reposts of the viewer's posts (grouped per post), new
+// followers (grouped per day), and replies, quotes and mentions (shown as the
+// posts themselves). Entries sort by time in milliseconds, which is also what
+// the cursors and the read marker hold.
+
+import type { User } from "./auth";
+import { PUBLIC_ORIGIN } from "./config";
+import { sql } from "./db";
+import { tweetResult, userResult } from "./model";
+import type { PostRow } from "./model";
+import { postsByIds } from "./posts";
+import { usersByIds } from "./users";
+
+// how many names a grouped notification lists before "and N others"
+const SHOWN_USERS = 3;
+
+type Group = { kind: "like" | "repost" | "follow"; key: string; at: number; users: string[]; total: number; postId?: string };
+type Mention = { kind: "post"; postId: string; at: number; reason: "reply" | "quote" | "mention" };
+type Item = Group | Mention;
+
+const ms = (d: Date) => d.getTime();
+
+// everything for the viewer older than `before` (or newer than `after`), newest first
+async function items(viewerId: string, opts: { before?: number; after?: number; limit: number; mentionsOnly: boolean }): Promise<Item[]> {
+	// the database keeps microseconds and cursors milliseconds, so "after n" starts at the next millisecond
+	const lo = opts.after !== undefined ? new Date(opts.after + 1) : new Date(0);
+	const hi = opts.before ? new Date(opts.before) : new Date(8.64e15);
+	const out: Item[] = [];
+
+	if (!opts.mentionsOnly) {
+		for (const kind of ["like", "repost"] as const) {
+			const table = kind === "like" ? sql`likes` : sql`reposts`;
+			const rows = await sql`
+				select a.post_id, max(a.created_at) as at, count(*)::int as total,
+					(array_agg(a.user_id order by a.created_at desc))[1:${SHOWN_USERS}] as users
+				from ${table} a join posts p on p.id = a.post_id
+				where p.user_id = ${viewerId}::bigint and a.user_id <> ${viewerId}::bigint
+				group by a.post_id
+				having max(a.created_at) >= ${lo} and max(a.created_at) < ${hi}
+				order by at desc limit ${opts.limit}`;
+			for (const r of rows)
+				out.push({ kind, key: `${kind}-${r.post_id}`, at: ms(r.at), users: r.users.map(String), total: r.total, postId: String(r.post_id) });
+		}
+		const follows = await sql`
+			select date_trunc('day', f.created_at) as day, max(f.created_at) as at, count(*)::int as total,
+				(array_agg(f.follower_id order by f.created_at desc))[1:${SHOWN_USERS}] as users
+			from follows f where f.followee_id = ${viewerId}::bigint
+			group by 1
+			having max(f.created_at) >= ${lo} and max(f.created_at) < ${hi}
+			order by at desc limit ${opts.limit}`;
+		for (const r of follows) out.push({ kind: "follow", key: `follow-${ms(r.day)}`, at: ms(r.at), users: r.users.map(String), total: r.total });
+	}
+
+	const posts = await sql`
+		select x.id, x.created_at as at, x.reason from (
+			select p.id, p.created_at, 'reply' as reason from posts p join posts parent on parent.id = p.reply_to_id
+				where parent.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint
+			union all
+			select p.id, p.created_at, 'mention' from posts p join post_mentions m on m.post_id = p.id
+				where m.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint
+			${
+				opts.mentionsOnly
+					? sql``
+					: sql`union all
+			select p.id, p.created_at, 'quote' from posts p join posts quoted on quoted.id = p.quote_id
+				where quoted.user_id = ${viewerId}::bigint and p.user_id <> ${viewerId}::bigint`
+			}
+		) x where x.created_at >= ${lo} and x.created_at < ${hi}
+		order by x.created_at desc limit ${opts.limit * 2}`;
+	const seen = new Set<string>();
+	for (const r of posts) {
+		const id = String(r.id);
+		if (seen.has(id)) continue;
+		seen.add(id);
+		out.push({ kind: "post", postId: id, at: ms(r.at), reason: r.reason });
+	}
+
+	out.sort((a, b) => b.at - a.at);
+	return out.slice(0, opts.limit);
+}
+
+const ICON = { like: "heart_icon", repost: "retweet_icon", follow: "person_icon" } as const;
+const VERB = { like: "liked your post", repost: "reposted your post", follow: "followed you" } as const;
+
+// "A", "A and B", "A, B and C", "A and 5 others" with each name linked to its account
+function message(users: User[], total: number, verb: string) {
+	const names = users.map((u) => u.name || u.screen_name);
+	let parts: (string | User)[];
+	if (total === 1) parts = [users[0]];
+	else if (total === 2 && users.length >= 2) parts = [users[0], " and ", users[1]];
+	else if (total === 3 && users.length >= 3) parts = [users[0], ", ", users[1], " and ", users[2]];
+	else parts = [users[0], ` and ${total - 1} others`];
+	let text = "";
+	const entities = [];
+	for (const part of parts) {
+		if (typeof part === "string") {
+			text += part;
+			continue;
+		}
+		const name = names[users.indexOf(part)];
+		const ref = { __typename: "TimelineRichTextUser", type: "TimelineRichTextUser", user_results: { result: userResult(part) } };
+		entities.push({ fromIndex: text.length, toIndex: text.length + name.length, ref });
+		text += name;
+	}
+	text += ` ${verb}`;
+	return { rtl: false, text, entities };
+}
+
+function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string, PostRow>, viewer: User) {
+	const from = g.users.map((id) => users.get(id)).filter((u): u is User => !!u);
+	const post = g.postId ? posts.get(g.postId) : undefined;
+	if (!from.length || (g.postId && !post)) return undefined;
+	const url = post ? `${PUBLIC_ORIGIN}/${viewer.screen_name}/status/${post.id}` : `${PUBLIC_ORIGIN}/${from[0].screen_name}`;
+	return {
+		entryId: `notification-${g.key}`,
+		sortIndex: String(g.at),
+		content: {
+			__typename: "TimelineTimelineItem",
+			entryType: "TimelineTimelineItem",
+			itemContent: {
+				__typename: "TimelineNotification",
+				itemType: "TimelineNotification",
+				id: g.key,
+				notification_icon: ICON[g.kind],
+				rich_message: message(from, g.total, VERB[g.kind]),
+				// an address on this instance opens inside the app; DeepLink would want twitter:// URLs
+				notification_url: { url, urlType: "ExternalUrl" },
+				template: {
+					__typename: "TimelineNotificationAggregateUserActions",
+					target_objects: post ? [{ __typename: "TimelineNotificationTweetRef", tweet_results: { result: tweetResult(post) } }] : [],
+					from_users: from.map((u) => ({ __typename: "TimelineNotificationUserRef", user_results: { result: userResult(u) } })),
+				},
+				// a number: the client passes it straight to Date
+				timestamp_ms: g.at,
+			},
+			clientEventInfo: { component: "urt", element: `user_${g.kind === "follow" ? "followed" : g.kind === "like" ? "liked_tweet" : "retweeted_tweet"}` },
+		},
+	};
+}
+
+function postEntry(m: Mention, posts: Map<string, PostRow>) {
+	const post = posts.get(m.postId);
+	if (!post) return undefined;
+	return {
+		entryId: `notification-${m.reason}-${m.postId}`,
+		sortIndex: String(m.at),
+		content: {
+			__typename: "TimelineTimelineItem",
+			entryType: "TimelineTimelineItem",
+			itemContent: { __typename: "TimelineTweet", itemType: "TimelineTweet", tweetDisplayType: "Tweet", tweet_results: { result: tweetResult(post) } },
+			clientEventInfo: { component: "urt", element: m.reason === "reply" ? "user_replied_to_your_tweet" : m.reason === "quote" ? "user_quoted_your_tweet" : "user_mentioned_you" },
+		},
+	};
+}
+
+const cursor = (type: "Top" | "Bottom", value: string, sortIndex: string) => ({
+	entryId: `cursor-${type.toLowerCase()}-${sortIndex}`,
+	sortIndex,
+	content: { __typename: "TimelineTimelineCursor", entryType: "TimelineTimelineCursor", cursorType: type, value },
+});
+
+// the All or Mentions tab; cursors are "t<ms>" (newer than) and "b<ms>" (older than)
+export async function notificationsTimeline(viewer: User, opts: { type: string; count: number; cursor?: string }) {
+	const c = /^([tb])(\d{1,16})$/.exec(opts.cursor ?? "");
+	const list = await items(viewer.id, {
+		limit: Math.min(Math.max(opts.count, 1), 40),
+		mentionsOnly: opts.type === "Mentions",
+		...(c?.[1] === "t" ? { after: Number(c[2]) } : c?.[1] === "b" ? { before: Number(c[2]) } : {}),
+	});
+	const userIds = [...new Set(list.flatMap((i) => (i.kind === "post" ? [] : i.users)))];
+	const postIds = [...new Set(list.map((i) => i.postId).filter((id): id is string => !!id))];
+	const [users, posts] = await Promise.all([usersByIds(viewer.id, userIds), postsByIds(viewer.id, postIds)]);
+	const entries = list.map((i) => (i.kind === "post" ? postEntry(i, posts) : notificationEntry(i, users, posts, viewer))).filter((e) => !!e);
+
+	const [{ seen }] = await sql`select notifications_seen_at as seen from users where id = ${viewer.id}::bigint`;
+	const newest = list[0]?.at ?? (c?.[1] === "t" ? Number(c[2]) : Date.now());
+	const oldest = list[list.length - 1]?.at ?? (c?.[1] === "b" ? Number(c[2]) : 0);
+	const instructions: unknown[] = [];
+	if (!c) instructions.push({ type: "TimelineClearCache" });
+	instructions.push({
+		type: "TimelineAddEntries",
+		entries: [...entries, cursor("Top", `t${newest}`, String(newest + 1)), cursor("Bottom", `b${oldest}`, String(Math.max(oldest - 1, 0)))],
+	});
+	// entries newer than the read marker are shown as unread
+	instructions.push({ type: "TimelineMarkEntriesUnreadGreaterThanSortIndex", sort_index: String(ms(seen) - 1) });
+	return {
+		data: {
+			viewer_v2: {
+				user_results: {
+					result: {
+						__typename: "User",
+						rest_id: viewer.id,
+						notification_timeline: { id: Buffer.from(`NotificationTimeline:${viewer.id}`).toString("base64"), timeline: { instructions } },
+					},
+				},
+			},
+		},
+	};
+}
+
+// how many notifications arrived since the viewer last looked
+export async function unreadCount(viewerId: string): Promise<number> {
+	const [{ seen }] = await sql`select notifications_seen_at as seen from users where id = ${viewerId}::bigint`;
+	return (await items(viewerId, { after: ms(seen) - 1, limit: 40, mentionsOnly: false })).length;
+}
+
+// the client reports the newest entry it has shown; cursors and sort indexes are both accepted
+export async function markSeen(viewerId: string, cursorOrIndex: string | null) {
+	const m = /(\d{10,16})/.exec(cursorOrIndex ?? "");
+	// everything up to the end of that millisecond is read
+	const at = m ? new Date(Math.min(Number(m[1]) + 1, Date.now())) : new Date();
+	await sql`update users set notifications_seen_at = greatest(notifications_seen_at, ${at}) where id = ${viewerId}::bigint`;
+}

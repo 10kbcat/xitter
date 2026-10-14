@@ -7,6 +7,8 @@ import { mediaForPosts } from "./media";
 import { toUser, userCols, usersByIds } from "./users";
 
 export const MAX_POST_LENGTH = 280;
+// @name, not preceded by a word character (so e-mail addresses do not count)
+export const MENTION = /(?<![\w@])@(\w{1,15})/g;
 const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
@@ -54,6 +56,11 @@ function toRow(r: any): PostRow {
 async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promise<PostRow[]> {
 	const media = await mediaForPosts(posts.map((p) => p.id));
 	for (const p of posts) p.media = media.get(p.id) ?? [];
+	if (posts.length) {
+		const mentions = await sql`select m.post_id, u.id, u.screen_name, u.name from post_mentions m join users u on u.id = m.user_id
+			where m.post_id = any(${sql.array(posts.map((p) => p.id), "INT8")})`;
+		for (const p of posts) p.mentions = mentions.filter((m: any) => String(m.post_id) === p.id).map((m: any) => ({ id: String(m.id), screen_name: m.screen_name, name: m.name }));
+	}
 	const articles = await articlesByIds(viewerId, [...new Set(posts.map((p) => p.article_id).filter((id): id is string => !!id))]);
 	for (const p of posts) if (p.article_id) p.article = articles.get(p.article_id);
 	const quoteIds = [...new Set(posts.map((p) => p.quote_id).filter((id): id is string => !!id))];
@@ -64,7 +71,7 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	return posts;
 }
 
-async function postsByIds(viewerId: string, ids: string[], quotes = true): Promise<Map<string, PostRow>> {
+export async function postsByIds(viewerId: string, ids: string[], quotes = true): Promise<Map<string, PostRow>> {
 	if (!ids.length) return new Map();
 	const rows = await sql`${select(viewerId)} where p.id = any(${sql.array(ids, "INT8")})`;
 	const posts = await hydrate(viewerId, rows.map(toRow), quotes);
@@ -179,6 +186,10 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	}
 	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id)
 		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint)`;
+	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
+	if (names.length)
+		await sql`insert into post_mentions (post_id, user_id)
+			select ${id}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")}) on conflict do nothing`;
 	return id;
 }
 
