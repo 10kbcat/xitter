@@ -6,7 +6,8 @@ import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
 import { settingsFor } from "./shell";
-import { setFollow, userById } from "./users";
+import { hashtagsLike, searchUsers } from "./search";
+import { setFollow, userById, usersByIds } from "./users";
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
 
@@ -82,6 +83,30 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		}
 		await markSeen(viewer.id, cursor);
 		return Response.json({ cursor });
+	}
+	// suggestions under the search box: accounts, and hashtags when one is being typed
+	if (path === "/1.1/search/typeahead.json") {
+		const q = (new URL(req.url).searchParams.get("q") ?? "").trim().slice(0, 100);
+		const users = q && !q.startsWith("#") ? await usersByIds(viewer.id, await searchUsers(q, 8)) : new Map();
+		const tags = q.startsWith("#") ? await hashtagsLike(q, 8) : [];
+		return Response.json({
+			num_results: users.size + tags.length,
+			users: [...users.values()].map((u) => ({
+				...legacyUser(u),
+				ext_is_blue_verified: u.verified_type !== null,
+				social_context: { following: u.stats?.followedByViewer ?? false, followed_by: u.stats?.followsViewer ?? false },
+			})),
+			topics: tags.map((topic) => ({ topic, rounded_score: 0, tokens: [{ token: topic }], inline: false, result_context: { display_string: "", types: [] } })),
+			// the client maps over each of these lists, so none may be missing
+			cashtags: [],
+			events: [],
+			lists: [],
+			ordered_sections: [],
+			oneclick: [],
+			hashtags: [],
+			completed_in: 0,
+			query: q,
+		});
 	}
 	if (path === "/1.1/account/settings.json") return Response.json(settingsFor(viewer) ?? {});
 	if (path === "/1.1/account/logout.json" && method === "POST") {

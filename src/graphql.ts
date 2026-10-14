@@ -4,6 +4,7 @@
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
 import { notificationsTimeline, unreadCount } from "./notifications";
+import { searchPosts, searchUsers, trendingHashtags } from "./search";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
 import { cursorEntry, feedEntry, gridAppend, gridEntry, pinnedEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
@@ -17,13 +18,14 @@ import {
 	feed,
 	getPost,
 	likedPosts,
+	postsByIds,
 	replies,
 	repost,
 	setMark,
 	setPinned,
 	unrepost,
 } from "./posts";
-import { followList, userById, userByName } from "./users";
+import { followList, userById, userByName, usersByIds } from "./users";
 
 type Vars = Record<string, any>;
 type Handler = (viewer: Viewer, vars: Vars) => Promise<unknown> | unknown;
@@ -442,6 +444,99 @@ const articleHandlers: Record<string, Handler> = {
 	UserArticlesTweets: profileFeed(false, "posts", false, true),
 };
 Object.assign(handlers, articleHandlers);
+
+// Search results. Latest pages by post id ("b<id>"), Top and People by offset ("o<n>").
+// Top starts with a few matching accounts, as on X.
+const searchTimeline = (instructions: unknown[]) => ({ data: { search_by_raw_query: { search_timeline: { timeline: { instructions } } } } });
+
+async function search(viewer: Viewer, vars: Vars) {
+	const query = typeof vars.rawQuery === "string" ? vars.rawQuery.slice(0, 500) : "";
+	const product = String(vars.product ?? "Top");
+	const count = Math.min(Math.max(Number(vars.count) || 20, 1), 50);
+	const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
+	if (cursor.startsWith("t")) return searchTimeline([]);
+	const offset = /^o(\d{1,6})$/.exec(cursor) ? Number(cursor.slice(1)) : 0;
+	const before = /^b(\d{1,19})$/.exec(cursor) ? cursor.slice(1) : undefined;
+	const entries: unknown[] = [];
+	const base = BigInt(newId());
+	const sort = (i: number) => (base - BigInt(i) - 10n).toString();
+	let next: string | undefined;
+
+	if (product === "People") {
+		const ids = await searchUsers(query, count, offset);
+		const users = await usersByIds(viewer.id, ids);
+		ids.forEach((id, i) => users.get(id) && entries.push(userEntry(users.get(id)!, sort(i))));
+		if (ids.length === count) next = `o${offset + count}`;
+	} else if (product === "Media") {
+		const ids = await searchPosts(query, { viewerId: viewer.id, top: false, media: true, limit: count, before });
+		const posts = await postsByIds(viewer.id, ids);
+		const list = ids.map((id) => posts.get(id)).filter((p) => !!p);
+		if (list.length) {
+			if (before) {
+				const last = ids[ids.length - 1];
+				return searchTimeline([gridAppend(list, "search-grid-0"), { type: "TimelineAddEntries", entries: [cursorEntry("Bottom", `b${last}`, sort(count + 1))] }]);
+			}
+			entries.push(gridEntry(list, sort(0), "search-grid-0"));
+		}
+		if (ids.length === count) next = `b${ids[ids.length - 1]}`;
+	} else if (product === "Latest" || product === "Top") {
+		const top = product === "Top";
+		if (top && !offset && !/(^|\s)-?\w+:/.test(query)) {
+			const userIds = await searchUsers(query, 3);
+			const users = await usersByIds(viewer.id, userIds);
+			const items = userIds.map((id) => users.get(id)).filter((u) => !!u);
+			if (items.length)
+				entries.push({
+					entryId: "toptabsrpusermodule-0",
+					sortIndex: sort(0),
+					content: {
+						__typename: "TimelineTimelineModule",
+						entryType: "TimelineTimelineModule",
+						displayType: "Vertical",
+						header: { displayType: "Classic", text: "People", sticky: false },
+						footer: { displayType: "Classic", text: "View all", landingUrl: { url: `twitter://search/?query=${encodeURIComponent(query)}&src=typed_query&f=user`, urlType: "DeepLink" } },
+						items: items.map((u) => ({ entryId: `toptabsrpusermodule-0-user-${u.id}`, item: userEntry(u, "0").content })),
+					},
+				});
+		}
+		const ids = await searchPosts(query, { viewerId: viewer.id, top, limit: count, before, offset });
+		const posts = await postsByIds(viewer.id, ids);
+		ids.forEach((id, i) => posts.get(id) && entries.push(tweetEntry(posts.get(id)!, sort(i + 1))));
+		if (ids.length === count) next = top ? `o${offset + count}` : `b${ids[ids.length - 1]}`;
+	}
+	entries.push(cursorEntry("Top", `t${base}`, (base + 1n).toString()));
+	entries.push(cursorEntry("Bottom", next ?? "end", sort(count + 1)));
+	return searchTimeline([{ type: "TimelineAddEntries", entries }]);
+}
+
+// Explore: hashtags used most in the last week, as trends
+async function explorePage() {
+	const trends = await trendingHashtags(7, 20);
+	const base = BigInt(newId());
+	const entries = trends.map((t, i) => ({
+		entryId: `trend-${t.tag.slice(1)}`,
+		sortIndex: (base - BigInt(i)).toString(),
+		content: {
+			__typename: "TimelineTimelineItem",
+			entryType: "TimelineTimelineItem",
+			itemContent: {
+				__typename: "TimelineTrend",
+				itemType: "TimelineTrend",
+				name: t.tag,
+				rank: String(i + 1),
+				trend_url: { url: `twitter://search/?query=${encodeURIComponent(t.tag)}&src=trend_click&vertical=trends`, urlType: "DeepLink" },
+				trend_metadata: { domain_context: "Trending", meta_description: `${t.posts} post${t.posts === 1 ? "" : "s"}` },
+			},
+		},
+	}));
+	const timeline = { instructions: [{ type: "TimelineAddEntries", entries }] };
+	return { data: { explore_page: { id: globalId("ExplorePage", "explore"), body: { __typename: "Timeline", timeline } } } };
+}
+
+Object.assign(handlers, {
+	SearchTimeline: (v: Viewer, vars: Vars) => search(v, vars),
+	ExplorePage: () => explorePage(),
+} satisfies Record<string, Handler>);
 
 export const knownOperation = (name: string) => name in handlers;
 

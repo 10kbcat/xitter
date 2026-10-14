@@ -173,9 +173,19 @@ function userMentions(p: PostRow) {
 	return out;
 }
 
+// #tags in the text; the client links each to a search for it
+function hashtags(text: string) {
+	// any script's letters (#привет), at least one letter, not glued to a word before it
+	return [...text.matchAll(/(?<![\p{L}\p{N}_#&])#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu)].map((m) => {
+		const start = [...text.slice(0, m.index)].length;
+		return { indices: [start, start + [...m[0]].length], text: m[1] };
+	});
+}
+
 export function tweetResult(p: PostRow, withTypename = true): Record<string, unknown> {
 	const textLength = [...p.text].length;
 	const mentions = userMentions(p);
+	const tags = hashtags(p.text);
 	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
 	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
@@ -201,7 +211,11 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 			conversation_id_str: p.conversation_id,
 			created_at: apiDate(p.created_at),
 			display_text_range: [0, [...p.text].length],
-			entities: { ...(media.length ? { media } : {}), ...(mentions.length ? { user_mentions: mentions } : {}) },
+			entities: {
+				...(media.length ? { media } : {}),
+				...(mentions.length ? { user_mentions: mentions } : {}),
+				...(tags.length ? { hashtags: tags } : {}),
+			},
 			...(media.length ? { extended_entities: { media } } : {}),
 			favorite_count: p.like_count,
 			favorited: p.liked,
@@ -312,19 +326,20 @@ export const feedEntry = (item: { id: string; post: PostRow; repost?: { by: User
 
 // the Media tab: one grid module, later pages append to it
 const GRID = "profile-grid-0";
-const gridItems = (posts: PostRow[]) =>
-	posts.map((p) => ({ entryId: `${GRID}-tweet-${p.id}`, item: { itemContent: tweetItem(tweetResult(p), undefined, "MediaGrid") } }));
-export const gridEntry = (posts: PostRow[], sortIndex: string) => ({
+const gridItems = (posts: PostRow[], grid: string) =>
+	posts.map((p) => ({ entryId: `${grid}-tweet-${p.id}`, item: { itemContent: tweetItem(tweetResult(p), undefined, "MediaGrid") } }));
+// grid is the module's id: the profile's media tab and search each have their own
+export const gridEntry = (posts: PostRow[], sortIndex: string, grid = GRID) => ({
 	content: {
 		__typename: "TimelineTimelineModule",
 		displayType: "VerticalGrid",
 		entryType: "TimelineTimelineModule",
-		items: gridItems(posts),
+		items: gridItems(posts, grid),
 	},
-	entryId: GRID,
+	entryId: grid,
 	sortIndex,
 });
-export const gridAppend = (posts: PostRow[]) => ({ type: "TimelineAddToModule", moduleEntryId: GRID, moduleItems: gridItems(posts) });
+export const gridAppend = (posts: PostRow[], grid = GRID) => ({ type: "TimelineAddToModule", moduleEntryId: grid, moduleItems: gridItems(posts, grid) });
 
 // one reply shown as its own thread under the opened post
 export const replyEntry = (p: PostRow, sortIndex: string) => ({
