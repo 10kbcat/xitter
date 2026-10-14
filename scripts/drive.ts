@@ -124,7 +124,7 @@ for (const step of steps) {
 		consoleErrors.clear();
 	} else if (kind === "wait") await Bun.sleep(Number(arg) * 1000);
 	else if (kind === "click") console.log(`click ${arg}: ${await evaluate(clickText(arg))}`);
-	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(arg)}); if (!e) return "not found"; e.click(); return "clicked"; })()`)}`);
+	else if (kind === "css") console.log(`css ${arg}: ${await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(arg)}); if (!e) return "not found"; e.focus?.(); e.click(); return "clicked"; })()`)}`);
 	else if (kind === "type") await call("Input.insertText", { text: arg });
 	else if (kind === "file") {
 		const cut = arg.lastIndexOf("=");

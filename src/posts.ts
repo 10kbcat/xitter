@@ -2,6 +2,7 @@ import type { User } from "./auth";
 import { sql } from "./db";
 import { newId } from "./ids";
 import type { PostRow } from "./model";
+import { articlesByIds } from "./articles";
 import { mediaForPosts } from "./media";
 import { toUser, userCols, usersByIds } from "./users";
 
@@ -10,7 +11,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.created_at,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -33,6 +34,7 @@ function toRow(r: any): PostRow {
 		reply_to_id: r.reply_to_id,
 		conversation_id: r.conversation_id,
 		quote_id: r.quote_id,
+		article_id: r.article_id,
 		created_at: r.created_at,
 		reply_user_id: r.reply_user_id,
 		reply_screen_name: r.reply_screen_name,
@@ -48,10 +50,12 @@ function toRow(r: any): PostRow {
 	};
 }
 
-// photos, and the post each one quotes (one level: a quote inside a quote is not expanded)
+// media, articles, and the post each one quotes (one level: a quote inside a quote is not expanded)
 async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promise<PostRow[]> {
 	const media = await mediaForPosts(posts.map((p) => p.id));
 	for (const p of posts) p.media = media.get(p.id) ?? [];
+	const articles = await articlesByIds(viewerId, [...new Set(posts.map((p) => p.article_id).filter((id): id is string => !!id))]);
+	for (const p of posts) if (p.article_id) p.article = articles.get(p.article_id);
 	const quoteIds = [...new Set(posts.map((p) => p.quote_id).filter((id): id is string => !!id))];
 	if (quotes && quoteIds.length) {
 		const quoted = await postsByIds(viewerId, quoteIds, false);
@@ -85,6 +89,8 @@ export type FeedQuery = {
 	media?: "any" | "photo" | "video";
 	// replies and nothing else
 	onlyReplies?: boolean;
+	// posts that carry an article
+	articlesOnly?: boolean;
 	limit: number;
 	// exclusive item ids
 	before?: string;
@@ -100,6 +106,7 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				: sql`true`;
 	const kindFilter = q.kinds === "posts" ? sql`f.reposter_id is null` : q.kinds === "reposts" ? sql`f.reposter_id is not null` : sql`true`;
 	const replyFilter = q.onlyReplies ? sql`f.is_reply` : q.replies ? sql`true` : sql`not f.is_reply`;
+	const articleFilter = q.articlesOnly ? sql`exists (select 1 from posts a where a.id = f.post_id and a.article_id is not null)` : sql`true`;
 	const mediaFilter = !q.media
 		? sql`true`
 		: q.media === "any"
@@ -108,9 +115,9 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
 	const rows = q.after
-		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and f.item_id > ${q.after}::bigint
+		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
-		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
+		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
 			order by f.item_id desc limit ${q.limit}`;
 	if (q.after) rows.reverse();
 
@@ -158,7 +165,7 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 	return hydrate(viewerId, rows.map(toRow));
 }
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string } = {}): Promise<string> {
+export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string } = {}): Promise<string> {
 	const id = newId();
 	let conversationId = id;
 	if (opts.replyToId) {
@@ -170,8 +177,8 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		const [quoted] = await sql`select id from posts where id = ${opts.quoteId}::bigint`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 	}
-	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id)
-		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint)`;
+	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id)
+		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint)`;
 	return id;
 }
 

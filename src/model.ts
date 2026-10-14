@@ -3,6 +3,7 @@
 
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
+import type { ArticleEntity } from "./articles";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 
 const DEFAULT_AVATAR = `${PUBLIC_ORIGIN}/abs/sticky/default_profile_images/default_profile_normal.png`;
@@ -67,6 +68,7 @@ export function userResult(u: User) {
 		super_followed_by: false,
 		super_following: false,
 		tweet_counts: { media_tweets: u.stats?.mediaPosts ?? 0, tweets: u.stats?.posts ?? 0 },
+		user_seed_tweet_count: u.stats?.articles ?? 0,
 		verification: verification(u),
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
 		website: { url: u.website ?? "" },
@@ -93,6 +95,7 @@ export function legacyUser(u: User) {
 		followers_count: u.stats?.followers ?? 0,
 		friends_count: u.stats?.following ?? 0,
 		media_count: u.stats?.mediaPosts ?? 0,
+		user_seed_tweet_count: u.stats?.articles ?? 0,
 		statuses_count: u.stats?.posts ?? 0,
 		url: u.website ?? "",
 		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
@@ -143,6 +146,9 @@ export type PostRow = {
 	bookmarked: boolean;
 	author: User;
 	media?: MediaRow[];
+	article_id?: string | null;
+	// the published article this post carries
+	article?: ArticleEntity;
 	// the post this one quotes, when it still exists
 	quoted?: PostRow;
 };
@@ -158,6 +164,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 	return {
 		...(withTypename ? { __typename: "Tweet" } : {}),
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
+		...(p.article ? { article: { article_results: { result: p.article } } } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
 		edit_control: {

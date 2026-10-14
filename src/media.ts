@@ -64,7 +64,7 @@ const fileOf = (id: string) => join(MEDIA_DIR, id);
 const EXT: Record<string, string> = { "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/jpeg": "jpg" };
 const EXT_VIDEO: Record<string, string> = { "video/mp4": "mp4" };
 export const mediaUrl = (id: string, mime: string) => `${PUBLIC_ORIGIN}/media/${id}.${EXT[mime] ?? EXT_VIDEO[mime] ?? "bin"}`;
-const posterUrl = (id: string) => `${PUBLIC_ORIGIN}/media/poster/${id}.jpg`;
+export const posterUrl = (id: string) => `${PUBLIC_ORIGIN}/media/poster/${id}.jpg`;
 // stored paths are relative so the instance can move to another domain
 export const absolute = (path: string | null) => (path?.startsWith("/") ? PUBLIC_ORIGIN + path : path);
 

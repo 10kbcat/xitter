@@ -61,6 +61,10 @@ export function settingsFor(user: User): Record<string, unknown> {
 	};
 }
 
+// Paid features the client gates on a per-account claim. Nothing is paid for
+// here, so every account holds them.
+const CLAIMED_FEATURES = Object.fromEntries(["subscriptions_feature_article_composer"].map((k) => [k, { value: "true" }]));
+
 // Switches whose values name x.com hosts. The client checks them against host
 // lists that patch.ts has already rewritten, so the captured value would fail;
 // without the switch the client falls back to its (patched) default.
@@ -114,7 +118,7 @@ function initialState(user: User, fs: NonNullable<ReturnType<typeof loadBuild>>[
 			},
 		},
 		educationFlags: {},
-		userClaim: { config: { subscriptions: {}, features: {} }, commerceSubscriptions: [], debug: {}, fetchStatus: "loaded" },
+		userClaim: { config: { subscriptions: {}, features: CLAIMED_FEATURES }, commerceSubscriptions: [], debug: {}, fetchStatus: "loaded" },
 		session: {
 			communitiesActions: { create: false },
 			country: "US",

@@ -18,6 +18,8 @@ export type User = {
 	stats?: {
 		posts: number;
 		mediaPosts: number;
+		// posts carrying an article; the profile shows its Articles tab when there are any
+		articles: number;
 		likes: number;
 		followers: number;
 		following: number;

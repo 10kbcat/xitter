@@ -98,3 +98,21 @@ create or replace view feed_items as
 -- videos: converted after upload; 'processing' until ffmpeg is done
 alter table media add column if not exists duration_ms integer;
 alter table media add column if not exists state text not null default 'ready';
+
+-- long-form articles; the body is the editor's Draft.js document, kept as sent.
+-- Publishing creates a post that carries the article (posts.article_id).
+create table if not exists articles (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	title text not null default '',
+	content_state jsonb,
+	plain_text text not null default '',
+	cover_media_id bigint references media (id) on delete set null,
+	-- 'Draft' or 'Published'
+	state text not null default 'Draft',
+	created_at timestamptz not null default now(),
+	modified_at timestamptz not null default now(),
+	first_published_at timestamptz
+);
+create index if not exists articles_user_idx on articles (user_id, state, modified_at desc);
+alter table posts add column if not exists article_id bigint references articles (id) on delete set null;

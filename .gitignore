@@ -6,7 +6,7 @@ har-raw/
 samples/
 # proprietary client bundle, fetched by script
 client/
-server.log
+server.log*
 .probe/
 # uploaded files
 media/

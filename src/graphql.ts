@@ -1,6 +1,7 @@
 // GraphQL operations, routed by name. The client sends a query id that changes
 // with every build; the name after it is stable.
 
+import * as articles from "./articles";
 import type { Viewer } from "./auth";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
@@ -159,15 +160,15 @@ function userId(vars: Vars): string {
 // Profile tabs: posts and reposts, with or without replies, or reposts only.
 // The pinned post leads the posts tab on the first page.
 const profileFeed =
-	(withReplies: boolean, kinds: "both" | "posts" | "reposts", onlyReplies = false): Handler =>
+	(withReplies: boolean, kinds: "both" | "posts" | "reposts", onlyReplies = false, articlesOnly = false): Handler =>
 	async (viewer, vars) => {
 		const { count, at, newer } = pageOf(vars);
 		// profile tabs only page downwards
 		if (newer) return userTimeline([]);
 		const owner = userId(vars);
-		const items = await feed({ viewerId: viewer.id, authors: { user: owner }, replies: withReplies, onlyReplies, kinds, limit: count, before: at });
+		const items = await feed({ viewerId: viewer.id, authors: { user: owner }, replies: withReplies, onlyReplies, articlesOnly, kinds, limit: count, before: at });
 		let pinned: Awaited<ReturnType<typeof getPost>>;
-		if (!at && !withReplies && kinds === "both") {
+		if (!at && !withReplies && kinds === "both" && !articlesOnly) {
 			const user = await userById(viewer.id, owner);
 			pinned = user?.pinned_post_id ? await getPost(viewer.id, user.pinned_post_id) : undefined;
 		}
@@ -261,6 +262,11 @@ const handlers: Record<string, Handler> = {
 		return { data: { unretweet: { source_tweet_results: { result: { rest_id: id } } } } };
 	},
 
+	TweetResultsByRestIds: async (v, vars) => {
+		const ids = Array.isArray(vars.tweetIds) ? (vars.tweetIds as unknown[]).map(String).filter(isId).slice(0, 100) : [];
+		const posts = await Promise.all(ids.map((id) => getPost(v.id, id)));
+		return { data: { tweetResult: posts.map((p) => (p ? { result: tweetResult(p) } : {})) } };
+	},
 	TweetResultByRestId: async (v, vars) => {
 		const post = await getPost(v.id, postId(vars, "tweetId"));
 		return { data: post ? { tweetResult: { result: tweetResult(post) } } : {} };
@@ -360,13 +366,84 @@ const handlers: Record<string, Handler> = {
 	grokAccountJwtQuery: () => ({ data: {} }),
 };
 
+// articles: the editor's operations, the redirect from /i/article/<id> and the profile tab
+const articleId = (vars: Vars, key = "articleEntityId") => {
+	const id = vars[key];
+	if (!isId(id)) throw new PostError("Article not found.", 34);
+	return id;
+};
+// the editor and its preview render a published article through its post,
+// so the post goes into the article's metadata in full
+async function withPost<T extends articles.ArticleEntity | undefined>(viewerId: string, article: T): Promise<T> {
+	const ref = article?.metadata?.tweet_results;
+	if (!ref) return article;
+	const post = await getPost(viewerId, ref.rest_id);
+	if (post) ref.result = tweetResult(post) as any;
+	return article;
+}
+
+const articleHandlers: Record<string, Handler> = {
+	ArticleEntityDraftCreate: async (v, vars) => ({
+		data: { articleentity_create_draft: { article_entity_results: { result: await withPost(v.id, await articles.createDraft(v.id, vars.title, vars.content_state)) } } },
+	}),
+	ArticleEntityResultByRestId: async (v, vars) => {
+		const article = await withPost(v.id, await articles.getArticle(v.id, articleId(vars)));
+		return { data: article ? { article_result_by_rest_id: { result: article } } : {} };
+	},
+	ArticleRedirectScreenQuery: async (v, vars) => {
+		const article = await articles.getArticle(v.id, articleId(vars), false);
+		return { data: { article_result_by_rest_id: article ? { result: article } : {} } };
+	},
+	ArticleEntityUpdateTitle: async (v, vars) => ({ data: { articleentity_update_title: await withPost(v.id, await articles.updateTitle(v.id, articleId(vars), vars.title)) } }),
+	ArticleEntityUpdateContent: async (v, vars) => ({
+		data: { articleentity_update_content_state: await withPost(v.id, await articles.updateContent(v.id, articleId(vars, "article_entity"), vars.content_state)) },
+	}),
+	ArticleEntityUpdateCoverMedia: async (v, vars) => ({
+		data: { articleentity_update_cover_media: await withPost(v.id, await articles.updateCover(v.id, articleId(vars), (vars.coverMedia as any)?.media_id)) },
+	}),
+	ArticleEntityPublish: async (v, vars) => {
+		const text = typeof vars.tweetText === "string" ? vars.tweetText : "";
+		if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
+		const result = await withPost(v.id, await articles.publish(v.id, articleId(vars), text, (t, id) => createPost(v.id, t, { articleId: id })));
+		return { data: { articleentity_publish: { article_entity_results: { result } } } };
+	},
+	ArticleEntityUnpublish: async (v, vars) => ({
+		data: { articleentity_unpublish: { article_entity_results: { result: await articles.unpublish(v.id, articleId(vars)) } } },
+	}),
+	ArticleEntityDelete: async (v, vars) => {
+		await articles.deleteArticle(v.id, articleId(vars));
+		return { data: { articleentity_delete: "Done" } };
+	},
+	ArticleEntitiesSlice: async (v, vars) => {
+		const owner = isId(vars.userId) ? vars.userId : v.id;
+		const slice = await articles.slice(v.id, owner, String(vars.lifecycle ?? "Draft"), vars.cursor);
+		const items = await Promise.all(slice.items.map((a) => withPost(v.id, a)));
+		const next = slice.next;
+		return {
+			data: {
+				user: {
+					result: {
+						__typename: "User",
+						articles_article_mixer_slice: {
+							items: items.map((result) => ({ article_entity_results: { result } })),
+							slice_info: next ? { next_cursor: next } : {},
+						},
+					},
+				},
+			},
+		};
+	},
+	UserArticlesTweets: profileFeed(false, "posts", false, true),
+};
+Object.assign(handlers, articleHandlers);
+
 export const knownOperation = (name: string) => name in handlers;
 
 export async function runOperation(name: string, viewer: Viewer, vars: Vars): Promise<Response> {
 	try {
 		return Response.json(await handlers[name](viewer, vars));
 	} catch (e) {
-		if (e instanceof PostError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
+		if (e instanceof PostError || e instanceof articles.ArticleError) return Response.json({ errors: [{ message: e.message, code: e.code }], data: {} });
 		throw e;
 	}
 }
