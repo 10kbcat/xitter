@@ -466,6 +466,12 @@ const ACTIONS: Record<string, Action> = {
 				await setSetting("default_follows", found.map((f: any) => f.screen_name));
 				changed.push("default_follows");
 			}
+			if (typeof b.source_url === "string") {
+				const url = b.source_url.trim();
+				if (!/^https?:\/\/\S+$/.test(url)) throw new AdminError("The source link must be an http or https address.");
+				await setSetting("source_url", url);
+				changed.push("source_url");
+			}
 			if (typeof b.rules === "string") {
 				await setSetting("rules", b.rules.slice(0, 20000));
 				changed.push("rules");

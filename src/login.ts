@@ -30,6 +30,7 @@ const layout = (title: string, body: string) => `<!doctype html>
 	.rules { margin: 0 0 4px; white-space: pre-wrap; line-height: 1.45; }
 	form:has(.rules) { width: min(560px, calc(100vw - 32px)); }
 	a { color: #1d9bf0; text-decoration: none; }
+	.source { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; color: #71767b; font-size: 13px; }
 	fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 	legend { margin-bottom: 8px; color: #71767b; }
 	fieldset label { cursor: pointer; }
@@ -42,6 +43,7 @@ const layout = (title: string, body: string) => `<!doctype html>
 </head>
 <body>
 ${body}
+<p class="source">${esc(settings().instance_name)} runs <a href="${esc(settings().source_url)}">open source</a> software (AGPL-3.0)</p>
 </body>
 </html>`;
 

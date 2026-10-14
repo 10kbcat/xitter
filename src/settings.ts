@@ -51,6 +51,8 @@ const DEFAULTS = {
 	default_follows: [] as string[],
 	// the instance's rules, shown at /rules and linked from sign-up
 	rules: "",
+	// AGPL-3.0: people using an instance can get its source here
+	source_url: process.env.SOURCE_URL ?? "https://github.com/Xittered/xitter",
 };
 export type Settings = typeof DEFAULTS;
 type Key = keyof Settings;

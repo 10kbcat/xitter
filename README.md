@@ -1,44 +1,78 @@
-# xitter
+# Xitter
 
-A self-hosted backend for the Twitter web client. The server hosts a pinned
+A self-hosted backend for the X (Twitter) web client. The server hosts a pinned
 build of the official client from your own domain and answers its API from
-Postgres.
+Postgres, so the real x.com interface runs against your own instance.
 
-The client itself is not in this repository. You download it during setup, and
-it stays on your machine.
+The client itself is not in this repository. Each instance downloads its own
+copy during setup, and it stays on that machine.
 
 ## What works
 
-Sign-in (own login page), home timeline, post page with replies, posting,
-replying, likes, reposts (as counters), bookmarks, profiles with posts,
-replies and likes tabs, follows and follower lists, blue, gold and grey badges.
-Features that are not implemented yet return valid empty answers so the client
-does not break.
+- Posting, replies, quotes, reposts, likes, bookmarks, pinned posts, @mentions
+  and hashtags
+- Images, GIFs and video (converted with ffmpeg), long-form articles
+- Profiles with all their tabs, editing, follows, followers
+- Home timeline: a ranked "For you" and a chronological "Following"
+- Notifications with unread counts
+- Search with X's operators, trends, Explore
+- Blocks, mutes and muted words
+- Invite-only sign-up, pride flag badges, organisations with affiliates
+- Reporting posts and accounts
+- An admin panel at `/admin`: users, standing (restrict, limit, suspend),
+  badges, roles, organisations, posts, reports, invites, instance settings,
+  feature switches, announcements and an audit log
 
-## Setup
+Not built yet: direct messages, lists, communities, polls, scheduling.
 
-You need [Bun](https://bun.sh) and Postgres.
+## Running it locally
+
+### What you need
+
+- [Bun](https://bun.sh) 1.4 or newer
+- PostgreSQL 14 or newer, with an empty database
+- An X account you can sign in to in a browser. Its `auth_token` cookie is used
+  once to download the client; nothing about the account is kept.
+- Optional: [ffmpeg](https://ffmpeg.org) on the PATH, for video uploads
+
+### Steps
 
 ```sh
+git clone https://github.com/Xittered/xitter
+cd xitter
 bun install
 
-# 1. pin a client build. Needs the auth_token cookie of any Twitter account
-#    (or a HAR capture that contains a signed-in x.com/home page).
+# 1. a database (any name; set DATABASE_URL if it isn't the default below)
+createdb xitter
+export DATABASE_URL=postgres://<user>@localhost:5432/xitter
+
+# 2. download a client build. Take the value of the auth_token cookie from
+#    a signed-in x.com tab (DevTools > Application > Cookies > https://x.com).
 bun scripts/fetch-client.ts --token <auth_token>
-# or: bun scripts/fetch-client.ts --har capture.har
 
-# 2. create an account (badge is optional: blue, business or government)
-bun scripts/create-user.ts <name> <password> "<display name>" [badge]
+# 3. the first account, made an admin
+bun scripts/create-user.ts <name> <password> "<display name>"
+bun scripts/make-admin.ts <name>
 
-# 3. run
+# 4. run
 bun src/server.ts
 ```
 
-Then open `http://localhost:3000/login`.
+Open `http://localhost:3000/login` and sign in. The tables are created on the
+first start.
 
-Only build data is kept from the fetched page: script names, the module loader,
-feature switches and page metadata. Nothing about the account the token belongs
-to is saved.
+More accounts: make invite codes in the admin panel (`/admin` > Invites) or with
+`bun scripts/invite.ts`, then sign up at `/signup?code=<code>`.
+
+On Windows, run the commands in Git Bash or set the variables with
+`$env:DATABASE_URL = "..."` in PowerShell.
+
+### Keep these private
+
+- The `auth_token` cookie is a live login to your X account. Use it only for
+  `fetch-client.ts` and don't share it.
+- `client/` holds X's own client code. It is downloaded per instance and must
+  not be committed or shared.
 
 ## Configuration
 
@@ -48,16 +82,29 @@ to is saved.
 | `PORT` | `3000` | Listen port |
 | `PUBLIC_ORIGIN` | `http://localhost:$PORT` | Address browsers use to reach the instance |
 | `CLIENT_DIR` | `client` | Where the pinned client is stored |
+| `MEDIA_DIR` | `media` | Uploaded images and videos |
+| `BRANDING_DIR` | `data/branding` | Logos uploaded in the admin panel |
+| `FFMPEG`, `FFPROBE` | `ffmpeg`, `ffprobe` | Video tools |
+| `MAX_VIDEO_MB`, `MAX_VIDEO_SECONDS` | `200`, `600` | Starting video limits (changeable in the panel) |
+| `SOURCE_URL` | this repository | The source link shown to users |
 | `LOG_REQUESTS` | unset | `1` logs every API call, `errors` also prints the client's error reports |
 
-The schema is created on startup.
+Everything else (name, sign-up mode, features, limits, announcement, rules,
+logos) is set in the admin panel.
 
 ## Development
 
-- `sh scripts/probe.sh [path]` restarts the server, signs in through the login
-  form in headless Edge, loads a page and prints the API calls, rendered posts
-  and console errors. The screenshot goes to `.probe/shot.png`.
-- `bun scripts/js-errors.ts <path without leading slash>` traps the exceptions
-  thrown while a page renders (uses the browser profile `probe.sh` left signed in).
-- `bun scripts/har-extract.ts` turns raw HAR captures in `har-raw/` into cleaned
-  per-request samples in `samples/`, for looking up response formats.
+- `GET /_debug/unknown` lists the client calls no handler answers yet, most
+  frequent first. Start there when a screen is empty.
+- `scripts/test-*.ts` check each feature end to end against a running server,
+  for example `bun scripts/test-posts.ts <user A> <user B> <password>`. Each
+  script's first lines give its arguments.
+- `bun scripts/drive.ts <path> <steps...>` clicks through the real client in
+  headless Edge and takes screenshots (uses the browser profile
+  `scripts/probe.sh` leaves signed in).
+
+## License
+
+[AGPL-3.0](LICENSE). If you run a modified instance for other people, you must
+offer them its source; the sign-in page links to it (`SOURCE_URL`, or the admin
+panel's Settings).
