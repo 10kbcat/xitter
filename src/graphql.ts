@@ -1,6 +1,7 @@
 // GraphQL operations, routed by name. The client sends a query id that changes
 // with every build; the name after it is stable.
 
+import { sql } from "./db";
 import { blockedIds } from "./blocks";
 import { rankedFeed } from "./ranking";
 import * as articles from "./articles";
@@ -328,6 +329,36 @@ const handlers: Record<string, Handler> = {
 		if (!user) return { data: {} };
 		if (user.status === "suspended" && !v.role) return { data: { user: { result: { __typename: "UserUnavailable", reason: "Suspended", message: "This account is suspended." } } } };
 		return { data: { user: { result: userResult(user) } } };
+	},
+	// "About this account" (/<name>/about)
+	AboutAccountQuery: async (v, vars) => {
+		const user = typeof vars.screenName === "string" ? await userByName(v.id, vars.screenName) : undefined;
+		if (!user || (user.status === "suspended" && !v.role))
+			return { data: { user_result_by_screen_name: { result: { __typename: "UserUnavailable", unavailable_reason: user ? "Suspended" : "NotFound" } } } };
+		const [extra] = await sql`select u.verified_at,
+			(select count(*)::int from username_changes c where c.user_id = u.id) as changes,
+			(select max(c.changed_at) from username_changes c where c.user_id = u.id) as last_change
+			from users u where u.id = ${user.id}::bigint`;
+		const base = userResult(user);
+		return {
+			data: {
+				user_result_by_screen_name: {
+					result: {
+						...base,
+						rest_id: user.id,
+						identity_profile_labels_highlighted_label: base.affiliates_highlighted_label,
+						about_profile: {
+							affiliate_username: user.org?.screen_name ?? null,
+							username_changes: { count: String(extra.changes), ...(extra.last_change ? { last_changed_at_msec: String(extra.last_change.getTime()) } : {}) },
+						},
+						verification_info: {
+							is_identity_verified: false,
+							...(user.verified_type && extra.verified_at ? { reason: { verified_since_msec: String(extra.verified_at.getTime()) } } : {}),
+						},
+					},
+				},
+			},
+		};
 	},
 	UserByRestId: async (v, vars) => {
 		const user = await userById(v.id, userId(vars));

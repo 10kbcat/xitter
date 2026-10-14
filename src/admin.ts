@@ -148,7 +148,10 @@ const ACTIONS: Record<string, Action> = {
 				const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${changes.screen_name}) and id <> ${id}::bigint`;
 				if (taken) throw new AdminError("That handle is taken.");
 			}
+			const [old] = await sql`select screen_name from users where id = ${id}::bigint`;
 			await sql`update users set ${sql(changes)} where id = ${id}::bigint`;
+			if (changes.screen_name && changes.screen_name !== old.screen_name)
+				await sql`insert into username_changes (user_id, old_name, new_name) values (${id}::bigint, ${old.screen_name}, ${changes.screen_name})`;
 			await audit(a, "edit_profile", id, changes);
 			return {};
 		},
@@ -163,7 +166,9 @@ const ACTIONS: Record<string, Action> = {
 			await guard(a, id);
 			// an account stops being an organisation when it loses the gold badge
 			if (badge !== "business") await sql`delete from affiliations where org_id = ${id}::bigint`;
-			await sql`update users set verified_type = ${badge} where id = ${id}::bigint`;
+			// verified_at: "Verified since" on the About page; a new badge type starts it again
+			await sql`update users set verified_at = case when ${badge}::text is null then null when verified_type is distinct from ${badge}::text then now() else verified_at end,
+				verified_type = ${badge} where id = ${id}::bigint`;
 			await audit(a, "set_badge", id, { badge });
 			return {};
 		},

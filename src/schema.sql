@@ -219,3 +219,14 @@ create table if not exists reports (
 	created_at timestamptz not null default now()
 );
 create index if not exists reports_status_idx on reports (status, created_at desc);
+
+-- for "About this account": when the badge was given, and past handles
+alter table users add column if not exists verified_at timestamptz;
+update users set verified_at = created_at where verified_type is not null and verified_at is null;
+create table if not exists username_changes (
+	user_id bigint not null references users (id) on delete cascade,
+	old_name text not null,
+	new_name text not null,
+	changed_at timestamptz not null default now()
+);
+create index if not exists username_changes_user_idx on username_changes (user_id, changed_at desc);

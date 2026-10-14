@@ -65,15 +65,17 @@ export function settingsFor(user: User): Record<string, unknown> {
 }
 
 // The instance's logo over the client's X in the side bar: the X alone when the
-// bar is narrow, the word mark when it is wide (the client widens it at 1265px).
-// The client marks its dark themes with color-scheme on <html>.
+// bar is narrow, the word mark when it is wide. The bar's width depends on the
+// window and on the page (Chat keeps it narrow), so tidy.ts measures it and sets
+// data-wide-nav on <html>. The client marks its dark themes with color-scheme on <html>.
 const LOGO = 'header h1 a[aria-label="X"]';
 const DARK = 'html[style*="color-scheme: dark"]';
+const WIDE = "html[data-wide-nav]";
 const LOGO_CSS = `${LOGO} svg{opacity:0}
 ${LOGO}{background:url(/public/icon-light.png) center/36px no-repeat}
 ${DARK} ${LOGO}{background-image:url(/public/icon-dark.png)}
-@media (min-width:1265px){${LOGO}{width:150px;background-image:url(/public/logo-light.png);background-size:128px auto;background-position:10px center}
-${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}}`;
+${WIDE} ${LOGO}{width:150px;background-image:url(/public/logo-light.png);background-size:128px auto;background-position:10px center}
+${WIDE}${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}`;
 
 // Paid features the client gates on a per-account claim. Nothing is paid for
 // here, so every account holds them.

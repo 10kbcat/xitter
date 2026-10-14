@@ -89,8 +89,15 @@ export const TIDY_SCRIPT = `(function(){
 		bar.appendChild(text);bar.appendChild(x);
 		col.insertBefore(bar,col.firstChild);
 	}
+	// the side bar shows its labels (and our word mark) only when it is wide
+	function navWidth(){
+		var nav=document.querySelector('header[role="banner"] nav');
+		if(nav)document.documentElement.toggleAttribute("data-wide-nav",nav.getBoundingClientRect().width>=180);
+	}
+	window.addEventListener("resize",navWidth);
 	function tidy(){
 		ownScreens();
+		navWidth();
 		announce();
 		if(!T.imageGen)document.querySelectorAll('[role="dialog"] button').forEach(function(b){
 			if(b.innerText.trim()!=="Edit Photo")return;
