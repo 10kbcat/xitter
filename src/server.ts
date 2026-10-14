@@ -102,7 +102,7 @@ const server = Bun.serve({
 
 		if (!viewer) return Response.redirect("/login", 302);
 		const page = shell(viewer);
-		if (!page) return new Response("client page template is missing: run har:extract", { status: 500 });
+		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 	},
 	error(e) {
