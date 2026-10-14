@@ -4,7 +4,7 @@
 import type { Viewer } from "./auth";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
-import { cursorEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
+import { cursorEntry, feedEntry, pinnedEntry, replyEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
 import {
 	MAX_POST_LENGTH,
 	PostError,
@@ -12,14 +12,14 @@ import {
 	bookmarkedPosts,
 	createPost,
 	deletePost,
+	feed,
 	getPost,
-	homePosts,
 	likedPosts,
 	replies,
 	repost,
 	setMark,
+	setPinned,
 	unrepost,
-	userPosts,
 } from "./posts";
 import { followList, userById, userByName } from "./users";
 
@@ -36,17 +36,31 @@ function postId(vars: Vars, key = "tweet_id"): string {
 	return id;
 }
 
-// Cursors are "b<id>" (older than) and "t<id>" (newer than).
-const home: Handler = async (viewer, vars) => {
+// Cursors are "b<id>" (older than) and "t<id>" (newer than), over feed item ids.
+function pageOf(vars: Vars) {
 	const count = Math.min(Math.max(Number(vars.count) || 20, 1), 100);
 	const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
 	const at = isId(cursor.slice(1)) ? cursor.slice(1) : undefined;
-	const newer = cursor[0] === "t" && at;
-	const posts = await homePosts(viewer.id, count, newer ? { after: at } : { before: at });
+	return { count, at, newer: cursor[0] === "t" && !!at };
+}
 
-	const entries: unknown[] = posts.map((p) => tweetEntry(p, p.id));
-	const newest = posts[0]?.id ?? at ?? newId();
-	const oldest = posts[posts.length - 1]?.id ?? at ?? newest;
+// "For you" shows everyone; "Following" shows the viewer and the accounts they follow
+const home =
+	(following: boolean): Handler =>
+	async (viewer, vars) => {
+	const { count, at, newer } = pageOf(vars);
+	const items = await feed({
+		viewerId: viewer.id,
+		authors: following ? { following: true } : { all: true },
+		replies: false,
+		kinds: "both",
+		limit: count,
+		...(newer ? { after: at } : { before: at }),
+	});
+
+	const entries: unknown[] = items.map((i) => feedEntry(i, i.id));
+	const newest = items[0]?.id ?? at ?? newId();
+	const oldest = items[items.length - 1]?.id ?? at ?? newest;
 	// a poll for newer posts only moves the top cursor
 	entries.unshift(cursorEntry("Top", `t${newest}`, inc(newest)));
 	if (!newer) entries.push(cursorEntry("Bottom", `b${oldest}`, dec(oldest)));
@@ -112,7 +126,9 @@ const createTweet: Handler = async (viewer, vars) => {
 	if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
 	const replyTo = vars.reply?.in_reply_to_tweet_id;
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
-	const id = await createPost(viewer.id, text, replyTo);
+	// a quote arrives as a link to the quoted post
+	const quoteId = typeof vars.attachment_url === "string" ? /\/status(?:es)?\/(\d{1,19})/.exec(vars.attachment_url)?.[1] : undefined;
+	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId });
 	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
@@ -124,7 +140,12 @@ const userTimeline = (entries: unknown[]) => ({
 		user: {
 			result: {
 				__typename: "User",
-				timeline: { timeline: { instructions: [{ type: "TimelineAddEntries", entries }], metadata: { scribeConfig: { page: "profileBest" } } } },
+				timeline: {
+					timeline: {
+						instructions: [{ type: "TimelineAddEntries", entries }],
+						metadata: { scribeConfig: { page: "profileBest" } },
+					},
+				},
 			},
 		},
 	},
@@ -135,19 +156,27 @@ function userId(vars: Vars): string {
 	return vars.userId;
 }
 
-const profilePosts =
-	(withReplies: boolean): Handler =>
+// Profile tabs: posts and reposts, with or without replies, or reposts only.
+// The pinned post leads the posts tab on the first page.
+const profileFeed =
+	(withReplies: boolean, kinds: "both" | "reposts"): Handler =>
 	async (viewer, vars) => {
-		const count = Math.min(Math.max(Number(vars.count) || 20, 1), 100);
-		const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
+		const { count, at, newer } = pageOf(vars);
 		// profile tabs only page downwards
-		if (cursor[0] === "t") return userTimeline([]);
-		const before = isId(cursor.slice(1)) ? cursor.slice(1) : undefined;
-		const posts = await userPosts(viewer.id, userId(vars), withReplies, count, before);
-		const entries: unknown[] = posts.map((p) => tweetEntry(p, p.id));
-		if (posts.length) {
-			if (!before) entries.unshift(cursorEntry("Top", `t${posts[0].id}`, inc(posts[0].id)));
-			const last = posts[posts.length - 1].id;
+		if (newer) return userTimeline([]);
+		const owner = userId(vars);
+		const items = await feed({ viewerId: viewer.id, authors: { user: owner }, replies: withReplies, kinds, limit: count, before: at });
+		let pinned: Awaited<ReturnType<typeof getPost>>;
+		if (!at && !withReplies && kinds === "both") {
+			const user = await userById(viewer.id, owner);
+			pinned = user?.pinned_post_id ? await getPost(viewer.id, user.pinned_post_id) : undefined;
+		}
+		// the labelled pinned entry goes first; its regular copy would be a duplicate id
+		const entries: unknown[] = items.filter((i) => i.id !== pinned?.id).map((i) => feedEntry(i, i.id));
+		if (pinned) entries.unshift(pinnedEntry(pinned, inc(BigInt(newId()).toString())));
+		if (items.length) {
+			if (!at) entries.unshift(cursorEntry("Top", `t${items[0].id}`, inc(items[0].id)));
+			const last = items[items.length - 1].id;
 			entries.push(cursorEntry("Bottom", `b${last}`, dec(last)));
 		}
 		return userTimeline(entries);
@@ -177,8 +206,8 @@ const follows =
 const viewerUser = (fields: object) => ({ data: { viewer: { user_results: { result: { __typename: "User", ...fields } } } } });
 
 const handlers: Record<string, Handler> = {
-	HomeTimeline: home,
-	HomeLatestTimeline: home,
+	HomeTimeline: home(false),
+	HomeLatestTimeline: home(true),
 	TweetDetail: tweetDetail,
 	Bookmarks: bookmarks,
 	CreateTweet: createTweet,
@@ -231,10 +260,19 @@ const handlers: Record<string, Handler> = {
 		const users = await Promise.all(ids.filter(isId).map((id) => userById(v.id, id)));
 		return { data: { users: users.filter((u) => u !== undefined).map((u) => ({ result: userResult(u) })) } };
 	},
-	UserTweets: profilePosts(false),
+	UserTweets: profileFeed(false, "both"),
+	UserRepostsTimeline: profileFeed(false, "reposts"),
+	PinTweet: async (v, vars) => {
+		if (!(await setPinned(v.id, postId(vars)))) throw new PostError("You can only pin your own posts.", 144);
+		return { data: { pin_one_tweet: { result: "Done" } } };
+	},
+	UnpinTweet: async (v) => {
+		await setPinned(v.id, null);
+		return { data: { unpin_one_tweet: { result: "Done" } } };
+	},
 	// what the posts tab of this build actually requests
-	UserOriginalsTimeline: profilePosts(false),
-	UserTweetsAndReplies: profilePosts(true),
+	UserOriginalsTimeline: profileFeed(false, "both"),
+	UserTweetsAndReplies: profileFeed(true, "both"),
 	Likes: likes,
 	Following: follows("following"),
 	Followers: follows("followers"),

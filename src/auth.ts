@@ -11,6 +11,7 @@ export type User = {
 	website?: string;
 	avatar_url: string | null;
 	banner_url: string | null;
+	pinned_post_id?: string | null;
 	verified_type: "blue" | "business" | "government" | null;
 	created_at: Date;
 	// present when the row was loaded through users.ts

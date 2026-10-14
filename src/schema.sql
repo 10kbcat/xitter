@@ -81,3 +81,16 @@ create table if not exists media (
 create index if not exists media_post_idx on media (post_id, position);
 
 alter table users add column if not exists website text not null default '';
+
+alter table posts add column if not exists quote_id bigint references posts (id) on delete set null;
+alter table users add column if not exists pinned_post_id bigint references posts (id) on delete set null;
+create index if not exists reposts_user_idx on reposts (user_id, id desc);
+
+-- posts and reposts as one ordered stream; a repost's own id places it in time
+create or replace view feed_items as
+	select p.id as item_id, p.id as post_id, null::bigint as reposter_id, p.user_id as author_id,
+		p.reply_to_id is not null as is_reply, p.created_at
+	from posts p
+	union all
+	select r.id, r.post_id, r.user_id, r.user_id, false, r.created_at
+	from reposts r;

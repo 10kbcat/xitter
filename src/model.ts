@@ -39,7 +39,7 @@ export function userResult(u: User) {
 		media_permissions: { can_media_tag: true },
 		notifications_settings: { notifications_enabled: false },
 		parody_commentary_fan_label: "None",
-		pinned_items: {},
+		pinned_items: u.pinned_post_id ? { tweet_ids_str: [u.pinned_post_id] } : {},
 		possibly_sensitive: false,
 		privacy: { protected: false },
 		profile_bio: { description: u.bio, entities: { description: {} } },
@@ -88,6 +88,7 @@ export function legacyUser(u: User) {
 		media_count: 0,
 		statuses_count: u.stats?.posts ?? 0,
 		url: u.website ?? "",
+		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
 		is_blue_verified: u.verified_type !== null,
 		...(u.verified_type === "business" ? { verified_type: "Business" } : {}),
 		...(u.verified_type === "government" ? { verified_type: "Government" } : {}),
@@ -121,6 +122,7 @@ export type PostRow = {
 	text: string;
 	reply_to_id: string | null;
 	conversation_id: string;
+	quote_id: string | null;
 	created_at: Date;
 	reply_user_id: string | null;
 	reply_screen_name: string | null;
@@ -128,20 +130,27 @@ export type PostRow = {
 	repost_count: number;
 	bookmark_count: number;
 	reply_count: number;
+	quote_count: number;
 	liked: boolean;
 	reposted: boolean;
 	bookmarked: boolean;
 	author: User;
 	media?: MediaRow[];
+	// the post this one quotes, when it still exists
+	quoted?: PostRow;
 };
 
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
 
-export function tweetResult(p: PostRow, withTypename = true) {
+const permalink = (p: PostRow) => `${PUBLIC_ORIGIN}/${p.author.screen_name}/status/${p.id}`;
+
+export function tweetResult(p: PostRow, withTypename = true): Record<string, unknown> {
 	const textLength = [...p.text].length;
 	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
+	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
 		...(withTypename ? { __typename: "Tweet" } : {}),
+		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
 		edit_control: {
@@ -174,9 +183,15 @@ export function tweetResult(p: PostRow, withTypename = true) {
 						in_reply_to_user_id_str: p.reply_user_id,
 					}
 				: {}),
-			is_quote_status: false,
+			is_quote_status: !!p.quote_id,
+			...(p.quoted && quoteLink
+				? {
+						quoted_status_id_str: p.quoted.id,
+						quoted_status_permalink: { url: quoteLink, expanded: quoteLink, display: quoteLink.replace(/^https?:\/\//, "") },
+					}
+				: {}),
 			lang: "und",
-			quote_count: 0,
+			quote_count: p.quote_count,
 			reply_count: p.reply_count,
 			retweet_count: p.repost_count,
 			retweeted: p.reposted,
@@ -189,18 +204,80 @@ export function tweetResult(p: PostRow, withTypename = true) {
 	};
 }
 
-const tweetItem = (p: PostRow) => ({
+// A repost is its own post by the reposter: "RT @author: text" with the
+// original nested inside, carrying the counters and viewer state of the original.
+export function repostResult(id: string, by: User, createdAt: Date, original: PostRow) {
+	const text = `RT @${original.author.screen_name}: ${original.text}`;
+	return {
+		__typename: "Tweet",
+		cashtag_attachments: [],
+		core: { user_results: { result: userResult(by) } },
+		edit_control: { edit_tweet_ids: [id], editable_until_msecs: String(createdAt.getTime()), edits_remaining: "0", is_edit_eligible: false },
+		grok_analysis_button: false,
+		grok_annotations: {},
+		grok_translated_post_with_availability: { is_available: false },
+		is_translatable: false,
+		legacy: {
+			bookmark_count: original.bookmark_count,
+			bookmarked: original.bookmarked,
+			conversation_id_str: id,
+			created_at: apiDate(createdAt),
+			display_text_range: [0, [...text].length],
+			entities: {
+				user_mentions: [
+					{
+						id_str: original.author.id,
+						indices: [3, 4 + original.author.screen_name.length],
+						name: original.author.name,
+						screen_name: original.author.screen_name,
+					},
+				],
+			},
+			favorite_count: original.like_count,
+			favorited: original.liked,
+			full_text: text,
+			id_str: id,
+			is_quote_status: false,
+			lang: "und",
+			quote_count: original.quote_count,
+			reply_count: original.reply_count,
+			retweet_count: original.repost_count,
+			retweeted: original.reposted,
+			retweeted_status_result: { result: tweetResult(original) },
+			user_id_str: by.id,
+		},
+		rest_id: id,
+		unmention_data: {},
+		unmention_info: {},
+		views: { state: "Enabled" },
+	};
+}
+
+type SocialContext = { type: "TimelineGeneralContext"; contextType: string; text: string };
+
+const tweetItem = (result: unknown, socialContext?: SocialContext) => ({
 	__typename: "TimelineTweet",
 	itemType: "TimelineTweet",
 	tweetDisplayType: "Tweet",
-	tweet_results: { result: tweetResult(p) },
+	tweet_results: { result },
+	...(socialContext ? { socialContext } : {}),
 });
 
-export const tweetEntry = (p: PostRow, sortIndex: string) => ({
-	content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: tweetItem(p) },
-	entryId: `tweet-${p.id}`,
+const itemEntry = (id: string, result: unknown, sortIndex: string, socialContext?: SocialContext) => ({
+	content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: tweetItem(result, socialContext) },
+	entryId: `tweet-${id}`,
 	sortIndex,
 });
+
+export const tweetEntry = (p: PostRow, sortIndex: string) => itemEntry(p.id, tweetResult(p), sortIndex);
+
+// the client lifts an entry to the top of a profile only when it carries this label
+export const pinnedEntry = (p: PostRow, sortIndex: string) =>
+	itemEntry(p.id, tweetResult(p), sortIndex, { type: "TimelineGeneralContext", contextType: "Pin", text: "Pinned" });
+
+// a post or a repost from feed(); entry ids are item ids, so both fit in one timeline
+export const feedEntry = (item: { id: string; post: PostRow; repost?: { by: User; created_at: Date } }, sortIndex: string) =>
+	item.repost ? itemEntry(item.id, repostResult(item.id, item.repost.by, item.repost.created_at, item.post), sortIndex) : tweetEntry(item.post, sortIndex);
 
 // one reply shown as its own thread under the opened post
 export const replyEntry = (p: PostRow, sortIndex: string) => ({
@@ -208,7 +285,7 @@ export const replyEntry = (p: PostRow, sortIndex: string) => ({
 		__typename: "TimelineTimelineModule",
 		displayType: "VerticalConversation",
 		entryType: "TimelineTimelineModule",
-		items: [{ entryId: `conversationthread-${p.id}-tweet-${p.id}`, item: { itemContent: tweetItem(p) } }],
+		items: [{ entryId: `conversationthread-${p.id}-tweet-${p.id}`, item: { itemContent: tweetItem(tweetResult(p)) } }],
 		metadata: { conversationMetadata: { allTweetIds: [p.id], enableDeduplication: true } },
 	},
 	entryId: `conversationthread-${p.id}`,

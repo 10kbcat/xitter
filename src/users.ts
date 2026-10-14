@@ -6,7 +6,7 @@ import { sql } from "./db";
 // same account never reaches the client in two different states.
 export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
-	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.verified_type as a_verified_type, u.created_at as a_created_at,
+	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.created_at as a_created_at,
 	(select count(*)::int from posts x where x.user_id = u.id) as a_posts,
 	(select count(*)::int from likes x where x.user_id = u.id) as a_likes,
 	(select count(*)::int from follows x where x.followee_id = u.id) as a_followers,
@@ -24,6 +24,7 @@ export function toUser(r: any): User {
 		website: r.a_website,
 		avatar_url: r.a_avatar_url,
 		banner_url: r.a_banner_url,
+		pinned_post_id: r.a_pinned_post_id,
 		verified_type: r.a_verified_type,
 		created_at: r.a_created_at,
 		stats: {
@@ -62,4 +63,10 @@ export async function followList(viewerId: string, userId: string, kind: "follow
 			: await sql`select ${userCols(viewerId)} from follows f join users u on u.id = f.follower_id
 				where f.followee_id = ${userId}::bigint order by f.created_at desc limit ${limit}`;
 	return rows.map(toUser);
+}
+
+export async function usersByIds(viewerId: string, ids: string[]): Promise<Map<string, User>> {
+	if (!ids.length) return new Map();
+	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = any(${sql.array(ids, "INT8")})`;
+	return new Map(rows.map((r: any) => [r.a_id as string, toUser(r)]));
 }

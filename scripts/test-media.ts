@@ -50,7 +50,7 @@ const media = post?.legacy?.extended_entities?.media?.[0];
 check("photo-only post", media?.id_str === photo, { type: media?.type, size: media?.original_info, url: media?.media_url_https });
 
 const file = await fetch(media.media_url_https, { headers });
-check("photo is served to a signed-in user", file.status === 200 && file.headers.get("content-type")?.startsWith("image/"), `${file.status} ${file.headers.get("content-type")}`);
+check("photo is served to a signed-in user", file.status === 200 && !!file.headers.get("content-type")?.startsWith("image/"), `${file.status} ${file.headers.get("content-type")}`);
 check("photo is hidden from visitors", (await fetch(media.media_url_https)).status === 404);
 const stolen = await gql("CreateTweet", { tweet_text: "reuse", media: { media_entities: [{ media_id: photo }] } });
 check("an upload cannot be attached twice", !stolen.data?.create_tweet?.tweet_results?.result?.legacy?.extended_entities);
