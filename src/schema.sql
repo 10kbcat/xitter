@@ -412,3 +412,44 @@ alter table articles add column if not exists hidden boolean not null default fa
 alter table users add column if not exists org_badge_id bigint references custom_badges(id) on delete set null;
 create index if not exists users_org_badge_idx on users(org_badge_id);
 create index if not exists users_status_until_idx on users(status_until) where status_until is not null;
+
+create table if not exists lists (
+	id bigint primary key,
+	owner_id bigint not null references users (id) on delete cascade,
+	name text not null,
+	description text not null default '',
+	is_private boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create index if not exists lists_owner_idx on lists (owner_id);
+
+create table if not exists list_members (
+	list_id bigint not null references lists (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (list_id, user_id)
+);
+create index if not exists list_members_user_idx on list_members (user_id);
+
+create table if not exists list_subscribers (
+	list_id bigint not null references lists (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (list_id, user_id)
+);
+create index if not exists list_subscribers_user_idx on list_subscribers (user_id);
+
+-- a muted list's accounts stay out of the viewer's home feeds
+create table if not exists list_mutes (
+	list_id bigint not null references lists (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	primary key (list_id, user_id)
+);
+
+-- lists shown as extra tabs on the viewer's home page
+create table if not exists pinned_lists (
+	user_id bigint not null references users (id) on delete cascade,
+	list_id bigint not null references lists (id) on delete cascade,
+	position int not null default 0,
+	primary key (user_id, list_id)
+);

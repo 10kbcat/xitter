@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { listHandlers } from "./lists";
 import { noteHandlers } from "./notes";
 import { sql } from "./db";
 import { blockedIds, blockedFor, outOfView } from "./blocks";
@@ -459,7 +460,6 @@ const handlers: Record<string, Handler> = {
 		},
 	}),
 	DataSaverMode: () => ({ data: { viewer: {} } }),
-	PinnedTimelines: () => ({ data: { pinned_timelines: { pinned_timelines: [] } } }),
 	CreatorStudioTabBarItemQuery: () => ({ data: { xpayments_audience_rewards_tasks: [] } }),
 	SidebarUserRecommendations: () => ({ data: { sidebar_user_recommendations: [] } }),
 	useStoryTopicQuery: () => ({ data: { story_topic: { id: globalId("StoryTopic", "For You"), stories: { items: [] } } } }),
@@ -672,6 +672,7 @@ Object.assign(handlers, {
 // the chat app's operations
 Object.assign(handlers, chatHandlers);
 Object.assign(handlers, noteHandlers);
+Object.assign(handlers, listHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

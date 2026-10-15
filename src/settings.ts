@@ -30,7 +30,7 @@ const DEFAULTS = {
 	instance_name: "Xitter",
 	features: {
 		communities: true,
-		lists: false,
+		lists: true,
 		gifs: true,
 		polls: true,
 		location: true,

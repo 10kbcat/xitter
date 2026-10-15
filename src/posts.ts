@@ -98,7 +98,7 @@ export type FeedItem = { id: string; post: PostRow; repost?: { by: User; created
 export type FeedQuery = {
 	viewerId: string;
 	// whose posts and reposts: everyone, the viewer plus accounts they follow, or one account
-	authors: { all: true } | { following: true } | { user: string };
+	authors: { all: true } | { following: true } | { user: string } | { list: string };
 	replies: boolean;
 	kinds: "both" | "posts" | "reposts";
 	// only posts with attached media of this kind
@@ -121,6 +121,8 @@ export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blocked
 	and f.author_id not in ${outOfView(viewerId)} and ${originalAuthor()} not in ${outOfView(viewerId)}
 	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
 	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}`;
+// a muted list keeps its members out of the home feeds, not out of the list itself
+const listMuted = (viewerId: string) => sql`f.author_id not in (select m.user_id from list_mutes x join list_members m on m.list_id = x.list_id where x.user_id = ${viewerId}::bigint)`;
 const blockedBy = (viewerId: string) => sql`(select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
 const profileHidden = (viewerId: string) => sql`f.author_id not in ${blockedBy(viewerId)} and ${originalAuthor()} not in ${blockedBy(viewerId)}
 	and f.author_id not in ${suspendedFor(viewerId)} and ${originalAuthor()} not in ${suspendedFor(viewerId)}`;
@@ -129,9 +131,11 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	const authorFilter =
 		"user" in q.authors
 			? sql`f.author_id = ${q.authors.user}::bigint`
-			: "following" in q.authors
-				? sql`(f.author_id = ${q.viewerId}::bigint or f.author_id in (select followee_id from follows where follower_id = ${q.viewerId}::bigint))`
-				: sql`true`;
+			: "list" in q.authors
+				? sql`f.author_id in (select user_id from list_members where list_id = ${q.authors.list}::bigint)`
+				: "following" in q.authors
+					? sql`(f.author_id = ${q.viewerId}::bigint or f.author_id in (select followee_id from follows where follower_id = ${q.viewerId}::bigint))`
+					: sql`true`;
 	const kindFilter = q.kinds === "posts" ? sql`f.reposter_id is null` : q.kinds === "reposts" ? sql`f.reposter_id is not null` : sql`true`;
 	const replyFilter = q.onlyReplies ? sql`f.is_reply` : q.replies ? sql`true` : sql`not f.is_reply`;
 	const articleFilter = q.articlesOnly ? sql`exists (select 1 from posts a where a.id = f.post_id and a.article_id is not null)` : sql`true`;
@@ -143,7 +147,7 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
 	const home = !("user" in q.authors);
-	const hidden = home ? homeHidden(q.viewerId) : profileHidden(q.viewerId);
+	const hidden = home ? ("list" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
 	const rows = q.after
 		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
