@@ -4,7 +4,7 @@
 import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { settings } from "./settings";
-import { FRESH_SCRIPT, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
+import { FORGOT_SCRIPT, FRESH_SCRIPT, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { BADGES_SCRIPT } from "./badges";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
@@ -212,6 +212,7 @@ ${FLAG_PICKER_CSS}</style>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}
+${FORGOT_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}</script>

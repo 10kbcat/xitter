@@ -20,6 +20,7 @@ import { shell } from "./shell";
 import { platformSource } from "./platforms";
 import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
+import { forgotRoute, resetRoute } from "./password-reset";
 import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
@@ -203,6 +204,8 @@ const server = Bun.serve({
 			if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
 			return maintenancePage();
 		}
+		if (p === "/account/reset") return resetRoute(req, url);
+		if (p === "/account/forgot") return forgotRoute(req, url);
 		if (p === "/account/notices" && viewer) return noticesPage(viewer);
 		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 		// uploads stay inside the instance: only signed-in users get them

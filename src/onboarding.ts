@@ -17,6 +17,7 @@ import { sql } from "./db";
 import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
 import { CODE_DIGITS, SignupError, normalizeCode, signUp, usernameState } from "./invites";
+import { requestReset } from "./password-reset";
 import { settings } from "./settings";
 
 const load = async (name: string): Promise<Message[]> => fromJson(await Bun.file(new URL(`./jf/${name}.json`, import.meta.url)).json());
@@ -110,8 +111,8 @@ function usernameReply(state: "available" | "taken" | "invalid"): Message[] {
 }
 
 const templates = {
-	// no password reset by email yet
-	password: without(await load("password"), ["Forgot password?"], 7140),
+	// the forgot-password button mails a reset link (forgot_password action)
+	password: await load("password"),
 	// no phone numbers, Google or Apple accounts here
 	landing: without(await load("landing"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	// the same, inline on the signed-out home page
@@ -262,6 +263,11 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		for (const c of await signInCookies(req, session!)) headers.append("set-cookie", c);
 		headers.append("set-cookie", "xitter_invite=; Path=/; Max-Age=0");
 		return respond(fill(templates.success, { user_id: session!.userId, username: String(f.username ?? s.username) }), false, headers);
+	}
+	if (path === "/onboarding/web/actions/begin_password_recovery") {
+		const f = await form(req);
+		await requestReset(String(f.username_or_email ?? f.username ?? ""));
+		return respond(fieldError("username_or_email", "If that account has an email, we've sent a reset link to it."));
 	}
 	if (path === "/onboarding/web/actions/login_enter_password") {
 		const f = await form(req);

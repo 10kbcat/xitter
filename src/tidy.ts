@@ -109,6 +109,23 @@ export const FRESH_SCRIPT = `(function(){
 	});
 })();`;
 
+// The dialog's "Forgot password?" has no screen behind it here: it goes to our
+// own reset page, with the username typed so far.
+export const FORGOT_SCRIPT = `(function(){
+	document.addEventListener("click",function(e){
+		var el=e.target;
+		while(el&&el!==document.body){
+			if(el.textContent==="Forgot password?"&&(/^(BUTTON|A)$/.test(el.tagName)||el.getAttribute("role")==="button")){
+				e.preventDefault();e.stopPropagation();
+				var field=document.querySelector('input[name="username"],input[name="username_or_email"]');
+				location.assign("/account/forgot"+(field&&field.value?"?u="+encodeURIComponent(field.value):""));
+				return;
+			}
+			el=el.parentElement;
+		}
+	},true);
+})();`;
+
 export const TIDY_SCRIPT = `(function(){
 	var T=(window.__XITTER__||{}).tidy||{menuItems:[]};
 	// X's old sign-up flow talks to its servers; ours is in the dialog on the signed-out home page
