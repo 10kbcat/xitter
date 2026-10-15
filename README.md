@@ -9,21 +9,39 @@ copy during setup, and it stays on that machine.
 
 ## What works
 
-- Posting, replies, quotes, reposts, likes, bookmarks, pinned posts, @mentions
-  and hashtags
-- Images, GIFs and video (converted with ffmpeg), long-form articles
-- Profiles with all their tabs, editing, follows, followers
+- Posting, replies, quotes, reposts, likes, bookmarks (with folders), pinned
+  posts, highlights, @mentions and hashtags; editing posts, polls, scheduling,
+  places
+- Who can reply (everyone, followed accounts, verified, mentioned), post views,
+  reposts, likes and quotes lists
+- Images, GIFs and video (converted with ffmpeg), alt text, content warnings on
+  media, long-form articles
+- Profiles with all their tabs, editing, follows, followers, private
+  (protected) accounts with follow requests, "About this account" with the
+  country or region it is based in
+- Lists (with banners) and communities (rules, members, moderation tools,
+  community label on posts)
 - Home timeline: a ranked "For you" and a chronological "Following"
 - Notifications with unread counts
 - Search with X's operators, trends, Explore
 - Blocks, mutes and muted words
-- Invite-only sign-up, pride flag badges, organisations with affiliates
+- Direct messages, end-to-end encrypted, with key backup
+- Community Notes
+- Invite-only sign-up with a required email, pride flag badges, organisations
+  with affiliates, several signed-in accounts
+- Account settings: password change, username change, language, deactivation
+  (reactivates on sign-in within 30 days), data archive, email notification
+  settings, sessions list with revoke, two-factor sign-in with an
+  authenticator app and backup codes, password reset by email
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges, roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements and an audit log
 
-Not built yet: direct messages, lists, communities, polls, scheduling.
+Not built yet: Spaces and live video, topics and Moments, pinned replies,
+saved searches, account notification bells, connected apps and login history,
+push notifications, a verified-email code at sign-up. Email is sent through
+[Resend](https://resend.com) when `RESEND_API_KEY` is set.
 
 ## Running it locally
 
@@ -94,6 +112,9 @@ On Windows, run the commands in Git Bash or set the variables with
 | `CHAT_TOKEN_SECRET` | saved in `data/chat-secrets.json` | Signing secret for chat socket tokens |
 | `JUICEBOX_REALM_ID`, `JUICEBOX_TENANT_SECRET` | saved in `data/chat-secrets.json` | Stable realm identity and tenant signing secret |
 | `MAX_CHAT_MEDIA_MB` | `200` | Maximum encrypted chat attachment size |
+| `RESEND_API_KEY` | unset | Resend key for password-reset and notification mail; without it nothing is sent |
+| `MAIL_FROM` | `Xitter <noreply@xit.chococat.lol>` | Sender of that mail (the domain must be verified in Resend) |
+| `TENOR_API_KEY` | unset | GIF search (see `src/gifs.ts`) |
 
 Everything else (name, sign-up mode, features, limits, announcement, rules,
 logos) is set in the admin panel.
@@ -184,6 +205,12 @@ trends, and a post pinned to the top of every home timeline.
   validation without a running server. `bun scripts/test-juicebox.ts` verifies
   realm registration and recovery; run it with `recover` after a realm/database
   restart to check durability (`TEST_JUICEBOX_URL` selects the realm).
+- Other checks: `test-account-settings`, `test-two-factor`, `test-password-reset`,
+  `test-reply-limits`, `test-views`, `test-protected`, `test-communities`, `test-lists`,
+  `test-polls`, `test-scheduled` and the rest of `scripts/test-*.ts`. A passing
+  script is not a working screen: check the UI with `drive.ts` too.
+- Where the account's country comes from: the `CF-IPCountry` header, which
+  only exists behind Cloudflare. Without it the About page shows no location.
 - `bun scripts/drive.ts <path> <steps...>` clicks through the real client in
   headless Edge and takes screenshots (uses the browser profile
   `scripts/probe.sh` leaves signed in).
