@@ -1,6 +1,6 @@
 // Checks GIF search and the media proxy against a running server that was
-// started with TENOR_API_KEY=test TENOR_API_URL=http://localhost:39999/v2
-// (this script serves the fake Tenor there).
+// started with KLIPY_API_KEY=test KLIPY_API_URL=http://localhost:39999/v2
+// (this script serves the fake Klipy there).
 // usage: bun scripts/test-gifs.ts <user> <password>
 
 export {};
@@ -11,7 +11,7 @@ if (!name || !password) throw new Error("usage: bun scripts/test-gifs.ts <user> 
 
 const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0, 0, 0, 0x3b]);
 const seen: string[] = [];
-const tenor = Bun.serve({
+const klipy = Bun.serve({
 	port: 39999,
 	fetch(req) {
 		const url = new URL(req.url);
@@ -54,10 +54,10 @@ function check(label: string, ok: boolean, detail: unknown = "") {
 }
 
 const found = (await get("GifSearch", { rawQuery: "cat", count: 10 })).data?.gif_search_slice;
-check("search returns usable items only", found?.items?.length === 1 && found.items[0].id === "tenor_abc", found?.items?.length);
-check("items have the shape the client maps", found?.items?.[0]?.full_image?.still_image_url && found.items[0].thumbnail_images.length === 1 && found.items[0].provider.id === "tenor");
+check("search returns usable items only", found?.items?.length === 1 && found.items[0].id === "klipy_abc", found?.items?.length);
+check("items have the shape the client maps", found?.items?.[0]?.full_image?.still_image_url && found.items[0].thumbnail_images.length === 1 && found.items[0].provider.id === "klipy");
 check("cursor passes through", found?.slice_info?.next_cursor === "page2");
-check("Tenor got the query and the key", seen.some((s) => s.includes("q=cat") && s.includes("key=test")));
+check("Klipy got the query and the key", seen.some((s) => s.includes("q=cat") && s.includes("key=test")));
 
 const trending = (await get("GifEnumerateCategory", { category: "trending", count: 5 })).data?.gif_enumerate_category_slice;
 check("trending uses the featured feed", trending?.items?.length === 1 && seen.some((s) => s.startsWith("/v2/featured")));
@@ -69,6 +69,6 @@ check("other hosts are refused", evil.status === 403);
 const signedOut = await fetch(`${origin}/i/api/xitter/gif?u=${encodeURIComponent("http://localhost:39999/media/abc.gif")}`);
 check("signed-out requests are refused", signedOut.status === 401);
 
-tenor.stop();
+klipy.stop();
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

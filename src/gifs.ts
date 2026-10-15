@@ -1,19 +1,19 @@
-// GIF search through Tenor (v2). The browser may only talk to this origin, and a
+// GIF search through Klipy (its Tenor-compatible v2 API). The browser may only talk to this origin, and a
 // picked GIF is downloaded by the client and uploaded like any other media, so
-// results point at /i/api/xitter/gif, which fetches from Tenor's hosts only.
-// Needs TENOR_API_KEY; without one the composer's GIF button is hidden.
+// results point at /i/api/xitter/gif, which fetches from Klipy's hosts only.
+// Needs KLIPY_API_KEY; without one the composer's GIF button is hidden.
 
 import type { Viewer } from "./auth";
 
-const API = process.env.TENOR_API_URL ?? "https://tenor.googleapis.com/v2";
-export const gifKey = () => process.env.TENOR_API_KEY ?? "";
+const API = process.env.KLIPY_API_URL ?? "https://api.klipy.com/v2";
+export const gifKey = () => process.env.KLIPY_API_KEY ?? "";
 
 type Vars = Record<string, any>;
 
-const PROVIDER = { id: "tenor", display_name: "Tenor" };
+const PROVIDER = { id: "klipy", display_name: "Klipy" };
 
-// only Tenor's own media hosts are fetched on a user's behalf
-export const gifHostAllowed = (host: string) => /(^|\.)tenor\.com$|(^|\.)tenor\.googleapis\.com$/.test(host) || host === new URL(API).host;
+// only Klipy's own media hosts are fetched on a user's behalf
+export const gifHostAllowed = (host: string) => /(^|\.)klipy\.com$/.test(host) || host === new URL(API).host;
 
 const proxied = (url: string) => `/i/api/xitter/gif?u=${encodeURIComponent(url)}`;
 
@@ -31,7 +31,7 @@ function item(r: any) {
 	const thumb = image(tiny, still);
 	if (!full || !thumb) return null;
 	return {
-		id: `tenor_${r.id}`,
+		id: `klipy_${r.id}`,
 		provider: PROVIDER,
 		alt_text: r.content_description ?? r.title ?? "",
 		full_image: full,
@@ -40,13 +40,13 @@ function item(r: any) {
 	};
 }
 
-async function tenor(path: string, params: Record<string, string>) {
+async function klipy(path: string, params: Record<string, string>) {
 	const key = gifKey();
 	if (!key) return { results: [], next: "" };
 	const url = new URL(`${API}${path}`);
 	for (const [k, v] of Object.entries({ key, client_key: "xitter", media_filter: "gif,tinygif,gifpreview", contentfilter: "medium", ...params })) url.searchParams.set(k, v);
 	const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-	if (!r.ok) throw new Error(`tenor ${r.status}`);
+	if (!r.ok) throw new Error(`klipy ${r.status}`);
 	return (await r.json()) as { results?: any[]; next?: string };
 }
 
@@ -62,14 +62,14 @@ export const gifHandlers = {
 	GifSearch: async (_v: Viewer, vars: Vars) => {
 		const q = String(vars.rawQuery ?? vars.raw_query ?? vars.query ?? vars.searchTerm ?? "").trim();
 		if (!q) return { data: { gif_search_slice: { items: [], slice_info: {} } } };
-		return { data: { gif_search_slice: slice(await tenor("/search", { q, limit: count(vars), ...cursor(vars) })) } };
+		return { data: { gif_search_slice: slice(await klipy("/search", { q, limit: count(vars), ...cursor(vars) })) } };
 	},
 	GifEnumerateCategory: async (_v: Viewer, vars: Vars) => {
 		const category = String(vars.category ?? vars.categoryName ?? "trending");
 		const data =
 			category === "trending"
-				? await tenor("/featured", { limit: count(vars), ...cursor(vars) })
-				: await tenor("/search", { q: category, limit: count(vars), ...cursor(vars) });
+				? await klipy("/featured", { limit: count(vars), ...cursor(vars) })
+				: await klipy("/search", { q: category, limit: count(vars), ...cursor(vars) });
 		return { data: { gif_enumerate_category_slice: slice(data) } };
 	},
 };

@@ -114,7 +114,7 @@ On Windows, run the commands in Git Bash or set the variables with
 | `MAX_CHAT_MEDIA_MB` | `200` | Maximum encrypted chat attachment size |
 | `RESEND_API_KEY` | unset | Resend key for password-reset and notification mail; without it nothing is sent |
 | `MAIL_FROM` | `Xitter <noreply@xit.chococat.lol>` | Sender of that mail (the domain must be verified in Resend) |
-| `TENOR_API_KEY` | unset | GIF search (see `src/gifs.ts`) |
+| `KLIPY_API_KEY` | unset | GIF search through [Klipy](https://klipy.com) (see `src/gifs.ts`); without it the GIF button is hidden |
 
 Everything else (name, sign-up mode, features, limits, announcement, rules,
 logos) is set in the admin panel.
