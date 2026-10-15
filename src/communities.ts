@@ -360,6 +360,17 @@ const fetchOne = async (v: Viewer, vars: Vars) => {
 	return { data: { communityResults: { result: obj }, community_results_by_rest_id: { result: obj }, community_by_rest_id: obj } };
 };
 
+// the moderator Tools screen also reads the pending request count and a spotlight action
+const toolsQuery = async (v: Viewer, vars: Vars) => {
+	const r = await fetchOne(v, vars);
+	const id = communityId(vars);
+	const obj = (r.data.community_results_by_rest_id as any).result;
+	if (obj?.__typename !== "Community") return r;
+	const { role } = await roleOf(v.id, id);
+	obj.actions = { ...obj.actions, community_spotlight_setup_action_result: { __typename: "CommunitySpotlightSetupActionUnavailable", reason: "NotSupported", message: "Spotlight isn't available here." } };
+	obj.join_requests_result = canModerate(role) ? await joinRequests(v.id, id) : { __typename: "CommunityJoinRequestsUnavailable" };
+	return r;
+};
 export const communityHandlers = {
 	CreateCommunity: create,
 	JoinCommunity: join,
@@ -370,7 +381,7 @@ export const communityHandlers = {
 	CommunitiesFetchOneQuery: fetchOne,
 	CommunityQuery: fetchOne,
 	CommunityInviteButtonQuery: fetchOne,
-	CommunityToolsScreenContainerQuery: fetchOne,
+	CommunityToolsScreenContainerQuery: toolsQuery,
 	EditMembershipTypeQuery: fetchOne,
 	PeopleCommunity_Query: fetchOne,
 
