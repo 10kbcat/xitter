@@ -4,7 +4,7 @@
 import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { settings } from "./settings";
-import { TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
+import { FRESH_SCRIPT, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { BADGES_SCRIPT } from "./badges";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
@@ -109,7 +109,7 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_edit_tweet_perspective_enabled: { value: true },
 });
 
-function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"]) {
+function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"], inCommunity: boolean) {
 	return {
 		optimist: [],
 		entities: {
@@ -160,7 +160,7 @@ function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadB
 			communitiesActions: { create: true },
 			country: "US",
 			guestId: "",
-			hasCommunityMemberships: false,
+			hasCommunityMemberships: inCommunity,
 			isActiveCreator: false,
 			isLoaded: true,
 			isRestrictedSession: false,
@@ -188,7 +188,7 @@ let runtimePatched: string | undefined;
 // With no user the client boots signed out, for the sign-in dialog.
 // `multi`: other accounts are signed in too (auth_multi), so the account menu
 // asks for them.
-export function shell(user: User | null, multi = false): string | undefined {
+export function shell(user: User | null, multi = false, inCommunity = false): string | undefined {
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
@@ -208,9 +208,10 @@ export function shell(user: User | null, multi = false): string | undefined {
 ${hideCss()}
 ${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
-<script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch))};window.__META_DATA__=${inline(meta)};</script>
+<script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity))};window.__META_DATA__=${inline(meta)};</script>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
+${FRESH_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}</script>

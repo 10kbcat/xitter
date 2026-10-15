@@ -68,6 +68,47 @@ export function tidyData() {
 	};
 }
 
+// The client caches the lists it already fetched and doesn't know our mutations
+// change them (a new community, list or bookmark stays missing until a reload).
+// After one of those mutations succeeds, the next navigation loads the page
+// fresh instead of from the cache.
+export const FRESH_SCRIPT = `(function(){
+	var stale=false;
+	var own=/(List|Communit|PinTimeline|Scheduled|Draft|Bookmark|Poll)/;
+	function seen(url,method){
+		var m=/\\/graphql\\/[^/]+\\/(\\w+)/.exec(String(url));
+		return !!m&&String(method||"GET").toUpperCase()==="POST"&&own.test(m[1])&&!/^(Fetch|Get)/.test(m[1]);
+	}
+	var f=window.fetch;
+	window.fetch=function(input,init){
+		var p=f.apply(this,arguments);
+		try{
+			var hit=seen(typeof input==="string"?input:input.url,(init&&init.method)||(input&&input.method));
+			if(hit)p.then(function(r){if(r.ok)stale=true},function(){});
+		}catch(e){}
+		return p;
+	};
+	var open=XMLHttpRequest.prototype.open;
+	XMLHttpRequest.prototype.open=function(method,url){
+		try{
+			if(seen(url,method))this.addEventListener("load",function(){if(this.status<400)stale=true});
+		}catch(e){}
+		return open.apply(this,arguments);
+	};
+	var push=history.pushState;
+	history.pushState=function(s,t,u){
+		if(stale&&u&&!/\\/(compose|i\\/flow)/.test(String(u))){
+			stale=false;
+			location.assign(u);
+			return;
+		}
+		return push.apply(this,arguments);
+	};
+	window.addEventListener("popstate",function(){
+		if(stale){stale=false;location.reload()}
+	});
+})();`;
+
 export const TIDY_SCRIPT = `(function(){
 	var T=(window.__XITTER__||{}).tidy||{menuItems:[]};
 	// X's old sign-up flow talks to its servers; ours is in the dialog on the signed-out home page

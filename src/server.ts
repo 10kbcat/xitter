@@ -1,7 +1,7 @@
 import { type Viewer, getViewer, parseCookies } from "./auth";
 import { getClientFile } from "./client-cache";
 import { PORT, PUBLIC_ORIGIN } from "./config";
-import { migrate } from "./db";
+import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
 import { handleLogin, maintenancePage, rulesPage } from "./login";
@@ -221,7 +221,8 @@ const server = Bun.serve({
 
 		// signed out: X's own home page with its sign-in form, and the dialog
 		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
-		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi);
+		const inCommunity = viewer ? (await sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`).length > 0 : false;
+		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, inCommunity);
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
 		// a guest token left from the signed-out page makes the signed-in client act
