@@ -498,3 +498,35 @@ create table if not exists community_join_requests (
 
 alter table posts add column if not exists community_id bigint references communities (id) on delete set null;
 create index if not exists posts_community_idx on posts (community_id, id desc) where community_id is not null;
+
+create table if not exists polls (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	choices text[] not null,
+	duration_minutes int not null,
+	-- set when the post is created; the card exists before the post does
+	ends_at timestamptz,
+	created_at timestamptz not null default now()
+);
+
+create table if not exists poll_votes (
+	poll_id bigint not null references polls (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	choice smallint not null,
+	created_at timestamptz not null default now(),
+	primary key (poll_id, user_id)
+);
+
+alter table posts add column if not exists poll_id bigint references polls (id) on delete set null;
+
+-- scheduled posts and drafts, kept as the composer sent them
+create table if not exists scheduled_posts (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	kind text not null check (kind in ('scheduled', 'draft')),
+	execute_at timestamptz,
+	request jsonb not null,
+	created_at timestamptz not null default now()
+);
+create index if not exists scheduled_posts_due_idx on scheduled_posts (execute_at) where kind = 'scheduled';
+create index if not exists scheduled_posts_user_idx on scheduled_posts (user_id, kind);

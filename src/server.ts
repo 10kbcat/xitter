@@ -21,6 +21,7 @@ import { platformSource } from "./platforms";
 import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 import { extraBadges } from "./badges";
+import { startScheduler } from "./scheduled";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -233,4 +234,5 @@ const server = Bun.serve({
 	},
 });
 
+startScheduler();
 console.log(`xitter listening on ${PUBLIC_ORIGIN}`);

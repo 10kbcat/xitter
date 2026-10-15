@@ -196,6 +196,9 @@ export type PostRow = {
 	media?: MediaRow[];
 	article_id?: string | null;
 	community_id?: string | null;
+	poll_id?: string | null;
+	// the poll card this post carries, as pollCard builds it
+	poll?: Record<string, unknown>;
 	// the community this post belongs to, as communityObjects builds it
 	community?: Record<string, unknown>;
 	// accounts named with @ in the text
@@ -251,6 +254,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
 		...(p.article ? { article: { article_results: { result: p.article } } } : {}),
 		...(p.community ? { community_results: { result: p.community } } : {}),
+		...(p.poll ? { card: p.poll } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
 		edit_control: {

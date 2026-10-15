@@ -7,6 +7,7 @@ import { articlesByIds } from "./articles";
 import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, suspendedFor } from "./blocks";
 import { mediaForPosts } from "./media";
 import { communityObjects } from "./community-model";
+import { pollCard, pollsByIds } from "./polls";
 import { toUser, userCols, usersByIds } from "./users";
 
 export const MAX_POST_LENGTH = 280;
@@ -16,7 +17,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -43,6 +44,7 @@ function toRow(r: any): PostRow {
 		quote_id: r.quote_id,
 		article_id: r.article_id,
 		community_id: r.community_id,
+		poll_id: r.poll_id,
 		created_at: r.created_at,
 		reply_user_id: r.reply_user_id,
 		reply_screen_name: r.reply_screen_name,
@@ -71,6 +73,14 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 		const mentions = await sql`select m.post_id, u.id, u.screen_name, u.name from post_mentions m join users u on u.id = m.user_id
 			where m.post_id = any(${sql.array(posts.map((p) => p.id), "INT8")})`;
 		for (const p of posts) p.mentions = mentions.filter((m: any) => String(m.post_id) === p.id).map((m: any) => ({ id: String(m.id), screen_name: m.screen_name, name: m.name }));
+	}
+	const pollIds = [...new Set(posts.map((p) => p.poll_id).filter((id): id is string => !!id))];
+	if (pollIds.length) {
+		const polls = await pollsByIds(viewerId, pollIds);
+		for (const p of posts) {
+			const poll = p.poll_id ? polls.get(p.poll_id) : undefined;
+			if (poll) p.poll = pollCard(poll);
+		}
 	}
 	const communityIds = [...new Set(posts.map((p) => p.community_id).filter((id): id is string => !!id))];
 	if (communityIds.length) {

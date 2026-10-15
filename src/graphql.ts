@@ -4,6 +4,8 @@
 import { ChatError, chatHandlers } from "./chat";
 import { communityHandlers } from "./communities";
 import { listHandlers } from "./lists";
+import { PollError, attachPoll } from "./polls";
+import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
 import { sql } from "./db";
 import { blockedIds, blockedFor, outOfView } from "./blocks";
@@ -188,6 +190,15 @@ const createTweet: Handler = async (viewer, vars) => {
 	const annotated = (Array.isArray(vars.semantic_annotation_ids) ? vars.semantic_annotation_ids : []).find((x: any) => String(x?.domain_id) === "31")?.entity_id;
 	const communityId = [vars.community_id, annotated].find(isId);
 	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId });
+	if (typeof vars.card_uri === "string" && vars.card_uri) {
+		try {
+			await attachPoll(viewer.id, id, vars.card_uri);
+		} catch (e) {
+			await deletePost(viewer.id, id);
+			if (e instanceof PollError) throw new PostError(e.message, 214);
+			throw e;
+		}
+	}
 	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
@@ -678,6 +689,7 @@ Object.assign(handlers, chatHandlers);
 Object.assign(handlers, noteHandlers);
 Object.assign(handlers, listHandlers);
 Object.assign(handlers, communityHandlers);
+Object.assign(handlers, scheduledHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

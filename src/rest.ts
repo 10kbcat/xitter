@@ -8,6 +8,7 @@ import { isFlag } from "./flags";
 import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
+import { PollError, createCard, vote } from "./polls";
 import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
@@ -71,6 +72,25 @@ const EMPTY_LIST = { users: [], next_cursor: 0, next_cursor_str: "0", previous_c
 
 // `path` has no /i/api prefix
 export async function restRoute(method: string, path: string, viewer: Viewer, req: Request): Promise<Response | undefined> {
+	// poll cards: created before the post, voted on afterwards
+	if (method === "POST" && /^\/v2\/cards\/create\.json$/.test(path)) {
+		const form = await req.formData().catch(() => undefined);
+		try {
+			return Response.json(await createCard(viewer.id, form?.get("card_data")));
+		} catch (e) {
+			if (e instanceof PollError) return Response.json({ errors: [{ code: 214, message: e.message }] }, { status: e.status });
+			throw e;
+		}
+	}
+	if (method === "POST" && path.endsWith("/capi/passthrough/1")) {
+		const form = await req.formData().catch(() => undefined);
+		try {
+			return Response.json(await vote(viewer.id, form ?? new FormData()));
+		} catch (e) {
+			if (e instanceof PollError) return Response.json({ errors: [{ code: 214, message: e.message }] }, { status: e.status });
+			throw e;
+		}
+	}
 	const accounts = await accountsRoute(method, path, viewer, req);
 	if (accounts) return accounts;
 	const profile = await profileRoute(path, viewer, req);
