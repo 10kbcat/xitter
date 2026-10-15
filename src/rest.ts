@@ -108,6 +108,14 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const place = placeById(geoId[1]);
 		return place ? Response.json(place) : Response.json({ errors: [{ code: 34, message: "Sorry, that page does not exist." }] }, { status: 404 });
 	}
+	// alt text for an uploaded image, sent before the post is made
+	if (method === "POST" && path === "/1.1/media/metadata/create.json") {
+		const body: any = await req.json().catch(() => ({}));
+		const alt = typeof body?.alt_text?.text === "string" ? body.alt_text.text.slice(0, 1000) : undefined;
+		if (/^\d{1,19}$/.test(String(body?.media_id)) && alt !== undefined)
+			await sql`update media set alt_text = ${alt || null} where id = ${String(body.media_id)}::bigint and user_id = ${viewer.id}::bigint`;
+		return Response.json({});
+	}
 	const own = await accountSettingsRoute(method, path, viewer, req);
 	if (own) return own;
 	const exported = await dataExportRoute(method, path, viewer, req);

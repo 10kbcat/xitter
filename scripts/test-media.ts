@@ -56,6 +56,14 @@ const stolen = await gql("CreateTweet", { tweet_text: "reuse", media: { media_en
 check("an upload cannot be attached twice", !stolen.data?.create_tweet?.tweet_results?.result?.legacy?.extended_entities);
 for (const id of [post?.rest_id, stolen.data?.create_tweet?.tweet_results?.result?.rest_id]) if (id) await gql("DeleteTweet", { tweet_id: id });
 
+// alt text and the sensitive flag travel with the post
+const described = await upload(imagePath, "tweet_image");
+await fetch(`${origin}/i/api/1.1/media/metadata/create.json`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ media_id: described, alt_text: { text: "a test pattern" } }) });
+const flagged = await gql("CreateTweet", { tweet_text: "", media: { media_entities: [{ media_id: described, tagged_users: [] }], possibly_sensitive: true } });
+const flaggedPost = flagged.data?.create_tweet?.tweet_results?.result;
+check("alt text comes back on the media", flaggedPost?.legacy?.extended_entities?.media?.[0]?.ext_alt_text === "a test pattern");
+check("the sensitive flag is kept", flaggedPost?.legacy?.possibly_sensitive === true);
+if (flaggedPost?.rest_id) await gql("DeleteTweet", { tweet_id: flaggedPost.rest_id });
 const avatar = await upload(imagePath, "profile_image", 1);
 const a = await (await fetch(`${origin}/i/api/1.1/account/update_profile_image.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: avatar, return_user: "true" }) })).json();
 check("avatar set", String(a.profile_image_url_https).includes(avatar), a.profile_image_url_https);
