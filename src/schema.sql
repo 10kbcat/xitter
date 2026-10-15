@@ -532,3 +532,17 @@ create index if not exists scheduled_posts_due_idx on scheduled_posts (execute_a
 create index if not exists scheduled_posts_user_idx on scheduled_posts (user_id, kind);
 
 alter table posts add column if not exists place_id text;
+
+-- edits keep the post's id; what it said before each edit lives here under an
+-- id of its own, so the client's edit history can fetch each version
+alter table posts add column if not exists edit_count int not null default 0;
+alter table posts add column if not exists edited_at timestamptz;
+create table if not exists post_versions (
+	version_id bigint primary key,
+	post_id bigint not null references posts (id) on delete cascade,
+	seq int not null,
+	text text not null,
+	-- when this version went up
+	created_at timestamptz not null
+);
+create index if not exists post_versions_post_idx on post_versions (post_id, seq);

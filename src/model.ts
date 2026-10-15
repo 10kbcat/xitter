@@ -199,6 +199,12 @@ export type PostRow = {
 	community_id?: string | null;
 	poll_id?: string | null;
 	place_id?: string | null;
+	edit_count?: number;
+	edited_at?: Date | null;
+	// ids the post went by before each edit, oldest first
+	versionIds?: string[];
+	// set on an older version: the post it is a version of
+	staleEditOf?: string;
 	// the poll card this post carries, as pollCard builds it
 	poll?: Record<string, unknown>;
 	// the community this post belongs to, as communityObjects builds it
@@ -212,6 +218,21 @@ export type PostRow = {
 };
 
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
+const MAX_EDITS = 5;
+
+// the latest version is the post's own id and comes last; an older version
+// shows the same list but is never eligible
+function editControl(p: PostRow) {
+	const latest = p.staleEditOf ?? p.id;
+	const until = (p.staleEditOf ? undefined : p.created_at.getTime()) ?? 0;
+	const remaining = MAX_EDITS - (p.edit_count ?? 0);
+	return {
+		edit_tweet_ids: [...(p.versionIds ?? []), latest],
+		editable_until_msecs: String(p.staleEditOf ? 0 : until + EDIT_WINDOW_MS),
+		edits_remaining: String(Math.max(remaining, 0)),
+		is_edit_eligible: !p.staleEditOf && remaining > 0 && !p.reply_to_id && Date.now() < until + EDIT_WINDOW_MS,
+	};
+}
 
 const permalink = (p: PostRow) => `${PUBLIC_ORIGIN}/${p.author.screen_name}/status/${p.id}`;
 
@@ -259,13 +280,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		...(p.poll ? { card: p.poll } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
-		edit_control: {
-			edit_tweet_ids: [p.id],
-			editable_until_msecs: String(p.created_at.getTime() + EDIT_WINDOW_MS),
-			edits_remaining: "5",
-			// editing is not implemented
-			is_edit_eligible: false,
-		},
+		edit_control: editControl(p),
 		grok_analysis_button: false,
 		grok_annotations: {},
 		grok_translated_post_with_availability: { is_available: false },

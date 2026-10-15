@@ -17,7 +17,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id, p.edit_count, p.edited_at,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -46,6 +46,8 @@ function toRow(r: any): PostRow {
 		community_id: r.community_id,
 		poll_id: r.poll_id,
 		place_id: r.place_id,
+		edit_count: r.edit_count,
+		edited_at: r.edited_at,
 		created_at: r.created_at,
 		reply_user_id: r.reply_user_id,
 		reply_screen_name: r.reply_screen_name,
@@ -83,6 +85,11 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 			if (poll) p.poll = pollCard(poll);
 		}
 	}
+	const editedIds = posts.filter((p) => p.edit_count).map((p) => p.id);
+	if (editedIds.length) {
+		const versions = await sql`select post_id::text, version_id::text from post_versions where post_id = any(${sql.array(editedIds, "INT8")}) order by seq`;
+		for (const p of posts) if (p.edit_count) p.versionIds = versions.filter((v: any) => v.post_id === p.id).map((v: any) => v.version_id);
+	}
 	const communityIds = [...new Set(posts.map((p) => p.community_id).filter((id): id is string => !!id))];
 	if (communityIds.length) {
 		const communities = await communityObjects(viewerId, communityIds);
@@ -102,7 +109,45 @@ export async function postsByIds(viewerId: string, ids: string[], quotes = true)
 	if (!ids.length) return new Map();
 	const rows = await sql`${select(viewerId)} where p.id = any(${sql.array(ids, "INT8")})`;
 	const posts = await hydrate(viewerId, rows.map(toRow), quotes);
-	return new Map(posts.map((p) => [p.id, p]));
+	const out = new Map(posts.map((p) => [p.id, p]));
+	const unknown = ids.filter((id) => !out.has(id));
+	if (unknown.length) {
+		const versions = await sql`select version_id::text, post_id::text, text, created_at from post_versions where version_id = any(${sql.array(unknown, "INT8")})`;
+		const current = await postsByIds(viewerId, [...new Set(versions.map((v: any) => v.post_id as string))] as string[], quotes);
+		for (const v of versions) {
+			const base = current.get(v.post_id);
+			if (base) out.set(v.version_id, { ...base, id: v.version_id, text: v.text, created_at: v.created_at, staleEditOf: base.id });
+		}
+	}
+	return out;
+}
+
+const EDIT_WINDOW_MS = 60 * 60 * 1000;
+const MAX_EDITS = 5;
+
+// Text changes only; media, replies and quotes stay as posted. The post keeps its
+// id and what it said before goes to post_versions.
+export async function editPost(userId: string, postId: string, text: string): Promise<void> {
+	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
+	if (!text.trim()) throw new PostError("Your post is empty.", 170);
+	if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
+	const [post] = await sql`select p.id::text, p.text, p.created_at, p.edit_count, p.edited_at, u.status,
+			exists (select 1 from users x where x.id = p.user_id and x.pinned_post_id = p.id) as pinned
+		from posts p join users u on u.id = p.user_id where p.id = ${postId}::bigint and p.user_id = ${userId}::bigint`;
+	if (!post) throw new PostError("You can only edit your own posts.", 144);
+	if (post.status !== "active") throw new PostError("Your account can't edit posts right now.", 326);
+	if (post.pinned) throw new PostError("Unpin this post before editing it.", 214);
+	if (Date.now() > new Date(post.created_at).getTime() + EDIT_WINDOW_MS) throw new PostError("This post can't be edited anymore.", 214);
+	if (post.edit_count >= MAX_EDITS) throw new PostError("This post has reached its edit limit.", 214);
+	if (text === post.text) throw new PostError("There's nothing new to save.", 214);
+	await sql`insert into post_versions (version_id, post_id, seq, text, created_at)
+		values (${newId()}::bigint, ${postId}::bigint, ${post.edit_count}, ${post.text}, ${post.edited_at ?? post.created_at})`;
+	await sql`update posts set text = ${text}, edit_count = edit_count + 1, edited_at = now() where id = ${postId}::bigint`;
+	await sql`delete from post_mentions where post_id = ${postId}::bigint`;
+	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
+	if (names.length)
+		await sql`insert into post_mentions (post_id, user_id)
+			select ${postId}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")}) on conflict do nothing`;
 }
 
 export async function getPost(viewerId: string, id: string): Promise<PostRow | undefined> {

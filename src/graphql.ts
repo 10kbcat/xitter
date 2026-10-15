@@ -27,6 +27,7 @@ import {
 	bookmarkedPosts,
 	createPost,
 	deletePost,
+	editPost,
 	feed,
 	getPost,
 	likedPosts,
@@ -184,6 +185,12 @@ const createTweet: Handler = async (viewer, vars) => {
 		.filter(isId);
 	if (!text && !mediaIds.length) throw new PostError("Your post is empty.", 170);
 	if ([...text].length > MAX_POST_LENGTH) throw new PostError(`Posts are limited to ${MAX_POST_LENGTH} characters.`, 186);
+	const previous = vars.edit_options?.previous_tweet_id;
+	if (previous !== undefined) {
+		if (!isId(previous)) throw new PostError("Invalid post id.", 144);
+		await editPost(viewer.id, previous, text);
+		return { data: { create_tweet: { tweet_results: { result: tweetResult((await getPost(viewer.id, previous))!, false) } } } };
+	}
 	const replyTo = vars.reply?.in_reply_to_tweet_id;
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
 	// a quote arrives as a link to the quoted post
@@ -690,8 +697,20 @@ async function exploreSidebar() {
 	return { data: { explore_sidebar: { timeline: { instructions, responseObjects: { feedbackActions: [] } } } } };
 }
 
+// the versions of an edited post, newest first; the client opens it from "Last edited"
+async function editHistory(viewer: Viewer, vars: Vars) {
+	const post = await getPost(viewer.id, postId(vars, "tweetId"));
+	if (!post) throw new PostError("Post not found.", 144);
+	const versions = await postsByIds(viewer.id, post.versionIds ?? []);
+	const chain = [post, ...[...(post.versionIds ?? [])].reverse().flatMap((id) => (versions.has(id) ? [versions.get(id)!] : []))];
+	const base = BigInt(newId());
+	const entries = chain.map((p, i) => tweetEntry(p, (base - BigInt(i) - 1n).toString()));
+	return { data: { tweet_result_by_rest_id: { result: { __typename: "Tweet", rest_id: post.id, edit_history_timeline: { timeline: { instructions: [{ type: "TimelineAddEntries", entries }] } } } } } };
+}
+
 Object.assign(handlers, {
 	SearchTimeline: (v: Viewer, vars: Vars) => search(v, vars),
+	TweetEditHistory: editHistory,
 	ExplorePage: () => explorePage(),
 	ExploreSidebar: () => exploreSidebar(),
 } satisfies Record<string, Handler>);
