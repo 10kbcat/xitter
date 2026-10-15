@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { bookmarkFolderHandlers } from "./bookmark-folders";
 import { communityHandlers } from "./communities";
 import { countryName, regionName } from "./countries";
 import { gifHandlers } from "./gifs";
@@ -609,7 +610,6 @@ const handlers: Record<string, Handler> = {
 	}),
 	isEligibleForVoButtonUpsellQuery: () => ({ data: {} }),
 	usePremiumPaywallOnLoadMutation: () => ({ data: {} }),
-	BookmarkFoldersSlice: () => viewerUser({ bookmark_collections_slice: { items: [], slice_info: {} } }),
 	ViewerBadgeCounts: async (v) => ({
 		data: {
 			viewer_v2: {
@@ -862,6 +862,7 @@ Object.assign(handlers, chatHandlers);
 Object.assign(handlers, noteHandlers);
 Object.assign(handlers, listHandlers);
 Object.assign(handlers, communityHandlers);
+Object.assign(handlers, bookmarkFolderHandlers);
 Object.assign(handlers, scheduledHandlers);
 Object.assign(handlers, gifHandlers);
 

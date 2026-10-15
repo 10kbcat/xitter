@@ -307,6 +307,14 @@ export async function setHighlight(userId: string, postId: string, on: boolean):
 	return true;
 }
 
+export async function folderPosts(viewerId: string, folderId: string, limit = 100): Promise<PostRow[]> {
+	const rows = await sql`${select(viewerId)}
+		join bookmark_folder_posts f on f.post_id = p.id and f.folder_id = ${folderId}::bigint
+		join bookmark_folders bf on bf.id = f.folder_id and bf.user_id = ${viewerId}::bigint
+		order by f.created_at desc limit ${limit}`;
+	return hydrate(viewerId, rows.map(toRow));
+}
+
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)}
 		join likes lk on lk.post_id = p.id and lk.user_id = ${userId}::bigint

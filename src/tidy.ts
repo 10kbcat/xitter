@@ -97,7 +97,7 @@ export const FRESH_SCRIPT = `(function(){
 	};
 	var push=history.pushState;
 	history.pushState=function(s,t,u){
-		if(stale&&u&&!/\\/(compose|i\\/flow)/.test(String(u))){
+		if(stale&&u&&!/\\/(compose|i\\/flow|i\\/bookmarks\\/add)/.test(String(u))){
 			stale=false;
 			location.assign(u);
 			return;

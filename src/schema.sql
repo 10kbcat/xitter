@@ -610,3 +610,18 @@ create table if not exists follow_requests (
 	check (requester_id <> target_id)
 );
 create index if not exists follow_requests_target_idx on follow_requests (target_id, created_at desc);
+
+-- bookmark folders: a viewer's own groups of bookmarked posts
+create table if not exists bookmark_folders (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	name text not null,
+	created_at timestamptz not null default now()
+);
+create index if not exists bookmark_folders_user_idx on bookmark_folders (user_id, created_at);
+create table if not exists bookmark_folder_posts (
+	folder_id bigint not null references bookmark_folders (id) on delete cascade,
+	post_id bigint not null references posts (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (folder_id, post_id)
+);
