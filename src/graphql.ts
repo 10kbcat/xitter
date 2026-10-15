@@ -366,15 +366,32 @@ const handlers: Record<string, Handler> = {
 		await sql`update users set email_settings = email_settings || ${JSON.stringify(next)}::text::jsonb where id = ${v.id}::bigint`;
 		return { data: { write_email_notification_settings: "Done" } };
 	},
-	UserPreferencesQuery: async (v: Viewer) => ({
-		data: {
-			user_preferences: {
-				about_this_account_user_preferences: { business_country_code_preferences: [], selected_business_country_code: null },
-				allow_for_you_recommendations: true,
-				inferred_location_resolution_preference: "Unspecified",
+	UserPreferencesQuery: async (v: Viewer) => {
+		const [u] = await sql`select preferences from users where id = ${v.id}::bigint`;
+		const p = (u?.preferences ?? {}) as Record<string, unknown>;
+		return {
+			data: {
+				user_preferences: {
+					about_this_account_user_preferences: { business_country_code_preferences: [], selected_business_country_code: null },
+					allow_for_you_recommendations: p.allow_for_you_recommendations ?? true,
+					inferred_location_resolution_preference: p.inferred_location_resolution_preference ?? "Unspecified",
+				},
+				viewer_v2: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), legacy_extended_profile: { birthdate: null } } } },
 			},
-			viewer_v2: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), legacy_extended_profile: { birthdate: null } } } },
-		},
+		};
+	},
+	// Settings > About your account: country or region on the About page, and the For you switch
+	UserPreferencesMutation: async (v: Viewer, vars: Vars) => {
+		const next: Record<string, unknown> = {};
+		if (vars.inferred_location_resolution_preference === "Country" || vars.inferred_location_resolution_preference === "Region" || vars.inferred_location_resolution_preference === "Unspecified")
+			next.inferred_location_resolution_preference = vars.inferred_location_resolution_preference;
+		if (typeof vars.allow_for_you_recommendations === "boolean") next.allow_for_you_recommendations = vars.allow_for_you_recommendations;
+		await sql`update users set preferences = preferences || ${JSON.stringify(next)}::text::jsonb where id = ${v.id}::bigint`;
+		return { data: { user_preferences_put: "Done" } };
+	},
+	// the note under Settings > About your account about a location that may be off
+	LocationDisclaimerQuery: async (v: Viewer) => ({
+		data: { viewer_v2: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), about_profile: { location_accurate: true, report_problem_url: null } } } } },
 	}),
 	AudienceAndTaggingQuery: async (v: Viewer) => ({
 		data: {
