@@ -27,6 +27,8 @@ import {
 	PostError,
 	ancestors,
 	bookmarkedPosts,
+	highlightedPosts,
+	setHighlight,
 	createPost,
 	deletePost,
 	editPost,
@@ -573,7 +575,19 @@ const handlers: Record<string, Handler> = {
 	UserPhotoTimeline: userMedia("photo"),
 	UserVideoTimeline: userMedia("video"),
 	UserRepliesTimeline: profileFeed(true, "posts", true),
-	UserHighlightsTweets: () => userTimeline([]),
+	UserHighlightsTweets: async (v, vars) => {
+		const posts = vars.cursor ? [] : await highlightedPosts(v.id, userId(vars));
+		const base = BigInt(newId());
+		return userTimeline([...posts.map((p, i) => tweetEntry(p, (base - BigInt(i) - 1n).toString())), ...wholeList([], base).slice(0)]);
+	},
+	// the sheet behind "Add/remove from Highlights": is this post one of the viewer's highlights
+	HighlightTweetSheetQuery: async (v, vars) => {
+		const id = postId(vars);
+		const [row] = await sql`select 1 from highlights where user_id = ${v.id}::bigint and post_id = ${id}::bigint`;
+		return { data: { tweet_result_by_rest_id: { result: { __typename: "Tweet", id: Buffer.from(`Tweet:${id}`).toString("base64"), rest_id: id, highlights_info: { highlighted: !!row } } } } };
+	},
+	CreateHighlight: async (v, vars) => ({ data: { tweet_highlights_put: { success: await setHighlight(v.id, postId(vars), true) } } }),
+	DeleteHighlight: async (v, vars) => ({ data: { tweet_highlights_delete: { success: await setHighlight(v.id, postId(vars), false) } } }),
 
 	// features that do not exist here: valid empty answers so the client stays quiet
 	ProfileSpotlightsQuery: () => ({ data: {} }),

@@ -35,6 +35,7 @@ export type User = {
 		mediaPosts: number;
 		// posts carrying an article; the profile shows its Articles tab when there are any
 		articles: number;
+		highlights?: number;
 		likes: number;
 		followers: number;
 		following: number;

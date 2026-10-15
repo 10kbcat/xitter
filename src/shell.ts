@@ -95,7 +95,7 @@ ${CODE_BOXES} > .jf-code-box{flex:1 1 0;min-width:0;max-width:56px}`;
 
 // Paid features the client gates on a per-account claim. Nothing is paid for
 // here, so every account holds them.
-const CLAIMED_FEATURES = Object.fromEntries(["subscriptions_feature_article_composer"].map((k) => [k, { value: "true" }]));
+const CLAIMED_FEATURES = Object.fromEntries(["subscriptions_feature_article_composer", "subscriptions_feature_highlights"].map((k) => [k, { value: "true" }]));
 
 // Switches whose values name x.com hosts. The client checks them against host
 // lists that patch.ts has already rewritten, so the captured value would fail;

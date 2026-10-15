@@ -111,6 +111,7 @@ export function userResult(u: User) {
 		super_following: false,
 		tweet_counts: { media_tweets: u.stats?.mediaPosts ?? 0, tweets: u.stats?.posts ?? 0 },
 		user_seed_tweet_count: u.stats?.articles ?? 0,
+		highlights_info: { can_highlight_tweets: true, highlighted_tweets: String(u.stats?.highlights ?? 0) },
 		verification: verification(u),
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
 		website: { url: u.website ?? "" },

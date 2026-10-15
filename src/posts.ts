@@ -289,6 +289,24 @@ export async function bookmarkedPosts(viewerId: string, limit = 100): Promise<Po
 	return hydrate(viewerId, rows.map(toRow));
 }
 
+export async function highlightedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
+	const rows = await sql`${select(viewerId)}
+		join highlights h on h.post_id = p.id and h.user_id = ${userId}::bigint
+		order by h.created_at desc limit ${limit}`;
+	return hydrate(viewerId, rows.map(toRow));
+}
+
+export async function setHighlight(userId: string, postId: string, on: boolean): Promise<boolean> {
+	if (!on) {
+		await sql`delete from highlights where user_id = ${userId}::bigint and post_id = ${postId}::bigint`;
+		return true;
+	}
+	const [mine] = await sql`select 1 from posts where id = ${postId}::bigint and user_id = ${userId}::bigint`;
+	if (!mine) return false;
+	await sql`insert into highlights (user_id, post_id) values (${userId}::bigint, ${postId}::bigint) on conflict do nothing`;
+	return true;
+}
+
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)}
 		join likes lk on lk.post_id = p.id and lk.user_id = ${userId}::bigint
