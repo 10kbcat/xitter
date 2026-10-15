@@ -37,7 +37,7 @@ import {
 	setPinned,
 	unrepost,
 } from "./posts";
-import { affiliatesOf, followList, userById, userByName, usersByIds } from "./users";
+import { affiliatesOf, followList, suggestedUsers, userById, userByName, usersByIds } from "./users";
 
 type Vars = Record<string, any>;
 type Handler = (viewer: Viewer, vars: Vars) => Promise<unknown> | unknown;
@@ -478,7 +478,17 @@ const handlers: Record<string, Handler> = {
 	}),
 	DataSaverMode: () => ({ data: { viewer: {} } }),
 	CreatorStudioTabBarItemQuery: () => ({ data: { xpayments_audience_rewards_tasks: [] } }),
-	SidebarUserRecommendations: () => ({ data: { sidebar_user_recommendations: [] } }),
+	SidebarUserRecommendations: async (v: Viewer, vars: Vars) => {
+		const users = await suggestedUsers(v.id, 3, isId(vars.profileUserId) ? [vars.profileUserId] : []);
+		return { data: { sidebar_user_recommendations: users.map((u) => ({ token: `xitter-${u.id}`, user_results: { result: userResult(u) } })) } };
+	},
+	// the Follow page
+	ConnectTabTimeline: async (v: Viewer, vars: Vars) => {
+		const users = vars.cursor ? [] : await suggestedUsers(v.id, 40);
+		const base = BigInt(newId());
+		const entries = users.map((u, i) => userEntry(u, (base - BigInt(i) - 1n).toString()));
+		return { data: { connect_tab_timeline: { timeline: { instructions: [{ type: "TimelineAddEntries", entries: wholeList(entries, base) }] } } } };
+	},
 	useStoryTopicQuery: () => ({ data: { story_topic: { id: globalId("StoryTopic", "For You"), stories: { items: [] } } } }),
 	useFetchProductSubscriptionsQuery: () => ({ data: { viewer_v2: { list_product_subscriptions: [] } } }),
 	useSubscriptionsPaymentFailureQuery: (v) => ({

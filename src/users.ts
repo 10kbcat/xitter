@@ -1,5 +1,5 @@
 import type { User } from "./auth";
-import { isBlockedEitherWay } from "./blocks";
+import { blockedFor, isBlockedEitherWay, mutedFor, outOfView } from "./blocks";
 import { sql } from "./db";
 
 // an account's custom badges in order, as a json list of { id, name }
@@ -100,5 +100,20 @@ export async function usersByIds(viewerId: string, ids: string[]): Promise<Map<s
 export async function affiliatesOf(viewerId: string, orgId: string, limit = 200): Promise<User[]> {
 	const rows = await sql`select ${userCols(viewerId)} from affiliations af join users u on u.id = af.user_id
 		where af.org_id = ${orgId}::bigint and u.status <> 'suspended' order by af.created_at desc limit ${limit}`;
+	return rows.map(toUser);
+}
+
+// Accounts to follow: not followed, not blocked either way, not muted, not out of
+// view. Ranked by how many of the accounts the viewer follows follow them, then size.
+export async function suggestedUsers(viewerId: string, limit = 20, exclude: string[] = []): Promise<User[]> {
+	const rows = await sql`select ${userCols(viewerId)} from users u
+		where u.id <> ${viewerId}::bigint and u.status = 'active'
+			and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)
+			and u.id not in ${blockedFor(viewerId)} and u.id not in ${mutedFor(viewerId)} and u.id not in ${outOfView(viewerId)}
+			${exclude.length ? sql`and u.id <> all(${sql.array(exclude, "INT8")})` : sql``}
+		order by (select count(*) from follows m where m.followee_id = u.id
+				and m.follower_id in (select followee_id from follows where follower_id = ${viewerId}::bigint)) desc,
+			(select count(*) from follows x where x.followee_id = u.id) desc, u.created_at desc
+		limit ${limit}`;
 	return rows.map(toUser);
 }
