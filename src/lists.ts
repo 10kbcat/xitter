@@ -36,6 +36,7 @@ type ListRow = {
 	name: string;
 	description: string;
 	is_private: boolean;
+	banner_media_id: string | null;
 	created_at: Date;
 	member_count: number;
 	subscriber_count: number;
@@ -48,7 +49,7 @@ type ListRow = {
 // Lists the viewer may see: public ones and their own, and not the lists of
 // accounts blocking them. `target` is the account whose membership is_member reports.
 const listSelect = (viewerId: string, target = "0") => sql`
-	select l.id::text, l.owner_id::text, l.name, l.description, l.is_private, l.created_at,
+	select l.id::text, l.owner_id::text, l.name, l.description, l.is_private, l.banner_media_id::text, l.created_at,
 		(select count(*)::int from list_members m where m.list_id = l.id) as member_count,
 		(select count(*)::int from list_subscribers s where s.list_id = l.id) as subscriber_count,
 		exists (select 1 from list_subscribers s where s.list_id = l.id and s.user_id = ${viewerId}::bigint) as following,
@@ -76,6 +77,11 @@ async function requireOwn(viewerId: string, id: string): Promise<ListRow> {
 	return row;
 }
 
+const customBanner = (mediaId: string) => ({
+	media_info: { __typename: "ApiImage", original_img_url: `/media/${mediaId}`, original_img_width: 1500, original_img_height: 500 },
+	id: `list-banner-media-${mediaId}`,
+});
+
 const banner = (id: string) => ({
 	media_info: { __typename: "ApiImage", original_img_url: "/public/list-banner.svg", original_img_width: 1500, original_img_height: 500 },
 	id: `list-banner-${id}`,
@@ -88,6 +94,7 @@ async function ownersOf(viewerId: string, rows: ListRow[]) {
 function listObject(row: ListRow, owners: Awaited<ReturnType<typeof ownersOf>>) {
 	const owner = owners.get(row.owner_id);
 	const media = banner(row.id);
+	const custom = row.banner_media_id ? customBanner(row.banner_media_id) : null;
 	return {
 		__typename: "List",
 		id: globalId("List", row.id),
@@ -102,7 +109,8 @@ function listObject(row: ListRow, owners: Awaited<ReturnType<typeof ownersOf>>) 
 		is_member: row.is_member,
 		muting: row.muting,
 		pinning: row.pinning,
-		custom_banner_media: null,
+		custom_banner_media: custom?.media_info ? { media_info: custom.media_info } : null,
+		custom_banner_media_results: custom ? { result: { __typename: "ApiMedia", id: custom.id, media_key: custom.id, media_info: custom.media_info } } : null,
 		default_banner_media: { media_info: media.media_info },
 		default_banner_media_results: { result: { __typename: "ApiMedia", id: media.id, media_key: media.id, media_info: media.media_info } },
 		...(owner ? { user_results: { result: userResult(owner) } } : {}),
@@ -378,9 +386,21 @@ export const listHandlers = {
 	ListUnsubscribe: (v: Viewer, vars: Vars) => subscribe(v, vars, false),
 	MuteList: (v: Viewer, vars: Vars) => mute(v, vars, true),
 	UnmuteList: (v: Viewer, vars: Vars) => mute(v, vars, false),
-	// the banner picker uploads through the media endpoint; custom banners aren't stored
-	EditListBanner: async (v: Viewer, vars: Vars) => ({ data: { list: await one(v.id, listId(vars)) } }),
-	DeleteListBanner: async (v: Viewer, vars: Vars) => ({ data: { list: await one(v.id, listId(vars)) } }),
+	// the banner picker uploads through the media endpoint, then names the media here
+	EditListBanner: async (v: Viewer, vars: Vars) => {
+		const id = listId(vars);
+		await requireOwn(v.id, id);
+		const [media] = isId(vars.mediaId) ? await sql`select 1 from media where id = ${vars.mediaId}::bigint and user_id = ${v.id}::bigint` : [];
+		if (!media) throw new PostError("That image isn't available.", 214);
+		await sql`update lists set banner_media_id = ${vars.mediaId}::bigint where id = ${id}::bigint`;
+		return { data: { list: await one(v.id, id) } };
+	},
+	DeleteListBanner: async (v: Viewer, vars: Vars) => {
+		const id = listId(vars);
+		await requireOwn(v.id, id);
+		await sql`update lists set banner_media_id = null where id = ${id}::bigint`;
+		return { data: { list: await one(v.id, id) } };
+	},
 
 	ListsManagementPageTimeline: async (v: Viewer, vars: Vars) => {
 		const result = { list_management_timeline: await listsTimeline(v.id, await managementRows(v.id), vars) };

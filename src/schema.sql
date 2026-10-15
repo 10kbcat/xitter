@@ -51,6 +51,7 @@ do $$ begin
 		alter table users drop column custom_badge_id;
 	end if;
 end $$;
+alter table lists add column if not exists banner_media_id bigint;
 alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
