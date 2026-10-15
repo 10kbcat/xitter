@@ -12,7 +12,8 @@
 // The first screen is the signed-in client's own sign-in dialog.
 
 import { signInCookies } from "./accounts";
-import { login } from "./auth";
+import { login, startSession } from "./auth";
+import { answerChallenge, startChallenge } from "./two-factor";
 import { sql } from "./db";
 import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
@@ -119,6 +120,8 @@ const templates = {
 	page: without(await load("page"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	// sign-up: X's emailed-code screen asks for the invite code instead
 	code: codeLength(without(await load("code"), ["Send again"], 7140), INVITE_LENGTH),
+	// the authenticator code at sign-in: six digits
+	twoFactor: codeLength(without(await load("code"), ["Send again"], 7140), 6),
 	setup: withEmailField(await load("setup")),
 	success: await load("success"),
 	passkey: await load("passkey"),
@@ -144,9 +147,16 @@ const TEXTS: Record<string, () => string> = {
 	"Choose a name, username, and password.": () => `Welcome to ${settings().instance_name}. Choose a name, username, and password.`,
 };
 
-function fill(messages: Message[], values: Record<string, string>): Message[] {
+const TWO_FACTOR_TEXTS: Record<string, string> = {
+	"We sent you a security code": "Enter your authentication code",
+	"The code was sent to your device": "Open your authenticator app and enter the 6-digit code, or one of your backup codes.",
+	"Didn't receive a code? ": "",
+};
+
+function fill(messages: Message[], values: Record<string, string>, texts: Record<string, string> = {}): Message[] {
 	return mapStrings(messages, (s) => {
 		if (s in LINKS) return LINKS[s];
+		if (s in texts) return texts[s];
 		if (s in TEXTS) return TEXTS[s]();
 		return s.replace(/\{\{(\w+)\}\}/g, (_, k) => values[k] ?? "");
 	});
@@ -238,6 +248,16 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 	if (path === "/onboarding/web/actions/finish_verification") {
 		const f = await form(req);
 		const token = String(f.session_token ?? "");
+		// a second-factor challenge answers here too
+		const answered = await answerChallenge(token, String(f.code ?? ""));
+		if (!answered.unknown) {
+			if (!answered.userId) return respond(fieldError("code", answered.error ?? "That code isn't right."));
+			const session = await startSession(answered.userId);
+			const [user] = await sql`select screen_name from users where id = ${session.userId}::bigint`;
+			const headers = new Headers();
+			for (const c of await signInCookies(req, session)) headers.append("set-cookie", c);
+			return respond(fill(templates.success, { user_id: session.userId, username: user.screen_name }), false, headers);
+		}
 		const s = await pending(token);
 		if (!s) return respond(fieldError("code", STALE));
 		const code = await validCode(String(f.code ?? ""));
@@ -272,6 +292,8 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 	if (path === "/onboarding/web/actions/login_enter_password") {
 		const f = await form(req);
 		const username = String(f.username ?? "").trim().replace(/^@/, "");
+		const challenge = username && f.password ? await startChallenge(username, f.password) : undefined;
+		if (challenge) return respond(fill(templates.twoFactor, { session_token: challenge }, TWO_FACTOR_TEXTS));
 		const session = username && f.password ? await login(username, f.password) : undefined;
 		if (!session) return respond(fieldError("password", "Wrong username or password."));
 		const [user] = await sql`select screen_name from users where id = ${session.userId}::bigint`;

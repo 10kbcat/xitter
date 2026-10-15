@@ -21,6 +21,7 @@ import { platformSource } from "./platforms";
 import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 import { forgotRoute, resetRoute } from "./password-reset";
+import { twoFactorRoute } from "./two-factor";
 import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
@@ -206,6 +207,7 @@ const server = Bun.serve({
 		}
 		if (p === "/account/reset") return resetRoute(req, url);
 		if (p === "/account/forgot") return forgotRoute(req, url);
+		if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
 		if (p === "/account/notices" && viewer) return noticesPage(viewer);
 		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 		// uploads stay inside the instance: only signed-in users get them

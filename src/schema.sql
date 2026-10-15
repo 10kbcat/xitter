@@ -59,6 +59,16 @@ alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists deactivated_at timestamptz;
 alter table users add column if not exists language text not null default 'en';
 alter table users add column if not exists email text;
+alter table users add column if not exists totp_enabled boolean not null default false;
+alter table users add column if not exists totp_secret text;
+alter table users add column if not exists totp_pending text;
+alter table users add column if not exists totp_backup jsonb not null default '[]';
+create table if not exists login_challenges (
+	token uuid primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	attempts int not null default 0,
+	created_at timestamptz not null default now()
+);
 -- who has been shown a post (other than its author), once each
 create table if not exists post_views (
 	post_id bigint not null references posts (id) on delete cascade,

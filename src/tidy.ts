@@ -124,6 +124,20 @@ export const FORGOT_SCRIPT = `(function(){
 			el=el.parentElement;
 		}
 	},true);
+	// Settings > Two-factor: the authenticator app row opens our set-up page
+	document.addEventListener("click",function(e){
+		if(location.pathname.indexOf("/settings/account/login_verification")!==0)return;
+		var el=e.target;
+		while(el&&el!==document.body){
+			var t=el.textContent||"";
+			if(t.indexOf("Authentication app")===0&&t.length<260){
+				e.preventDefault();e.stopPropagation();
+				location.assign("/account/2fa");
+				return;
+			}
+			el=el.parentElement;
+		}
+	},true);
 })();`;
 
 export const TIDY_SCRIPT = `(function(){
