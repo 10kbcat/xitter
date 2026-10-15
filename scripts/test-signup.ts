@@ -82,7 +82,7 @@ check("and a taken one as taken", states.get(AVAILABLE) === false && states.get(
 states = await typing("ab");
 check("and one too short as neither", states.get(AVAILABLE) === false && states.get(TAKEN) === false);
 
-const setup = (o: Record<string, string>) => step("verify_signup", { session_token: token, name: "Signup Test", username: name, password: "testpass123", ...o });
+const setup = (o: Record<string, string>) => step("verify_signup", { session_token: token, name: "Signup Test", username: name, password: "testpass123", email: `${name.toLowerCase()}@example.com`, ...o });
 s = await setup({ username: "settings" });
 check("reserved names are refused", /reserved/.test(s.errors.username ?? ""), s.errors);
 s = await setup({ username: "ab" });
@@ -123,7 +123,7 @@ const inviteCookie = link.headers.getSetCookie().map((c) => c.split(";")[0]).fin
 check("an invite link leads to the home page and keeps the code", link.status === 302 && link.headers.get("location") === "/" && !!inviteCookie);
 s = await step("begin_login", { username_or_email: `${name}c` }, inviteCookie);
 check("then a new username goes straight to account setup", shows(s, "Set up your account"));
-s = await step("verify_signup", { session_token: s.fields.session_token, name: "", username: `${name}c`, password: "testpass123" }, inviteCookie);
+s = await step("verify_signup", { session_token: s.fields.session_token, name: "", username: `${name}c`, password: "testpass123", email: `${name.toLowerCase()}c@example.com` }, inviteCookie);
 check("and signing up spends the code and clears it", s.cookies.some((c) => c.startsWith("auth_token=")) && s.cookies.includes("xitter_invite="));
 const [spent] = await sql`select uses from invites where code = ${linked}`;
 check("the linked code is used", spent?.uses === 1, spent);

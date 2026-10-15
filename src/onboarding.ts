@@ -55,6 +55,43 @@ function codeLength(messages: Message[], length: number): Message[] {
 	return without(messages, ["Didn't receive a code? Retry in  "], 25739);
 }
 
+// The setup screen has name, username and password. Email goes under the name:
+// a copy of the name block (label, input, error slot) with its texts changed.
+function withEmailField(messages: Message[]): Message[] {
+	const [, root] = messages[0];
+	const text = (p: number): string | undefined => (root.props[p]?.[0] === 0 ? root.props[p][1] : undefined);
+	const parentOf = new Map<number, number>();
+	root.els.forEach((e: any, i: number) => e.children.forEach((c: number) => parentOf.set(c, i)));
+	const input = root.els.findIndex((e: any) => e.props.has(17392) && text(e.props.get(17392)) === "name");
+	const block = parentOf.get(input);
+	const holder = block === undefined ? undefined : parentOf.get(block);
+	if (input < 0 || block === undefined || holder === undefined) throw new Error("setup screen: no name field to copy");
+	const swap: Record<string, string> = { "Name *": "Email *", name: "email", "Full name": "Email" };
+	const copies = new Map<number, number>();
+	const copy = (i: number): number => {
+		if (copies.has(i)) return copies.get(i)!;
+		const old = root.els[i];
+		const props = new Map<number, number>(old.props);
+		for (const [k, p] of props) {
+			const t = text(p);
+			if (t !== undefined && t in swap) {
+				root.props.push([0, swap[t]]);
+				props.set(k, root.props.length - 1);
+			}
+		}
+		const fresh = { ...old, props, children: [] as number[] };
+		root.els.push(fresh);
+		const at = root.els.length - 1;
+		copies.set(i, at);
+		fresh.children = old.children.map(copy);
+		return at;
+	};
+	const at = copy(block);
+	const siblings = root.els[holder].children;
+	siblings.splice(siblings.indexOf(block) + 1, 0, at);
+	return messages;
+}
+
 // The setup screen checks the username as it's typed: its
 // Input2.RemoteAsYouType posts the form to suggest_username and draws the
 // reply. "Username is available" shows, and Continue enables, while the
@@ -81,7 +118,7 @@ const templates = {
 	page: without(await load("page"), ["Continue with phone", "Continue with Google", "Continue with Apple", "or"]),
 	// sign-up: X's emailed-code screen asks for the invite code instead
 	code: codeLength(without(await load("code"), ["Send again"], 7140), INVITE_LENGTH),
-	setup: await load("setup"),
+	setup: withEmailField(await load("setup")),
 	success: await load("success"),
 	passkey: await load("passkey"),
 };
@@ -213,10 +250,10 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		const s = await pending(token);
 		if (!s) return respond(fieldError("username", STALE));
 		try {
-			await signUp({ code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? "") });
+			await signUp({ code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? ""), email: String(f.email ?? "") });
 		} catch (e) {
 			if (!(e instanceof SignupError)) throw e;
-			const field = /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : "username";
+			const field = /email/i.test(e.message) ? "email" : /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : "username";
 			return respond(fieldError(field, e.message));
 		}
 		await sql`delete from signup_sessions where token = ${token}::uuid`;

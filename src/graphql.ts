@@ -9,6 +9,7 @@ import { placeById } from "./places";
 import { PollError, attachPoll } from "./polls";
 import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
+import { usernameAvailable } from "./account-settings";
 import { sql } from "./db";
 import { blockedIds, blockedFor, outOfView } from "./blocks";
 import { settings } from "./settings";
@@ -316,7 +317,27 @@ const relationList =
 
 const viewerUser = (fields: object) => ({ data: { viewer: { user_results: { result: { __typename: "User", ...fields } } } } });
 
+const LANGUAGES: [string, string, string][] = [
+	["en", "English", "English"],
+	["ru", "Русский", "Russian"],
+	["uk", "Українська", "Ukrainian"],
+	["de", "Deutsch", "German"],
+	["fr", "Français", "French"],
+	["es", "Español", "Spanish"],
+	["it", "Italiano", "Italian"],
+	["pt", "Português", "Portuguese"],
+	["pl", "Polski", "Polish"],
+	["ja", "日本語", "Japanese"],
+];
+
 const handlers: Record<string, Handler> = {
+	GetUsernameAvailabilityAndSuggestions: async (v: Viewer, vars: Vars) => {
+		const r = await usernameAvailable(v.id, String(vars.username ?? ""));
+		return { data: { get_username_availability_and_suggestions: { __typename: "UsernameAvailabilityAndSuggestions", available: r.available, suggestions: vars.include_suggestions === false ? [] : r.suggestions } } };
+	},
+	SupportedLanguages: async () => ({
+		data: { supported_languages: { supported_languages: LANGUAGES.map(([code, local_name, name]) => ({ code, local_name, name, status: "supported" })) } },
+	}),
 	PutClientEducationFlag: async (v: Viewer, vars: Vars) => {
 		if (typeof vars.flag === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(vars.flag))
 			await sql`update users set education_flags = education_flags || ${JSON.stringify({ [vars.flag]: Date.now() })}::text::jsonb where id = ${v.id}::bigint`;

@@ -13,6 +13,7 @@ import { placeById, searchPlaces } from "./places";
 import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
+import { accountSettingsRoute, changeUsername } from "./account-settings";
 import { answerRequest, pendingRequests, setFollow, setProtected, userById, userByName, usersByIds } from "./users";
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
@@ -106,6 +107,8 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const place = placeById(geoId[1]);
 		return place ? Response.json(place) : Response.json({ errors: [{ code: 34, message: "Sorry, that page does not exist." }] }, { status: 404 });
 	}
+	const own = await accountSettingsRoute(method, path, viewer, req);
+	if (own) return own;
 	const accounts = await accountsRoute(method, path, viewer, req);
 	if (accounts) return accounts;
 	const profile = await profileRoute(path, viewer, req);
@@ -145,8 +148,15 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const form = await req.formData().catch(() => undefined);
 		const asked = form?.get("protected");
 		if (asked !== null && asked !== undefined) await setProtected(viewer.id, String(asked) === "true");
-		const fresh = await userById(viewer.id, viewer.id);
-		return Response.json(settingsFor(fresh ? { ...viewer, protected: fresh.protected } : viewer) ?? {});
+		const name = form?.get("screen_name");
+		if (typeof name === "string" && name !== viewer.screen_name) {
+			const problem = await changeUsername(viewer, name);
+			if (problem) return Response.json({ errors: [{ code: 120, message: problem }] }, { status: 400 });
+		}
+		const lang = form?.get("lang") ?? form?.get("language");
+		if (typeof lang === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(lang)) await sql`update users set language = ${lang} where id = ${viewer.id}::bigint`;
+		const [fresh] = await sql`select screen_name, language, protected from users where id = ${viewer.id}::bigint`;
+		return Response.json(settingsFor({ ...viewer, ...fresh }) ?? {});
 	}
 	// Report post / Report account
 	if (path === "/1.1/report/flow.json" && method === "POST") {

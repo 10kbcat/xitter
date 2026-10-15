@@ -27,6 +27,7 @@ export type User = {
 	affiliates?: number;
 	// posts only for approved followers
 	protected?: boolean;
+	language?: string;
 	created_at: Date;
 	// present when the row was loaded through users.ts
 	stats?: {
@@ -64,10 +65,13 @@ export async function createUser(screenName: string, name: string, password: str
 
 export async function login(screenName: string, password: string): Promise<{ token: string; csrf: string; userId: string } | undefined> {
 	await expireSanctions();
-	const [u] = await sql`select id, password_hash from users where lower(screen_name) = lower(${screenName}) and status <> 'suspended'`;
+	const [u] = await sql`select id, password_hash, deactivated_at from users where lower(screen_name) = lower(${screenName})
+		and (status <> 'suspended' or deactivated_at > now() - interval '30 days')`;
 	// verify against a dummy hash when the user is unknown so timing does not reveal it
 	const ok = await Bun.password.verify(password, u?.password_hash ?? DUMMY_HASH).catch(() => false);
 	if (!u || !ok) return undefined;
+	// signing in within 30 days of deactivating brings the account back
+	if (u.deactivated_at) await sql`update users set status = 'active', deactivated_at = null where id = ${u.id}::bigint`;
 	const token = randomHex(20);
 	const csrf = randomHex(32);
 	await sql`insert into sessions (token, user_id, csrf) values (${token}, ${u.id}::bigint, ${csrf})`;
@@ -94,7 +98,7 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
 	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.created_at, s.csrf, s.token,
+		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.language, u.created_at, s.csrf, s.token,
 		(select coalesce(json_agg(json_build_object('id', b.id::text, 'name', b.name) order by ub.position, b.name), '[]')
 			from user_badges ub join custom_badges b on b.id = ub.badge_id where ub.user_id = u.id) as badges
 		from sessions s join users u on u.id = s.user_id

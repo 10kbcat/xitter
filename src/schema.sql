@@ -55,6 +55,11 @@ alter table lists add column if not exists banner_media_id bigint;
 -- the client's "seen this" popups: flag name -> timestamp
 alter table users add column if not exists education_flags jsonb not null default '{}';
 alter table users add column if not exists status_until timestamptz;
+-- self-service deactivation: signing in within 30 days brings the account back
+alter table users add column if not exists deactivated_at timestamptz;
+alter table users add column if not exists language text not null default 'en';
+alter table users add column if not exists email text;
+create unique index if not exists users_email_idx on users (lower(email));
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
 alter table posts add column if not exists sensitive boolean not null default false;

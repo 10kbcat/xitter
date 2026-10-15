@@ -22,7 +22,7 @@ export function settingsFor(user: User): Record<string, unknown> {
 		use_cookie_personalization: false,
 		sleep_time: { enabled: false, end_time: null, start_time: null },
 		geo_enabled: false,
-		language: "en",
+		language: user.language ?? "en",
 		discoverable_by_email: false,
 		discoverable_by_mobile_phone: false,
 		personalized_trends: false,
