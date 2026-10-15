@@ -10,7 +10,7 @@
 
 import { sql } from "./db";
 import { idTime } from "./ids";
-import { type FeedItem, homeHidden, itemsFromRows } from "./posts";
+import { type FeedItem, communityVisible, homeHidden, itemsFromRows } from "./posts";
 
 // how many candidates are ranked; the feed ends after them
 const CANDIDATES = 600;
@@ -29,7 +29,7 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 		with candidates as (
 			select f.*, (select x.user_id from posts x where x.id = f.post_id) as original_author
 			from feed_items f
-			where not f.is_reply and f.item_id <= ${opts.asOf}::bigint and ${homeHidden(viewerId)}
+			where not f.is_reply and f.item_id <= ${opts.asOf}::bigint and ${homeHidden(viewerId)} and ${communityVisible(viewerId)}
 			order by f.item_id desc limit ${CANDIDATES * 3}
 		),
 		scored as (

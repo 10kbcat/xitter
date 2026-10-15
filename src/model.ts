@@ -195,6 +195,9 @@ export type PostRow = {
 	author: User;
 	media?: MediaRow[];
 	article_id?: string | null;
+	community_id?: string | null;
+	// the community this post belongs to, as communityObjects builds it
+	community?: Record<string, unknown>;
 	// accounts named with @ in the text
 	mentions?: { id: string; screen_name: string; name: string }[];
 	// the published article this post carries
@@ -247,6 +250,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		} } : {}),
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
 		...(p.article ? { article: { article_results: { result: p.article } } } : {}),
+		...(p.community ? { community_results: { result: p.community } } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
 		edit_control: {

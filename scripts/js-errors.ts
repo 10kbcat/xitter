@@ -45,8 +45,16 @@ const send = (method: string, params: object = {}) => ws.send(JSON.stringify({ i
 const seen = new Map<string, number>();
 let pauses = 0;
 let summaryId = 0;
+// WHERE=<regex>: print the source around the throwing frame of matching exceptions
+const where = process.env.WHERE ? new RegExp(process.env.WHERE) : undefined;
+const pending = new Map<number, { line: number; col: number; text: string }>();
 ws.addEventListener("message", (ev) => {
 	const msg = JSON.parse(String(ev.data));
+	const want = msg.id && pending.get(msg.id);
+	if (want && msg.result?.scriptSource) {
+		const line = msg.result.scriptSource.split(String.fromCharCode(10))[want.line] ?? "";
+		console.log(`SOURCE for ${want.text}: ${line.slice(Math.max(0, want.col - 400), want.col)}<<HERE>>${line.slice(want.col, want.col + 200)}`);
+	}
 	if (msg.id && msg.id === summaryId) console.log(`page: ${msg.result?.result?.value}`);
 	if (msg.error) console.log(`protocol error: ${JSON.stringify(msg.error)}`);
 	if (msg.result?.errorText) console.log(`navigation failed: ${msg.result.errorText}`);
@@ -61,6 +69,11 @@ ws.addEventListener("message", (ev) => {
 			.join(" < ");
 		const key = `${text}\n    at ${frames}`;
 		seen.set(key, (seen.get(key) ?? 0) + 1);
+			if (where?.test(text) && seen.get(key) === 1) {
+				const f = callFrames[0];
+				pending.set(++id, { line: f.location.lineNumber, col: f.location.columnNumber, text });
+				ws.send(JSON.stringify({ id, method: "Debugger.getScriptSource", params: { scriptId: f.location.scriptId } }));
+			}
 	}
 	send("Debugger.resume");
 });

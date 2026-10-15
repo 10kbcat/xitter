@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { communityHandlers } from "./communities";
 import { listHandlers } from "./lists";
 import { noteHandlers } from "./notes";
 import { sql } from "./db";
@@ -183,7 +184,10 @@ const createTweet: Handler = async (viewer, vars) => {
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
 	// a quote arrives as a link to the quoted post
 	const quoteId = typeof vars.attachment_url === "string" ? /\/status(?:es)?\/(\d{1,19})/.exec(vars.attachment_url)?.[1] : undefined;
-	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource });
+	// a post to a community carries it as a semantic annotation (domain 31)
+	const annotated = (Array.isArray(vars.semantic_annotation_ids) ? vars.semantic_annotation_ids : []).find((x: any) => String(x?.domain_id) === "31")?.entity_id;
+	const communityId = [vars.community_id, annotated].find(isId);
+	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId });
 	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
@@ -673,6 +677,7 @@ Object.assign(handlers, {
 Object.assign(handlers, chatHandlers);
 Object.assign(handlers, noteHandlers);
 Object.assign(handlers, listHandlers);
+Object.assign(handlers, communityHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

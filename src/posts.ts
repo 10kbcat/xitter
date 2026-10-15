@@ -6,6 +6,7 @@ import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
 import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, suspendedFor } from "./blocks";
 import { mediaForPosts } from "./media";
+import { communityObjects } from "./community-model";
 import { toUser, userCols, usersByIds } from "./users";
 
 export const MAX_POST_LENGTH = 280;
@@ -15,7 +16,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -41,6 +42,7 @@ function toRow(r: any): PostRow {
 		conversation_id: r.conversation_id,
 		quote_id: r.quote_id,
 		article_id: r.article_id,
+		community_id: r.community_id,
 		created_at: r.created_at,
 		reply_user_id: r.reply_user_id,
 		reply_screen_name: r.reply_screen_name,
@@ -70,6 +72,11 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 			where m.post_id = any(${sql.array(posts.map((p) => p.id), "INT8")})`;
 		for (const p of posts) p.mentions = mentions.filter((m: any) => String(m.post_id) === p.id).map((m: any) => ({ id: String(m.id), screen_name: m.screen_name, name: m.name }));
 	}
+	const communityIds = [...new Set(posts.map((p) => p.community_id).filter((id): id is string => !!id))];
+	if (communityIds.length) {
+		const communities = await communityObjects(viewerId, communityIds);
+		for (const p of posts) if (p.community_id) p.community = communities.get(p.community_id);
+	}
 	const articles = await articlesByIds(viewerId, [...new Set(posts.map((p) => p.article_id).filter((id): id is string => !!id))]);
 	for (const p of posts) if (p.article_id) p.article = articles.get(p.article_id);
 	const quoteIds = [...new Set(posts.map((p) => p.quote_id).filter((id): id is string => !!id))];
@@ -98,7 +105,7 @@ export type FeedItem = { id: string; post: PostRow; repost?: { by: User; created
 export type FeedQuery = {
 	viewerId: string;
 	// whose posts and reposts: everyone, the viewer plus accounts they follow, or one account
-	authors: { all: true } | { following: true } | { user: string } | { list: string };
+	authors: { all: true } | { following: true } | { user: string } | { list: string } | { community: string };
 	replies: boolean;
 	kinds: "both" | "posts" | "reposts";
 	// only posts with attached media of this kind
@@ -121,6 +128,10 @@ export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blocked
 	and f.author_id not in ${outOfView(viewerId)} and ${originalAuthor()} not in ${outOfView(viewerId)}
 	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
 	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}`;
+// posts of a community show outside it only to its members (f is feed_items)
+export const communityVisible = (viewerId: string) => sql`((select x.community_id from posts x where x.id = f.post_id) is null
+	or (select x.community_id from posts x where x.id = f.post_id) in (select community_id from community_members where user_id = ${viewerId}::bigint))`;
+
 // a muted list keeps its members out of the home feeds, not out of the list itself
 const listMuted = (viewerId: string) => sql`f.author_id not in (select m.user_id from list_mutes x join list_members m on m.list_id = x.list_id where x.user_id = ${viewerId}::bigint)`;
 const blockedBy = (viewerId: string) => sql`(select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
@@ -131,6 +142,8 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	const authorFilter =
 		"user" in q.authors
 			? sql`f.author_id = ${q.authors.user}::bigint`
+			: "community" in q.authors
+				? sql`(f.reposter_id is null and f.post_id in (select id from posts where community_id = ${q.authors.community}::bigint))`
 			: "list" in q.authors
 				? sql`f.author_id in (select user_id from list_members where list_id = ${q.authors.list}::bigint)`
 				: "following" in q.authors
@@ -146,12 +159,14 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 			: q.media === "video"
 				? sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind = 'video')`
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
+	// a community's posts stay in the community for everyone who isn't in it
+	const communityFilter = "community" in q.authors ? sql`true` : communityVisible(q.viewerId);
 	const home = !("user" in q.authors);
-	const hidden = home ? ("list" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
+	const hidden = home ? ("list" in q.authors || "community" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
 	const rows = q.after
-		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
+		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${communityFilter} and ${hidden} and f.item_id > ${q.after}::bigint
 			order by f.item_id asc limit ${q.limit}`
-		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${hidden} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
+		: await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${communityFilter} and ${hidden} and f.item_id < ${q.before ?? NO_LIMIT}::bigint
 			order by f.item_id desc limit ${q.limit}`;
 	if (q.after) rows.reverse();
 
@@ -205,7 +220,7 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 	return hydrate(viewerId, rows.map(toRow));
 }
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string } = {}): Promise<string> {
+export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string } = {}): Promise<string> {
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	const [author] = await sql`select status from users where id = ${userId}::bigint`;
 	if (author?.status === "restricted") throw new PostError("Your account can't post right now.", 326);
@@ -222,8 +237,12 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
 	}
-	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source)
-		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"})`;
+	if (opts.communityId) {
+		const [m] = await sql`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
+		if (!m) throw new PostError("Only members can post in this community.", 187);
+	}
+	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source, community_id)
+		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"}, ${opts.communityId ?? null}::bigint)`;
 	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
 	if (names.length)
 		await sql`insert into post_mentions (post_id, user_id)

@@ -453,3 +453,48 @@ create table if not exists pinned_lists (
 	position int not null default 0,
 	primary key (user_id, list_id)
 );
+
+create table if not exists communities (
+	id bigint primary key,
+	creator_id bigint not null references users (id) on delete cascade,
+	name text not null,
+	description text not null default '',
+	question text not null default '',
+	-- Open, RestrictedJoinRequestsRequireModeratorApproval, RestrictedJoinRequestsRequireAdminApproval, RestrictedJoinRequestsDisabled
+	join_policy text not null default 'Open',
+	-- MemberInvitesAllowed, ModeratorInvitesAllowed, AdminInvitesAllowed
+	invites_policy text not null default 'MemberInvitesAllowed',
+	is_nsfw boolean not null default false,
+	banner_url text,
+	created_at timestamptz not null default now()
+);
+create unique index if not exists communities_name_key on communities (lower(name));
+
+create table if not exists community_members (
+	community_id bigint not null references communities (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	role text not null default 'Member' check (role in ('Member', 'Moderator', 'Admin')),
+	created_at timestamptz not null default now(),
+	primary key (community_id, user_id)
+);
+create index if not exists community_members_user_idx on community_members (user_id);
+
+create table if not exists community_rules (
+	id bigint primary key,
+	community_id bigint not null references communities (id) on delete cascade,
+	name text not null,
+	description text not null default '',
+	position int not null default 0
+);
+create index if not exists community_rules_community_idx on community_rules (community_id, position);
+
+create table if not exists community_join_requests (
+	community_id bigint not null references communities (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	answer text not null default '',
+	created_at timestamptz not null default now(),
+	primary key (community_id, user_id)
+);
+
+alter table posts add column if not exists community_id bigint references communities (id) on delete set null;
+create index if not exists posts_community_idx on posts (community_id, id desc) where community_id is not null;
