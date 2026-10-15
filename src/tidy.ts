@@ -221,6 +221,10 @@ export const TIDY_SCRIPT = `(function(){
 		document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
 			if(T.menuItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
 		});
+		// the verified-badge popup's "Upgrade to get verified": nothing to upgrade to here
+		document.querySelectorAll('a,button,[role="button"]').forEach(function(b){
+			if(b.innerText&&b.innerText.trim()==="Upgrade to get verified")b.style.display="none";
+		});
 		// upsell banners: the box around a Premium link, up to whatever else shares its column
 		if(!T.premium)document.querySelectorAll('[data-testid="primaryColumn"] a[href="/i/premium_sign_up"]').forEach(function(a){
 			var box=a;
