@@ -80,7 +80,8 @@ export async function loadSettings() {
 }
 
 export const settings = (): Settings => current;
-export const feature = (f: Feature) => current.features[f] !== false;
+// GIF search needs a Tenor key; without one the button stays hidden
+export const feature = (f: Feature) => (f === "gifs" && !process.env.TENOR_API_KEY ? false : current.features[f] !== false);
 // the admin's blocked phrases, matched in any case
 export const hasBlockedPhrase = (text: string) => {
 	const lower = text.toLowerCase();

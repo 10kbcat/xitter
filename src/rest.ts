@@ -9,6 +9,7 @@ import { isId } from "./ids";
 import { legacyUser } from "./model";
 import { markSeen } from "./notifications";
 import { PollError, createCard, vote } from "./polls";
+import { placeById, searchPlaces } from "./places";
 import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
@@ -90,6 +91,20 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 			if (e instanceof PollError) return Response.json({ errors: [{ code: 214, message: e.message }] }, { status: e.status });
 			throw e;
 		}
+	}
+	if (method === "GET" && /^\/1\.1\/geo\/(?:places|search)(?:\.json)?$/.test(path)) {
+		const q = new URL(req.url).searchParams;
+		const num = (k: string) => (q.get(k) === null || Number.isNaN(Number(q.get(k))) ? null : Number(q.get(k)));
+		return Response.json({
+			places: searchPlaces(q.get("query"), num("lat"), num("long") ?? num("lng"), Math.min(num("max_results") ?? 20, 50)),
+			geo_search_request_id: crypto.randomUUID().replace(/-/g, ""),
+			attributions: [],
+		});
+	}
+	const geoId = /^\/1\.1\/geo\/id\/([0-9a-f]{16})(?:\.json)?$/.exec(path);
+	if (method === "GET" && geoId) {
+		const place = placeById(geoId[1]);
+		return place ? Response.json(place) : Response.json({ errors: [{ code: 34, message: "Sorry, that page does not exist." }] }, { status: 404 });
 	}
 	const accounts = await accountsRoute(method, path, viewer, req);
 	if (accounts) return accounts;

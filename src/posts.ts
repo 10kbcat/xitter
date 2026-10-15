@@ -17,7 +17,7 @@ const NO_LIMIT = "9223372036854775807";
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id,
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		(select count(*)::int from likes x where x.post_id = p.id) as like_count,
@@ -45,6 +45,7 @@ function toRow(r: any): PostRow {
 		article_id: r.article_id,
 		community_id: r.community_id,
 		poll_id: r.poll_id,
+		place_id: r.place_id,
 		created_at: r.created_at,
 		reply_user_id: r.reply_user_id,
 		reply_screen_name: r.reply_screen_name,
@@ -230,7 +231,7 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 	return hydrate(viewerId, rows.map(toRow));
 }
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string } = {}): Promise<string> {
+export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string } = {}): Promise<string> {
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	const [author] = await sql`select status from users where id = ${userId}::bigint`;
 	if (author?.status === "restricted") throw new PostError("Your account can't post right now.", 326);
@@ -251,8 +252,8 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		const [m] = await sql`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
 		if (!m) throw new PostError("Only members can post in this community.", 187);
 	}
-	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source, community_id)
-		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"}, ${opts.communityId ?? null}::bigint)`;
+	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source, community_id, place_id)
+		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"}, ${opts.communityId ?? null}::bigint, ${opts.placeId ?? null})`;
 	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
 	if (names.length)
 		await sql`insert into post_mentions (post_id, user_id)

@@ -22,6 +22,7 @@ import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
+import { gifProxy } from "./gifs";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -114,6 +115,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	const path = url.pathname.replace(/^\/i\/(jf)?api/, "");
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
+	if (path === "/xitter/gif") return gifProxy(url);
 	const parts = path.split("/").filter(Boolean);
 	const gql = parts.indexOf("graphql");
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
