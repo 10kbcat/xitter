@@ -546,3 +546,14 @@ create table if not exists post_versions (
 	created_at timestamptz not null
 );
 create index if not exists post_versions_post_idx on post_versions (post_id, seq);
+
+-- protected accounts: posts only for approved followers
+alter table users add column if not exists protected boolean not null default false;
+create table if not exists follow_requests (
+	requester_id bigint not null references users (id) on delete cascade,
+	target_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (requester_id, target_id),
+	check (requester_id <> target_id)
+);
+create index if not exists follow_requests_target_idx on follow_requests (target_id, created_at desc);

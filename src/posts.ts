@@ -4,7 +4,7 @@ import { newId } from "./ids";
 import { hasBlockedPhrase } from "./settings";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
-import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, suspendedFor } from "./blocks";
+import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, suspendedFor } from "./blocks";
 import { mediaForPosts } from "./media";
 import { communityObjects } from "./community-model";
 import { pollCard, pollsByIds } from "./polls";
@@ -30,6 +30,7 @@ const select = (viewerId: string) => sql`
 		exists (select 1 from bookmarks x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as bookmarked
 	from posts p
 	join users u on u.id = p.user_id and (not p.hidden or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))
+		and u.id not in ${protectedFor(viewerId)}
 	left join posts rp on rp.id = p.reply_to_id
 	left join users ru on ru.id = rp.user_id`;
 
@@ -182,6 +183,7 @@ export type FeedQuery = {
 const originalAuthor = () => sql`(select x.user_id from posts x where x.id = f.post_id)`;
 export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blockedFor(viewerId)} and ${originalAuthor()} not in ${blockedFor(viewerId)}
 	and f.author_id not in ${outOfView(viewerId)} and ${originalAuthor()} not in ${outOfView(viewerId)}
+	and f.author_id not in ${protectedFor(viewerId)} and ${originalAuthor()} not in ${protectedFor(viewerId)}
 	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
 	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}`;
 // posts of a community show outside it only to its members (f is feed_items)
@@ -192,7 +194,8 @@ export const communityVisible = (viewerId: string) => sql`((select x.community_i
 const listMuted = (viewerId: string) => sql`f.author_id not in (select m.user_id from list_mutes x join list_members m on m.list_id = x.list_id where x.user_id = ${viewerId}::bigint)`;
 const blockedBy = (viewerId: string) => sql`(select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
 const profileHidden = (viewerId: string) => sql`f.author_id not in ${blockedBy(viewerId)} and ${originalAuthor()} not in ${blockedBy(viewerId)}
-	and f.author_id not in ${suspendedFor(viewerId)} and ${originalAuthor()} not in ${suspendedFor(viewerId)}`;
+	and f.author_id not in ${suspendedFor(viewerId)} and ${originalAuthor()} not in ${suspendedFor(viewerId)}
+	and f.author_id not in ${protectedFor(viewerId)} and ${originalAuthor()} not in ${protectedFor(viewerId)}`;
 
 export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 	const authorFilter =
@@ -292,6 +295,8 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		const [quoted] = await sql`select id, user_id from posts where id = ${opts.quoteId}::bigint`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
+		const [owner] = await sql`select protected from users where id = ${quoted.user_id}::bigint`;
+		if (owner?.protected && String(quoted.user_id) !== userId) throw new PostError("Posts from protected accounts can't be quoted.", 433);
 	}
 	if (opts.communityId) {
 		const [m] = await sql`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
@@ -336,6 +341,9 @@ export async function setMark(table: Mark, userId: string, postId: string, on: b
 }
 
 export async function repost(userId: string, postId: string): Promise<string> {
+	// a protected account's posts can't be passed on
+	const [owner] = await sql`select u.protected, u.id::text as owner from posts p join users u on u.id = p.user_id where p.id = ${postId}::bigint`;
+	if (owner?.protected && owner.owner !== userId) throw new PostError("Posts from protected accounts can't be reposted.", 328);
 	const id = newId();
 	const rows = await sql`insert into reposts (id, user_id, post_id) values (${id}::bigint, ${userId}::bigint, ${postId}::bigint)
 		on conflict (user_id, post_id) do update set post_id = excluded.post_id returning id`;

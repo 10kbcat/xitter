@@ -16,7 +16,7 @@ import { patchText } from "./patch";
 export function settingsFor(user: User): Record<string, unknown> {
 	return {
 		display_sensitive_media: false,
-		protected: false,
+		protected: !!user.protected,
 		screen_name: user.screen_name,
 		always_use_https: true,
 		use_cookie_personalization: false,

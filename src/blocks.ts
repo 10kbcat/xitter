@@ -18,6 +18,13 @@ export const outOfView = (viewerId: string) =>
 		and id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)))
 		and not exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))`;
 
+// Protected accounts: their posts are for themselves and the accounts they let
+// follow. Staff see everything.
+export const protectedFor = (viewerId: string) =>
+	sql`(select id from users where protected and id <> ${viewerId}::bigint
+		and id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)
+		and not exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))`;
+
 // suspended accounts only, for profiles: a limited account's own page stays readable
 export const suspendedFor = (viewerId: string) =>
 	sql`(select id from users where status = 'suspended'

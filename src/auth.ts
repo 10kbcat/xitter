@@ -25,6 +25,8 @@ export type User = {
 	org?: { id: string; name: string; screen_name: string; avatar_url: string | null } | null;
 	// for organisations: how many affiliates they have
 	affiliates?: number;
+	// posts only for approved followers
+	protected?: boolean;
 	created_at: Date;
 	// present when the row was loaded through users.ts
 	stats?: {
@@ -37,6 +39,8 @@ export type User = {
 		following: number;
 		followedByViewer: boolean;
 		followsViewer: boolean;
+		// the viewer asked to follow and waits for approval
+		requestedByViewer?: boolean;
 		blocking?: boolean;
 		blockedBy?: boolean;
 		muting?: boolean;
@@ -90,7 +94,7 @@ export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
 	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.created_at, s.csrf, s.token,
+		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.created_at, s.csrf, s.token,
 		(select coalesce(json_agg(json_build_object('id', b.id::text, 'name', b.name) order by ub.position, b.name), '[]')
 			from user_badges ub join custom_badges b on b.id = ub.badge_id where ub.user_id = u.id) as badges
 		from sessions s join users u on u.id = s.user_id

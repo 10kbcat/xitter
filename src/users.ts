@@ -11,7 +11,7 @@ export const badgesOf = (userId: ReturnType<typeof sql>) => sql`(select json_agg
 // same account never reaches the client in two different states.
 export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
-	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.verified_type as a_verified_type, u.flag as a_flag, u.status as a_status, u.created_at as a_created_at,
+	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.protected as a_protected, u.verified_type as a_verified_type, u.flag as a_flag, u.status as a_status, u.created_at as a_created_at,
 	${badgesOf(sql`u.id`)} as a_badges,
 	(select count(*)::int from posts x where x.user_id = u.id) as a_posts,
 	(select json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', case when o.org_badge_id is not null then '/public/badge-' || o.org_badge_id::text || '.png' else o.avatar_url end)
@@ -24,6 +24,7 @@ export const userCols = (viewerId: string) => sql`
 	(select count(*)::int from follows x where x.follower_id = u.id) as a_following,
 	exists (select 1 from follows x where x.follower_id = ${viewerId}::bigint and x.followee_id = u.id) as a_followed_by_viewer,
 	exists (select 1 from follows x where x.follower_id = u.id and x.followee_id = ${viewerId}::bigint) as a_follows_viewer,
+	exists (select 1 from follow_requests x where x.requester_id = ${viewerId}::bigint and x.target_id = u.id) as a_requested,
 	exists (select 1 from blocks x where x.blocker_id = ${viewerId}::bigint and x.blocked_id = u.id) as a_blocking,
 	exists (select 1 from blocks x where x.blocker_id = u.id and x.blocked_id = ${viewerId}::bigint) as a_blocked_by,
 	exists (select 1 from mutes x where x.muter_id = ${viewerId}::bigint and x.muted_id = u.id) as a_muting`;
@@ -39,6 +40,7 @@ export function toUser(r: any): User {
 		avatar_url: r.a_avatar_url,
 		banner_url: r.a_banner_url,
 		pinned_post_id: r.a_pinned_post_id,
+		protected: !!r.a_protected,
 		verified_type: r.a_verified_type,
 		flag: r.a_flag,
 		badges: r.a_badges ?? [],
@@ -55,6 +57,7 @@ export function toUser(r: any): User {
 			following: r.a_following,
 			followedByViewer: r.a_followed_by_viewer,
 			followsViewer: r.a_follows_viewer,
+			requestedByViewer: !!r.a_requested,
 			blocking: r.a_blocking,
 			blockedBy: r.a_blocked_by,
 			muting: r.a_muting,
@@ -72,15 +75,58 @@ export async function userById(viewerId: string, id: string): Promise<User | und
 	return rows[0] && toUser(rows[0]);
 }
 
+// Following a protected account asks instead; unfollowing also withdraws a request.
 export async function setFollow(followerId: string, followeeId: string, on: boolean) {
 	if (followerId === followeeId) return;
 	if (on && (await isBlockedEitherWay(followerId, followeeId))) return;
-	if (on) await sql`insert into follows (follower_id, followee_id) values (${followerId}::bigint, ${followeeId}::bigint) on conflict do nothing`;
-	else await sql`delete from follows where follower_id = ${followerId}::bigint and followee_id = ${followeeId}::bigint`;
+	if (on) {
+		const [target] = await sql`select protected from users where id = ${followeeId}::bigint`;
+		if (target?.protected) {
+			await sql`insert into follow_requests (requester_id, target_id) values (${followerId}::bigint, ${followeeId}::bigint) on conflict do nothing`;
+			return;
+		}
+		await sql`insert into follows (follower_id, followee_id) values (${followerId}::bigint, ${followeeId}::bigint) on conflict do nothing`;
+	} else {
+		await sql`delete from follows where follower_id = ${followerId}::bigint and followee_id = ${followeeId}::bigint`;
+		await sql`delete from follow_requests where requester_id = ${followerId}::bigint and target_id = ${followeeId}::bigint`;
+	}
+}
+
+export async function pendingRequests(userId: string): Promise<string[]> {
+	const rows = await sql`select requester_id::text as id from follow_requests where target_id = ${userId}::bigint order by created_at desc limit 500`;
+	return rows.map((r: any) => r.id);
+}
+
+// the owner decides; a blocked account's request is dropped on approval
+export async function answerRequest(ownerId: string, requesterId: string, approve: boolean): Promise<boolean> {
+	const rows = await sql`delete from follow_requests where requester_id = ${requesterId}::bigint and target_id = ${ownerId}::bigint returning requester_id`;
+	if (!rows.length) return false;
+	if (approve && !(await isBlockedEitherWay(ownerId, requesterId)))
+		await sql`insert into follows (follower_id, followee_id) values (${requesterId}::bigint, ${ownerId}::bigint) on conflict do nothing`;
+	return true;
+}
+
+// Going public approves everyone who asked.
+export async function setProtected(userId: string, on: boolean): Promise<void> {
+	await sql`update users set protected = ${on} where id = ${userId}::bigint`;
+	if (!on) {
+		await sql`insert into follows (follower_id, followee_id)
+			select r.requester_id, r.target_id from follow_requests r where r.target_id = ${userId}::bigint
+				and not exists (select 1 from blocks b where (b.blocker_id = r.requester_id and b.blocked_id = r.target_id) or (b.blocker_id = r.target_id and b.blocked_id = r.requester_id))
+			on conflict do nothing`;
+		await sql`delete from follow_requests where target_id = ${userId}::bigint`;
+	}
 }
 
 // accounts `userId` follows, or accounts following `userId`
 export async function followList(viewerId: string, userId: string, kind: "following" | "followers", limit = 200): Promise<User[]> {
+	// a protected account's lists are for itself and its followers
+	if (userId !== viewerId) {
+		const [hidden] = await sql`select 1 from users u where u.id = ${userId}::bigint and u.protected
+			and not exists (select 1 from follows f where f.follower_id = ${viewerId}::bigint and f.followee_id = u.id)
+			and not exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null)`;
+		if (hidden) return [];
+	}
 	const rows =
 		kind === "following"
 			? await sql`select ${userCols(viewerId)} from follows f join users u on u.id = f.followee_id

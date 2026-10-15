@@ -13,7 +13,7 @@ import { placeById, searchPlaces } from "./places";
 import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
-import { setFollow, userById, userByName, usersByIds } from "./users";
+import { answerRequest, pendingRequests, setFollow, setProtected, userById, userByName, usersByIds } from "./users";
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
 
@@ -119,6 +119,34 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const user = await userById(viewer.id, target);
 		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
 		return Response.json(legacyUser(user));
+	}
+	// follow requests of a protected account
+	if (method === "GET" && /^\/1\.1\/friendships\/incoming(?:\.json)?$/.test(path)) {
+		const ids = await pendingRequests(viewer.id);
+		return Response.json({ ids, next_cursor: 0, next_cursor_str: "0", previous_cursor: 0, previous_cursor_str: "0" });
+	}
+	if (method === "GET" && /^\/1\.1\/friendships\/outgoing(?:\.json)?$/.test(path)) {
+		const rows = await sql`select target_id::text as id from follow_requests where requester_id = ${viewer.id}::bigint`;
+		return Response.json({ ids: rows.map((r: any) => r.id), next_cursor: 0, next_cursor_str: "0", previous_cursor: 0, previous_cursor_str: "0" });
+	}
+	const answer = /^\/1\.1\/friendships\/(accept|deny|cancel)(?:\.json)?$/.exec(path);
+	if (answer && method === "POST") {
+		const form = await req.formData().catch(() => undefined);
+		const target = form?.get("user_id");
+		if (!isId(target)) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		if (answer[1] === "cancel") await setFollow(viewer.id, target, false);
+		else await answerRequest(viewer.id, target, answer[1] === "accept");
+		const user = await userById(viewer.id, target);
+		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		return Response.json(legacyUser(user));
+	}
+	// Settings > Privacy > Protect your posts
+	if (method === "POST" && path === "/1.1/account/settings.json") {
+		const form = await req.formData().catch(() => undefined);
+		const asked = form?.get("protected");
+		if (asked !== null && asked !== undefined) await setProtected(viewer.id, String(asked) === "true");
+		const fresh = await userById(viewer.id, viewer.id);
+		return Response.json(settingsFor(fresh ? { ...viewer, protected: fresh.protected } : viewer) ?? {});
 	}
 	// Report post / Report account
 	if (path === "/1.1/report/flow.json" && method === "POST") {
