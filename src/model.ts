@@ -200,6 +200,11 @@ export type PostRow = {
 	poll_id?: string | null;
 	place_id?: string | null;
 	edit_count?: number;
+	reply_policy?: string | null;
+	// the viewer may not reply to this conversation
+	reply_limited?: boolean;
+	conversation_policy?: string | null;
+	conversation_owner?: string | null;
 	edited_at?: Date | null;
 	// ids the post went by before each edit, oldest first
 	versionIds?: string[];
@@ -281,6 +286,26 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
 		edit_control: editControl(p),
+		...(p.conversation_policy
+			? { conversation_control: { policy: p.conversation_policy, conversation_owner_results: { result: { __typename: "User", legacy: { screen_name: p.conversation_owner } } } } }
+			: {}),
+		...(p.reply_limited
+			? {
+					limitedActionResults: {
+						limited_actions: [
+							{
+								action: "Reply",
+								prompt: {
+									__typename: "CtaLimitedActionPrompt",
+									cta_type: "SeeConversation",
+									headline: { text: "Who can reply?", entities: [] },
+									subtext: { text: `Accounts @${p.conversation_owner} ${p.conversation_policy === "Community" ? "follows" : p.conversation_policy === "Verified" ? "allows (verified accounts only)" : "mentioned"} can reply`, entities: [] },
+								},
+							},
+						],
+					},
+				}
+			: {}),
 		grok_analysis_button: false,
 		grok_annotations: {},
 		grok_translated_post_with_availability: { is_available: false },

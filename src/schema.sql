@@ -59,6 +59,8 @@ alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists deactivated_at timestamptz;
 alter table users add column if not exists language text not null default 'en';
 alter table users add column if not exists email text;
+-- who may reply, set on the first post of a conversation: Community (accounts it follows), ByInvitation (mentioned) or Verified
+alter table posts add column if not exists reply_policy text;
 create table if not exists password_resets (
 	token_hash text primary key,
 	user_id bigint not null references users (id) on delete cascade,

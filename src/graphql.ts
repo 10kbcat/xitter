@@ -199,7 +199,7 @@ const createTweet: Handler = async (viewer, vars) => {
 	// a post to a community carries it as a semantic annotation (domain 31)
 	const annotated = (Array.isArray(vars.semantic_annotation_ids) ? vars.semantic_annotation_ids : []).find((x: any) => String(x?.domain_id) === "31")?.entity_id;
 	const communityId = [vars.community_id, annotated].find(isId);
-	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId, placeId: placeById(vars.geo?.place_id) ? vars.geo.place_id : undefined });
+	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId, placeId: placeById(vars.geo?.place_id) ? vars.geo.place_id : undefined, replyPolicy: ["Community", "ByInvitation", "Verified"].includes(vars.conversation_control?.mode) ? vars.conversation_control.mode : undefined });
 	if (typeof vars.card_uri === "string" && vars.card_uri) {
 		try {
 			await attachPoll(viewer.id, id, vars.card_uri);
