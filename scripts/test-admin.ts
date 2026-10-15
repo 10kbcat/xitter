@@ -105,7 +105,7 @@ async function signup(f: { code: string; username?: string }): Promise<boolean> 
 	const { token } = await act("begin_login", { username_or_email: username });
 	if (!token) return false;
 	await act("finish_verification", { session_token: token, code: f.code.replace(/\D/g, "") });
-	const done = await act("verify_signup", { session_token: token, name: "Admin Test", username, password: "testpass123" });
+	const done = await act("verify_signup", { session_token: token, name: "Admin Test", username, password: "testpass123", email: `${username.toLowerCase()}@example.com` });
 	return done.cookies.some((c) => c.startsWith("auth_token="));
 }
 await a.admin("setSignupMode", { mode: "closed" });
