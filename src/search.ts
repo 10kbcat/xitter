@@ -41,6 +41,7 @@ function term(t: string, viewerId: string): Clause | undefined {
 		c = sql`exists (select 1 from posts parent join users pu on pu.id = parent.user_id where parent.id = p.reply_to_id and lower(pu.screen_name) = lower(${m[1]}))`;
 	else if ((m = /^@(\w{1,15})$/.exec(body)))
 		c = sql`exists (select 1 from post_mentions pm join users mu on mu.id = pm.user_id where pm.post_id = p.id and lower(mu.screen_name) = lower(${m[1]}))`;
+	else if ((m = /^quoted_tweet_id:(\d{1,19})$/.exec(body))) c = sql`p.quote_id = ${m[1]}::bigint`;
 	else if ((m = /^#(\w+)$/.exec(body))) c = sql`p.text ~* ${tagPattern(m[1])}`;
 	else if ((m = /^filter:(\w+)$/i.exec(body))) {
 		const f = m[1].toLowerCase();

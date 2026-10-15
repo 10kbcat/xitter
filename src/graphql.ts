@@ -11,7 +11,7 @@ import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
 import { usernameAvailable } from "./account-settings";
 import { sql } from "./db";
-import { blockedIds, blockedFor, outOfView } from "./blocks";
+import { blockedIds, blockedFor, outOfView, protectedFor } from "./blocks";
 import { settings } from "./settings";
 import { rankedFeed } from "./ranking";
 import * as articles from "./articles";
@@ -290,6 +290,21 @@ const wholeList = (entries: unknown[], base: bigint) => [
 	cursorEntry("Bottom", "b0", (base - BigInt(entries.length) - 2n).toString()),
 ];
 
+// Who reposted / liked a post, from the post's activity page. Protected
+// accounts' reactions stay with the people allowed to see them.
+const reactors = (kind: "reposts" | "likes", key: string): Handler => async (viewer, vars) => {
+	const empty = { data: { [key]: { timeline: { instructions: [{ type: "TimelineAddEntries", entries: [] }] } } } };
+	if (!isId(vars.tweetId) || vars.cursor) return empty;
+	const rows =
+		kind === "reposts"
+			? await sql`select r.user_id::text as id from reposts r where r.post_id = ${vars.tweetId}::bigint and r.user_id not in ${blockedFor(viewer.id)} and r.user_id not in ${protectedFor(viewer.id)} order by r.created_at desc limit 100`
+			: await sql`select l.user_id::text as id from likes l where l.post_id = ${vars.tweetId}::bigint and l.user_id not in ${blockedFor(viewer.id)} and l.user_id not in ${protectedFor(viewer.id)} order by l.created_at desc limit 100`;
+	const users = await usersByIds(viewer.id, rows.map((r: any) => r.id));
+	const base = BigInt(newId());
+	const entries = rows.flatMap((r: any, i: number) => (users.has(r.id) ? [userEntry(users.get(r.id)!, (base - BigInt(i) - 1n).toString())] : []));
+	return { data: { [key]: { timeline: { instructions: [{ type: "TimelineAddEntries", entries: wholeList(entries, base) }], metadata: { scribeConfig: { page: "reactors" } } } } } };
+};
+
 const likes: Handler = async (viewer, vars) => {
 	const posts = vars.cursor ? [] : await likedPosts(viewer.id, userId(vars));
 	const base = BigInt(newId());
@@ -499,6 +514,8 @@ const handlers: Record<string, Handler> = {
 		const base = BigInt(newId());
 		return userTimeline(wholeList(users.map((u, i) => userEntry(u, (base - BigInt(i) - 1n).toString())), base));
 	},
+	Retweeters: reactors("reposts", "retweeters_timeline"),
+	Favoriters: reactors("likes", "favoriters_timeline"),
 	Following: follows("following"),
 	Followers: follows("followers"),
 	UserMedia: userMedia("any"),
