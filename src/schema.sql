@@ -52,6 +52,8 @@ do $$ begin
 	end if;
 end $$;
 alter table lists add column if not exists banner_media_id bigint;
+-- the client's "seen this" popups: flag name -> timestamp
+alter table users add column if not exists education_flags jsonb not null default '{}';
 alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;

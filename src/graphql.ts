@@ -317,6 +317,11 @@ const relationList =
 const viewerUser = (fields: object) => ({ data: { viewer: { user_results: { result: { __typename: "User", ...fields } } } } });
 
 const handlers: Record<string, Handler> = {
+	PutClientEducationFlag: async (v: Viewer, vars: Vars) => {
+		if (typeof vars.flag === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(vars.flag))
+			await sql`update users set education_flags = education_flags || ${JSON.stringify({ [vars.flag]: Date.now() })}::text::jsonb where id = ${v.id}::bigint`;
+		return { data: { add_client_education_flag_put: "Done" } };
+	},
 	HomeTimeline: forYou,
 	HomeLatestTimeline: home(true),
 	TweetDetail: tweetDetail,

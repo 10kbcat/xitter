@@ -222,7 +222,8 @@ const server = Bun.serve({
 		// signed out: X's own home page with its sign-in form, and the dialog
 		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
 		const inCommunity = viewer ? (await sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`).length > 0 : false;
-		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, inCommunity);
+		const [flagRow] = viewer ? await sql`select education_flags from users where id = ${viewer.id}::bigint` : [];
+		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, inCommunity, flagRow?.education_flags ?? {});
 		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 		const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
 		// a guest token left from the signed-out page makes the signed-in client act

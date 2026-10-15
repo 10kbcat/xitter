@@ -109,7 +109,7 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_edit_tweet_perspective_enabled: { value: true },
 });
 
-function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"], inCommunity: boolean) {
+function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"], inCommunity: boolean, educationFlags: Record<string, number>) {
 	return {
 		optimist: [],
 		entities: {
@@ -154,7 +154,7 @@ function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadB
 				checkin_time: null,
 			},
 		},
-		educationFlags: {},
+		educationFlags,
 		userClaim: { config: { subscriptions: {}, features: CLAIMED_FEATURES }, commerceSubscriptions: [], debug: {}, fetchStatus: "loaded" },
 		session: {
 			communitiesActions: { create: true },
@@ -188,7 +188,7 @@ let runtimePatched: string | undefined;
 // With no user the client boots signed out, for the sign-in dialog.
 // `multi`: other accounts are signed in too (auth_multi), so the account menu
 // asks for them.
-export function shell(user: User | null, multi = false, inCommunity = false): string | undefined {
+export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}): string | undefined {
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
@@ -208,7 +208,7 @@ export function shell(user: User | null, multi = false, inCommunity = false): st
 ${hideCss()}
 ${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
-<script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity))};window.__META_DATA__=${inline(meta)};</script>
+<script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags))};window.__META_DATA__=${inline(meta)};</script>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}
