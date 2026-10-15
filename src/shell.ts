@@ -157,7 +157,7 @@ function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadB
 		educationFlags: {},
 		userClaim: { config: { subscriptions: {}, features: CLAIMED_FEATURES }, commerceSubscriptions: [], debug: {}, fetchStatus: "loaded" },
 		session: {
-			communitiesActions: { create: false },
+			communitiesActions: { create: true },
 			country: "US",
 			guestId: "",
 			hasCommunityMemberships: false,
