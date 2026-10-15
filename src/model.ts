@@ -200,6 +200,7 @@ export type PostRow = {
 	poll_id?: string | null;
 	place_id?: string | null;
 	edit_count?: number;
+	view_count?: number;
 	reply_policy?: string | null;
 	// the viewer may not reply to this conversation
 	reply_limited?: boolean;
@@ -353,7 +354,7 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		rest_id: p.id,
 		unmention_data: {},
 		unmention_info: {},
-		views: { state: "Enabled" },
+		views: p.view_count ? { count: String(p.view_count), state: "EnabledWithCount" } : { state: "Enabled" },
 	};
 }
 

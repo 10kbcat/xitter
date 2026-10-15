@@ -59,6 +59,13 @@ alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists deactivated_at timestamptz;
 alter table users add column if not exists language text not null default 'en';
 alter table users add column if not exists email text;
+-- who has been shown a post (other than its author), once each
+create table if not exists post_views (
+	post_id bigint not null references posts (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (post_id, user_id)
+);
 alter table media add column if not exists alt_text text;
 -- who may reply, set on the first post of a conversation: Community (accounts it follows), ByInvitation (mentioned) or Verified
 alter table posts add column if not exists reply_policy text;

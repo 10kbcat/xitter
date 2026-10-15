@@ -32,6 +32,7 @@ const select = (viewerId: string) => sql`
 		(select count(*)::int from bookmarks x where x.post_id = p.id) as bookmark_count,
 		(select count(*)::int from posts x where x.reply_to_id = p.id) as reply_count,
 		(select count(*)::int from posts x where x.quote_id = p.id) as quote_count,
+		(select count(*)::int from post_views x where x.post_id = p.id) as view_count,
 		exists (select 1 from likes x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as liked,
 		exists (select 1 from reposts x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as reposted,
 		exists (select 1 from bookmarks x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as bookmarked
@@ -55,6 +56,7 @@ function toRow(r: any): PostRow {
 		poll_id: r.poll_id,
 		place_id: r.place_id,
 		edit_count: r.edit_count,
+		view_count: r.view_count,
 		reply_policy: r.reply_policy,
 		reply_limited: !!r.reply_limited,
 		conversation_policy: r.conversation_policy,
@@ -121,6 +123,10 @@ export async function postsByIds(viewerId: string, ids: string[], quotes = true)
 	if (!ids.length) return new Map();
 	const rows = await sql`${select(viewerId)} where p.id = any(${sql.array(ids, "INT8")})`;
 	const posts = await hydrate(viewerId, rows.map(toRow), quotes);
+	// being shown a post counts once per viewer; nobody waits for it
+	const seen = posts.filter((p) => p.author.id !== viewerId).map((p) => p.id);
+	if (seen.length)
+		void sql`insert into post_views (post_id, user_id) select x, ${viewerId}::bigint from unnest(${sql.array(seen, "INT8")}::bigint[]) x on conflict do nothing`.catch(() => {});
 	const out = new Map(posts.map((p) => [p.id, p]));
 	const unknown = ids.filter((id) => !out.has(id));
 	if (unknown.length) {
