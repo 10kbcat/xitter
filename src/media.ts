@@ -30,6 +30,7 @@ export type MediaRow = {
 	position: number | null;
 	duration_ms: number | null;
 	alt_text?: string | null;
+	sensitive_warning?: string[] | null;
 };
 
 type Image = { mime: string; width: number; height: number };
@@ -237,7 +238,7 @@ export async function attachMedia(userId: string, postId: string, mediaIds: stri
 export async function mediaForPosts(postIds: string[]): Promise<Map<string, MediaRow[]>> {
 	const out = new Map<string, MediaRow[]>();
 	if (!postIds.length) return out;
-	const rows = await sql`select id, post_id, kind, mime, size, width, height, position, duration_ms, alt_text from media
+	const rows = await sql`select id, post_id, kind, mime, size, width, height, position, duration_ms, alt_text, sensitive_warning from media
 		where post_id = any(${sql.array(postIds, "INT8")}) and state = 'ready' order by post_id, position`;
 	for (const r of rows) {
 		const list = out.get(r.post_id) ?? [];
@@ -253,6 +254,11 @@ function fit(w: number, h: number, max: number) {
 }
 
 // one photo or video as it appears in a post's entities.media and extended_entities.media
+const warning = (m: MediaRow) =>
+	m.sensitive_warning?.length
+		? { sensitive_media_warning: { adult_content: m.sensitive_warning.includes("adult_content"), graphic_violence: m.sensitive_warning.includes("graphic_violence"), other: m.sensitive_warning.includes("other") } }
+		: {};
+
 export function mediaEntity(m: MediaRow, postId: string, screenName: string, index: number, textLength: number) {
 	if (m.kind === "video") return videoEntity(m, postId, screenName, textLength);
 	const page = `${PUBLIC_ORIGIN}/${screenName}/status/${postId}/photo/${index + 1}`;
@@ -261,6 +267,7 @@ export function mediaEntity(m: MediaRow, postId: string, screenName: string, ind
 		display_url: `pic.${PUBLIC_HOSTNAME}/${m.id}`,
 		expanded_url: page,
 		...(m.alt_text ? { ext_alt_text: m.alt_text } : {}),
+		...warning(m),
 		ext_media_availability: { status: "Available" },
 		features: { large: { faces: [] }, medium: { faces: [] }, orig: { faces: [] }, small: { faces: [] } },
 		id_str: m.id,
@@ -295,6 +302,7 @@ function videoEntity(m: MediaRow, postId: string, screenName: string, textLength
 		display_url: `pic.${PUBLIC_HOSTNAME}/${m.id}`,
 		expanded_url: page,
 		...(m.alt_text ? { ext_alt_text: m.alt_text } : {}),
+		...warning(m),
 		ext_media_availability: { status: "Available" },
 		id_str: m.id,
 		indices: [textLength, textLength],

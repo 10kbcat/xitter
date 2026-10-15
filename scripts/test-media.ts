@@ -63,6 +63,14 @@ const flagged = await gql("CreateTweet", { tweet_text: "", media: { media_entiti
 const flaggedPost = flagged.data?.create_tweet?.tweet_results?.result;
 check("alt text comes back on the media", flaggedPost?.legacy?.extended_entities?.media?.[0]?.ext_alt_text === "a test pattern");
 check("the sensitive flag is kept", flaggedPost?.legacy?.possibly_sensitive === true);
+// a content warning set on the media (the composer's flag tab)
+const warned = await upload(imagePath, "tweet_image");
+await fetch(`${origin}/i/api/1.1/media/metadata/create.json`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ media_id: warned, sensitive_media_warning: ["adult_content"] }) });
+const warnedPost = (await gql("CreateTweet", { tweet_text: "", media: { media_entities: [{ media_id: warned, tagged_users: [] }], possibly_sensitive: false } })).data?.create_tweet?.tweet_results?.result;
+check("a content warning makes the post sensitive", warnedPost?.legacy?.possibly_sensitive === true);
+check("and is reported on the media", warnedPost?.legacy?.extended_entities?.media?.[0]?.sensitive_media_warning?.adult_content === true);
+if (warnedPost?.rest_id) await gql("DeleteTweet", { tweet_id: warnedPost.rest_id });
+
 if (flaggedPost?.rest_id) await gql("DeleteTweet", { tweet_id: flaggedPost.rest_id });
 const avatar = await upload(imagePath, "profile_image", 1);
 const a = await (await fetch(`${origin}/i/api/1.1/account/update_profile_image.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: avatar, return_user: "true" }) })).json();

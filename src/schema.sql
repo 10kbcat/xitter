@@ -77,6 +77,8 @@ create table if not exists post_views (
 	primary key (post_id, user_id)
 );
 alter table media add column if not exists alt_text text;
+-- the content warning the author put on it: adult_content, graphic_violence, other
+alter table media add column if not exists sensitive_warning text[];
 -- who may reply, set on the first post of a conversation: Community (accounts it follows), ByInvitation (mentioned) or Verified
 alter table posts add column if not exists reply_policy text;
 create table if not exists password_resets (

@@ -200,7 +200,6 @@ const createTweet: Handler = async (viewer, vars) => {
 	const annotated = (Array.isArray(vars.semantic_annotation_ids) ? vars.semantic_annotation_ids : []).find((x: any) => String(x?.domain_id) === "31")?.entity_id;
 	const communityId = [vars.community_id, annotated].find(isId);
 	const id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId, placeId: placeById(vars.geo?.place_id) ? vars.geo.place_id : undefined, replyPolicy: ["Community", "ByInvitation", "Verified"].includes(vars.conversation_control?.mode) ? vars.conversation_control.mode : undefined });
-	if (vars.media?.possibly_sensitive === true) await sql`update posts set sensitive = true where id = ${id}::bigint`;
 	if (typeof vars.card_uri === "string" && vars.card_uri) {
 		try {
 			await attachPoll(viewer.id, id, vars.card_uri);
@@ -211,6 +210,10 @@ const createTweet: Handler = async (viewer, vars) => {
 		}
 	}
 	if (mediaIds.length) await attachMedia(viewer.id, id, mediaIds);
+	// a content warning on any of its media makes the post sensitive
+	if (vars.media?.possibly_sensitive === true || mediaIds.length)
+		await sql`update posts set sensitive = true where id = ${id}::bigint and (${vars.media?.possibly_sensitive === true}
+			or exists (select 1 from media m where m.post_id = posts.id and m.sensitive_warning is not null))`;
 	const post = await getPost(viewer.id, id);
 	return { data: { create_tweet: { tweet_results: { result: tweetResult(post!, false) } } } };
 };
@@ -381,6 +384,24 @@ const handlers: Record<string, Handler> = {
 	}),
 	UserSessionsList: async (v: Viewer) => ({
 		data: { viewer: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), sessions_list: await sessionsList(v) } } } },
+	}),
+	// the composer's flag tab: what the viewer chooses to see, and whether they may choose
+	SensitiveMediaSettingsQuery: async (v: Viewer) => ({
+		data: {
+			viewer_v2: {
+				user_results: {
+					result: {
+						__typename: "User",
+						id: userGlobalId(v.id),
+						rest_id: v.id,
+						sensitive_media_settings: {
+							sensitive_media_settings: { view_adult_content: false, view_violent_content: false, view_other_content: false },
+							can_user_allow_sensitive_content: true,
+						},
+					},
+				},
+			},
+		},
 	}),
 	UserAccountLabel: async (v: Viewer) => ({ data: { user: { result: { __typename: "User", id: userGlobalId(v.id) } } } }),
 	GetUsernameAvailabilityAndSuggestions: async (v: Viewer, vars: Vars) => {

@@ -114,6 +114,9 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const alt = typeof body?.alt_text?.text === "string" ? body.alt_text.text.slice(0, 1000) : undefined;
 		if (/^\d{1,19}$/.test(String(body?.media_id)) && alt !== undefined)
 			await sql`update media set alt_text = ${alt || null} where id = ${String(body.media_id)}::bigint and user_id = ${viewer.id}::bigint`;
+		const warnings = Array.isArray(body?.sensitive_media_warning) ? body.sensitive_media_warning.filter((w: unknown) => ["adult_content", "graphic_violence", "other"].includes(String(w))) : undefined;
+		if (/^\d{1,19}$/.test(String(body?.media_id)) && warnings !== undefined)
+			await sql`update media set sensitive_warning = ${warnings.length ? sql.array(warnings, "TEXT") : null} where id = ${String(body.media_id)}::bigint and user_id = ${viewer.id}::bigint`;
 		return Response.json({});
 	}
 	const own = (await accountSettingsRoute(method, path, viewer, req)) ?? (await revokeSessionsRoute(method, path, viewer, req));

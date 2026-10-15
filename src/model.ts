@@ -423,7 +423,13 @@ const itemEntry = (id: string, result: unknown, sortIndex: string, socialContext
 	sortIndex,
 });
 
-export const tweetEntry = (p: PostRow, sortIndex: string) => itemEntry(p.id, tweetResult(p), sortIndex);
+// a post made in a community says so above itself, like a pinned one does
+const communityContext = (p: PostRow): SocialContext | undefined => {
+	const name = typeof p.community?.name === "string" ? p.community.name : undefined;
+	return name ? { type: "TimelineGeneralContext", contextType: "Topic", text: `${name} · Community` } : undefined;
+};
+
+export const tweetEntry = (p: PostRow, sortIndex: string) => itemEntry(p.id, tweetResult(p), sortIndex, communityContext(p));
 
 // the client lifts an entry to the top of a profile only when it carries this label
 export const pinnedEntry = (p: PostRow, sortIndex: string) =>
