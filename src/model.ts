@@ -407,7 +407,7 @@ export function repostResult(id: string, by: User, createdAt: Date, original: Po
 	};
 }
 
-type SocialContext = { type: "TimelineGeneralContext"; contextType: string; text: string };
+type SocialContext = { type: "TimelineGeneralContext"; contextType: string; text: string; landingUrl?: { url: string; urlType: string } };
 
 const tweetItem = (result: unknown, socialContext?: SocialContext, displayType = "Tweet") => ({
 	__typename: "TimelineTweet",
@@ -426,7 +426,7 @@ const itemEntry = (id: string, result: unknown, sortIndex: string, socialContext
 // a post made in a community says so above itself, like a pinned one does
 const communityContext = (p: PostRow): SocialContext | undefined => {
 	const name = typeof p.community?.name === "string" ? p.community.name : undefined;
-	return name ? { type: "TimelineGeneralContext", contextType: "Topic", text: `${name} · Community` } : undefined;
+	return name ? { type: "TimelineGeneralContext", contextType: "Community", text: name, landingUrl: { url: `/i/communities/${p.community_id}`, urlType: "ExternalUrl" } } : undefined;
 };
 
 export const tweetEntry = (p: PostRow, sortIndex: string) => itemEntry(p.id, tweetResult(p), sortIndex, communityContext(p));
