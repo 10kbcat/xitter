@@ -14,6 +14,7 @@ import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
 import { accountSettingsRoute, changeUsername } from "./account-settings";
+import { dataExportRoute } from "./data-export";
 import { answerRequest, pendingRequests, setFollow, setProtected, userById, userByName, usersByIds } from "./users";
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
@@ -109,6 +110,16 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	}
 	const own = await accountSettingsRoute(method, path, viewer, req);
 	if (own) return own;
+	const exported = await dataExportRoute(method, path, viewer, req);
+	if (exported) return exported;
+	// Settings pages that only read: email on file, personalisation (we keep none)
+	if (method === "GET" && path === "/1.1/users/email_phone_info.json") {
+		const [u] = await sql`select email from users where id = ${viewer.id}::bigint`;
+		return Response.json({ email: u?.email ?? null, email_verified: !!u?.email, phone_number: null, phone_verified: false });
+	}
+	if (method === "GET" && path === "/1.1/account/personalization/p13n_preferences.json")
+		return Response.json({ interest_preferences: { disabled_interests: [], partner_interests: [] }, personalization_enabled: false });
+	if (method === "GET" && path === "/1.1/account/personalization/p13n_data.json") return Response.json({ interests: { interests: [], partner_interests: [], audience_and_advertisers: {} }, demographics: {} });
 	const accounts = await accountsRoute(method, path, viewer, req);
 	if (accounts) return accounts;
 	const profile = await profileRoute(path, viewer, req);

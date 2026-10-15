@@ -330,7 +330,40 @@ const LANGUAGES: [string, string, string][] = [
 	["ja", "日本語", "Japanese"],
 ];
 
+const userGlobalId = (id: string) => Buffer.from(`User:${id}`).toString("base64");
+const EMAIL_SETTINGS = ["send_twitter_emails", "send_email_vit_weekly", "send_network_activity_email", "send_new_direct_text_email", "send_shared_tweet_email", "send_network_digest", "send_performance_digest"];
+
 const handlers: Record<string, Handler> = {
+	// Settings > Notifications > Email: what is stored is what would be mailed
+	ViewerEmailSettings: async (v: Viewer) => {
+		const [u] = await sql`select email_settings from users where id = ${v.id}::bigint`;
+		const stored = u?.email_settings ?? {};
+		const settings = Object.fromEntries(EMAIL_SETTINGS.map((k) => [k, stored[k] ?? false]));
+		return { data: { viewer: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), notifications_email_notifications: settings } } } } };
+	},
+	WriteEmailNotificationSettings: async (v: Viewer, vars: Vars) => {
+		const given = typeof vars.settings === "object" && vars.settings ? (vars.settings as Record<string, unknown>) : {};
+		const next = Object.fromEntries(EMAIL_SETTINGS.filter((k) => typeof given[k] === "boolean" || (typeof given[k] === "string" && ["Daily", "Weekly", "Periodically", "None"].includes(given[k] as string))).map((k) => [k, given[k]]));
+		await sql`update users set email_settings = email_settings || ${JSON.stringify(next)}::text::jsonb where id = ${v.id}::bigint`;
+		return { data: { write_email_notification_settings: "Done" } };
+	},
+	UserPreferencesQuery: async (v: Viewer) => ({
+		data: {
+			user_preferences: {
+				about_this_account_user_preferences: { business_country_code_preferences: [], selected_business_country_code: null },
+				allow_for_you_recommendations: true,
+				inferred_location_resolution_preference: "Unspecified",
+			},
+			viewer_v2: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), legacy_extended_profile: { birthdate: null } } } },
+		},
+	}),
+	AudienceAndTaggingQuery: async (v: Viewer) => ({
+		data: {
+			user_preferences: { allow_video_downloads: true },
+			viewer: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), legacy_extended_profile: { birthdate: null } } } },
+		},
+	}),
+	UserAccountLabel: async (v: Viewer) => ({ data: { user: { result: { __typename: "User", id: userGlobalId(v.id) } } } }),
 	GetUsernameAvailabilityAndSuggestions: async (v: Viewer, vars: Vars) => {
 		const r = await usernameAvailable(v.id, String(vars.username ?? ""));
 		return { data: { get_username_availability_and_suggestions: { __typename: "UsernameAvailabilityAndSuggestions", available: r.available, suggestions: vars.include_suggestions === false ? [] : r.suggestions } } };

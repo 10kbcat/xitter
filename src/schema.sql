@@ -59,6 +59,13 @@ alter table users add column if not exists status_until timestamptz;
 alter table users add column if not exists deactivated_at timestamptz;
 alter table users add column if not exists language text not null default 'en';
 alter table users add column if not exists email text;
+alter table users add column if not exists email_settings jsonb not null default '{}';
+create table if not exists data_exports (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	body jsonb not null,
+	created_at timestamptz not null default now()
+);
 create unique index if not exists users_email_idx on users (lower(email));
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
