@@ -81,3 +81,54 @@ export async function accountSettingsRoute(method: string, path: string, viewer:
 	}
 	return undefined;
 }
+
+// Settings > Security > Apps and sessions. The client names a session by a hash
+// of its token, so the real token never leaves the server.
+import { createHash } from "node:crypto";
+
+const hashed = (token: string) => createHash("sha256").update(token).digest("hex").slice(0, 32);
+
+function describeAgent(ua: string | null): { name: string; icon: string } {
+	const text = ua ?? "";
+	const browser = /Edg\//.test(text) ? "Edge" : /OPR\//.test(text) ? "Opera" : /Firefox\//.test(text) ? "Firefox" : /Chrome\//.test(text) ? "Chrome" : /Safari\//.test(text) ? "Safari" : "Browser";
+	const os = /Android/.test(text) ? "Android" : /iPhone|iPad|iOS/.test(text) ? "iOS" : /Windows/.test(text) ? "Windows" : /Mac OS X/.test(text) ? "macOS" : /Linux/.test(text) ? "Linux" : "an unknown device";
+	return { name: `${browser} on ${os}`, icon: /Android|iPhone|iPad/.test(text) ? "mobile" : "desktop" };
+}
+
+export async function sessionsList(viewer: Viewer) {
+	const rows = await sql`select token, user_agent, last_seen_at from sessions where user_id = ${viewer.id}::bigint order by last_seen_at desc`;
+	return rows.map((r: any) => {
+		const d = describeAgent(r.user_agent);
+		return {
+			__typename: "UserSession",
+			token: hashed(r.token),
+			hashed_token: hashed(r.token),
+			device_name: d.name,
+			name: d.name,
+			device_summary: d.name,
+			summary: d.name,
+			icon_type: d.icon === "mobile" ? "Mobile" : "Desktop",
+			is_current_session: r.token === viewer.token,
+			location: "",
+			last_seen_at: new Date(r.last_seen_at).getTime(),
+			last_seen_time_ms: new Date(r.last_seen_at).getTime(),
+		};
+	});
+}
+
+export async function revokeSessionsRoute(method: string, path: string, viewer: Viewer, req: Request): Promise<Response | undefined> {
+	if (method !== "POST") return undefined;
+	if (path === "/account/sessions/revoke_all") {
+		await sql`delete from sessions where user_id = ${viewer.id}::bigint and token <> ${viewer.token}`;
+		return Response.json({ status: "ok" });
+	}
+	if (path === "/account/sessions/revoke") {
+		const f = await body(req);
+		const wanted = f.hashed_token ?? f.token ?? f.session_token ?? "";
+		const rows = await sql`select token from sessions where user_id = ${viewer.id}::bigint`;
+		const hit = rows.find((r: any) => hashed(r.token) === wanted && r.token !== viewer.token);
+		if (hit) await sql`delete from sessions where token = ${hit.token}`;
+		return Response.json({ status: "ok" });
+	}
+	return undefined;
+}

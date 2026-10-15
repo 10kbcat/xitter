@@ -13,7 +13,7 @@ import { placeById, searchPlaces } from "./places";
 import { reportFlow } from "./reports";
 import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
-import { accountSettingsRoute, changeUsername } from "./account-settings";
+import { accountSettingsRoute, changeUsername, revokeSessionsRoute } from "./account-settings";
 import { dataExportRoute } from "./data-export";
 import { answerRequest, pendingRequests, setFollow, setProtected, userById, userByName, usersByIds } from "./users";
 
@@ -116,7 +116,7 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 			await sql`update media set alt_text = ${alt || null} where id = ${String(body.media_id)}::bigint and user_id = ${viewer.id}::bigint`;
 		return Response.json({});
 	}
-	const own = await accountSettingsRoute(method, path, viewer, req);
+	const own = (await accountSettingsRoute(method, path, viewer, req)) ?? (await revokeSessionsRoute(method, path, viewer, req));
 	if (own) return own;
 	const exported = await dataExportRoute(method, path, viewer, req);
 	if (exported) return exported;

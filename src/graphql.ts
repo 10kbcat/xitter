@@ -9,7 +9,7 @@ import { placeById } from "./places";
 import { PollError, attachPoll } from "./polls";
 import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
-import { usernameAvailable } from "./account-settings";
+import { sessionsList, usernameAvailable } from "./account-settings";
 import { sql } from "./db";
 import { blockedIds, blockedFor, outOfView, protectedFor } from "./blocks";
 import { settings } from "./settings";
@@ -378,6 +378,9 @@ const handlers: Record<string, Handler> = {
 			user_preferences: { allow_video_downloads: true },
 			viewer: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), legacy_extended_profile: { birthdate: null } } } },
 		},
+	}),
+	UserSessionsList: async (v: Viewer) => ({
+		data: { viewer: { user_results: { result: { __typename: "User", id: userGlobalId(v.id), sessions_list: await sessionsList(v) } } } },
 	}),
 	UserAccountLabel: async (v: Viewer) => ({ data: { user: { result: { __typename: "User", id: userGlobalId(v.id) } } } }),
 	GetUsernameAvailabilityAndSuggestions: async (v: Viewer, vars: Vars) => {
