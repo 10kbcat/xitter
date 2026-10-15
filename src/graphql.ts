@@ -3,6 +3,7 @@
 
 import { ChatError, chatHandlers } from "./chat";
 import { communityHandlers } from "./communities";
+import { countryName, regionName } from "./countries";
 import { gifHandlers } from "./gifs";
 import { listHandlers } from "./lists";
 import { placeById } from "./places";
@@ -352,6 +353,13 @@ const LANGUAGES: [string, string, string][] = [
 const userGlobalId = (id: string) => Buffer.from(`User:${id}`).toString("base64");
 const EMAIL_SETTINGS = ["send_twitter_emails", "send_email_vit_weekly", "send_network_activity_email", "send_new_direct_text_email", "send_shared_tweet_email", "send_network_digest", "send_performance_digest"];
 
+// "Account based in": the country if its owner chose that, else the continent
+function basedIn(country: string | null, preference: string | null): string | null {
+	if (!country) return null;
+	if (preference === "Country") return countryName(country) ?? null;
+	return regionName(country) ?? countryName(country) ?? null;
+}
+
 const handlers: Record<string, Handler> = {
 	// Settings > Notifications > Email: what is stored is what would be mailed
 	ViewerEmailSettings: async (v: Viewer) => {
@@ -492,7 +500,7 @@ const handlers: Record<string, Handler> = {
 		const user = typeof vars.screenName === "string" ? await userByName(v.id, vars.screenName) : undefined;
 		if (!user || (user.status === "suspended" && !v.role))
 			return { data: { user_result_by_screen_name: { result: { __typename: "UserUnavailable", unavailable_reason: user ? "Suspended" : "NotFound" } } } };
-		const [extra] = await sql`select u.verified_at,
+		const [extra] = await sql`select u.verified_at, u.country, u.preferences->>'inferred_location_resolution_preference' as location_pref,
 			(select count(*)::int from username_changes c where c.user_id = u.id) as changes,
 			(select max(c.changed_at) from username_changes c where c.user_id = u.id) as last_change
 			from users u where u.id = ${user.id}::bigint`;
@@ -506,6 +514,8 @@ const handlers: Record<string, Handler> = {
 						identity_profile_labels_highlighted_label: base.affiliates_highlighted_label,
 						about_profile: {
 							affiliate_username: user.org?.screen_name ?? null,
+							account_based_in: basedIn(extra.country, extra.location_pref),
+							location_accurate: true,
 							username_changes: { count: String(extra.changes), ...(extra.last_change ? { last_changed_at_msec: String(extra.last_change.getTime()) } : {}) },
 						},
 						verification_info: {
