@@ -467,6 +467,8 @@ const handlers: Record<string, Handler> = {
 	},
 	DeleteBookmark: async (v, vars) => {
 		await setMark("bookmarks", v.id, postId(vars), false);
+		// an unbookmarked post leaves the viewer's folders too
+		await sql`delete from bookmark_folder_posts where post_id = ${postId(vars)}::bigint and folder_id in (select id from bookmark_folders where user_id = ${v.id}::bigint)`;
 		return { data: { tweet_bookmark_delete: "Done" } };
 	},
 	CreateRetweet: async (v, vars) => {
@@ -587,6 +589,8 @@ const handlers: Record<string, Handler> = {
 		const [row] = await sql`select 1 from highlights where user_id = ${v.id}::bigint and post_id = ${id}::bigint`;
 		return { data: { tweet_result_by_rest_id: { result: { __typename: "Tweet", id: Buffer.from(`Tweet:${id}`).toString("base64"), rest_id: id, highlights_info: { highlighted: !!row } } } } };
 	},
+	// who-can-reply choices beyond the built-in ones: none here
+	ConversationControlsQuery: () => ({ data: { get_conversation_control_settings: { settings: [] } } }),
 	CreateHighlight: async (v, vars) => ({ data: { tweet_highlights_put: { success: await setHighlight(v.id, postId(vars), true) } } }),
 	DeleteHighlight: async (v, vars) => ({ data: { tweet_highlights_delete: { success: await setHighlight(v.id, postId(vars), false) } } }),
 
