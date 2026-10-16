@@ -26,7 +26,8 @@ const BY_FEATURE: Record<Feature, string[]> = {
 		'[data-testid="sidebarColumn"] aside:not([aria-label="Who to follow"]):not([aria-label="Relevant people"])',
 	],
 	calls: [...links("/i/calls"), ...ids("AppTabBar_Calls_Link")],
-	history: links("/i/history"),
+	// only the menu entries: the History page itself holds the Bookmarks tab and its folders
+	history: ["header", '[role="menu"]', '[data-testid="sidebarColumn"]'].flatMap((root) => links("/i/history").map((l) => `${root} ${l}`)),
 	creator_studio: links("/i/jf/creators/studio", "/i/monetization", "/settings/monetization"),
 	spaces: links("/i/spaces/start"),
 	business: links("/i/verified-orgs-signup"),
