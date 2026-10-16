@@ -266,7 +266,32 @@ function hashtags(text: string) {
 	});
 }
 
+// a post its viewer may not reply to travels in the visibility wrapper, which is
+// where the client reads limitedActionResults from
 export function tweetResult(p: PostRow, withTypename = true): Record<string, unknown> {
+	const tweet = plainTweet(p, withTypename);
+	if (!p.reply_limited || !withTypename) return tweet;
+	const who = p.conversation_policy === "Community" ? "follows" : p.conversation_policy === "Verified" ? "allows (verified accounts only)" : "mentioned";
+	return {
+		__typename: "TweetWithVisibilityResults",
+		tweet,
+		limitedActionResults: {
+			limited_actions: [
+				{
+					action: "Reply",
+					prompt: {
+						__typename: "CtaLimitedActionPrompt",
+						cta_type: "SeeConversation",
+						headline: { text: "Who can reply?", entities: [] },
+						subtext: { text: `Accounts @${p.conversation_owner} ${who} can reply`, entities: [] },
+					},
+				},
+			],
+		},
+	};
+}
+
+function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> {
 	const textLength = [...p.text].length;
 	const mentions = userMentions(p);
 	const tags = hashtags(p.text);
@@ -290,23 +315,6 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		edit_control: editControl(p),
 		...(p.conversation_policy
 			? { conversation_control: { policy: p.conversation_policy, conversation_owner_results: { result: { __typename: "User", legacy: { screen_name: p.conversation_owner } } } } }
-			: {}),
-		...(p.reply_limited
-			? {
-					limitedActionResults: {
-						limited_actions: [
-							{
-								action: "Reply",
-								prompt: {
-									__typename: "CtaLimitedActionPrompt",
-									cta_type: "SeeConversation",
-									headline: { text: "Who can reply?", entities: [] },
-									subtext: { text: `Accounts @${p.conversation_owner} ${p.conversation_policy === "Community" ? "follows" : p.conversation_policy === "Verified" ? "allows (verified accounts only)" : "mentioned"} can reply`, entities: [] },
-								},
-							},
-						],
-					},
-				}
 			: {}),
 		grok_analysis_button: false,
 		grok_annotations: {},

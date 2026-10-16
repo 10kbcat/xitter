@@ -52,7 +52,7 @@ const reply = async (s: typeof author, to: string, text = "reply") => {
 };
 const limited = async (s: typeof author, id: string) => {
 	const r = (await s.get("TweetResultByRestId", { tweetId: id })).data?.tweetResult?.result;
-	return { limited: !!r?.limitedActionResults?.limited_actions?.length, policy: r?.conversation_control?.policy };
+	return { limited: !!r?.limitedActionResults?.limited_actions?.length, policy: (r?.tweet ?? r)?.conversation_control?.policy };
 };
 
 try {
