@@ -261,10 +261,10 @@ export async function notificationsTimeline(viewer: User, opts: { type: string; 
 	};
 }
 
-// how many notifications arrived since the viewer last looked
-export async function unreadCount(viewerId: string): Promise<number> {
+// how many notifications arrived since the viewer last looked (or since `sinceMs`)
+export async function unreadCount(viewerId: string, sinceMs?: number): Promise<number> {
 	const [{ seen }] = await sql`select notifications_seen_at as seen from users where id = ${viewerId}::bigint`;
-	return (await items(viewerId, { after: ms(seen) - 1, limit: 40, mentionsOnly: false })).length;
+	return (await items(viewerId, { after: Math.max(ms(seen), sinceMs ?? 0) - 1, limit: 40, mentionsOnly: false })).length;
 }
 
 // the client reports the newest entry it has shown; cursors and sort indexes are both accepted

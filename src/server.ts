@@ -27,6 +27,7 @@ import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
 import { rememberIp } from "./login-history";
+import { startMailDigests } from "./mail-digest";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -249,4 +250,5 @@ const server = Bun.serve({
 });
 
 startScheduler();
+startMailDigests();
 console.log(`xitter listening on ${PUBLIC_ORIGIN}`);

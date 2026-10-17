@@ -25,6 +25,7 @@ export async function requestReset(usernameOrEmail: string): Promise<void> {
 		u.email,
 		`Reset your ${name} password`,
 		`Hi @${u.screen_name},\n\nSomeone asked to reset the password of your ${name} account. Open this link within an hour to choose a new one:\n\n${PUBLIC_ORIGIN}/account/reset?token=${token}\n\nIf this wasn't you, ignore this message: your password stays as it is.`,
+		{ kind: "password_reset", userId: u.id },
 	).catch((e) => console.error("password reset mail:", e.message));
 }
 

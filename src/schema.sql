@@ -729,3 +729,19 @@ alter table communities add column if not exists topic_id bigint references topi
 -- grey badges: 'government' is an organisation (square picture), 'government_individual' an official
 alter table users drop constraint if exists users_verified_type_check;
 alter table users add constraint users_verified_type_check check (verified_type in ('blue', 'business', 'government', 'government_individual'));
+
+-- every mail the instance tried to send (mail.ts)
+create table if not exists mail_log (
+	id bigint primary key,
+	user_id bigint references users (id) on delete set null,
+	to_addr text not null,
+	kind text not null,
+	subject text not null,
+	status text not null check (status in ('sent', 'failed', 'skipped')),
+	error text,
+	created_at timestamptz not null default now()
+);
+create index if not exists mail_log_created_idx on mail_log (created_at desc);
+-- when the activity and message digests last went to this account
+alter table users add column if not exists activity_mailed_at timestamptz;
+alter table users add column if not exists messages_mailed_at timestamptz;

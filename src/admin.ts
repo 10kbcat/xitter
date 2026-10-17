@@ -17,6 +17,8 @@ import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 import { createPlatform } from "./platforms";
 import { TopicError, deleteTopic, listTopics, saveTopic } from "./topics";
 import { CardError, deleteCard, listCards, saveCard } from "./explore-cards";
+import { MAIL_FROM, mailEnabled, sendMail } from "./mail";
+import { mailDigests } from "./mail-digest";
 import { toolActions } from "./admin-tools";
 
 type Role = "admin" | "moderator" | "support";
@@ -97,6 +99,26 @@ const ACTIONS: Record<string, Action> = {
 		await audit(a, "revoke_platform", id);
 		return {};
 	} },
+	mail: { role: "support", run: async () => ({
+		enabled: mailEnabled(),
+		from: MAIL_FROM,
+		log: await sql`select m.id::text, m.to_addr, m.kind, m.subject, m.status, m.error, m.created_at, u.screen_name
+			from mail_log m left join users u on u.id = m.user_id order by m.created_at desc limit 50`,
+	}) },
+	// what Resend says to a test mail answers whether the sending domain is verified
+	sendTestMail: { role: "admin", run: async (a, b) => {
+		const to = typeof b.to === "string" ? b.to.trim() : "";
+		if (!/^[^\s@]{1,64}@[^\s@]{1,253}$/.test(to)) throw new AdminError("Enter an email address.");
+		const name = settings().instance_name;
+		try {
+			await sendMail(to, `Test mail from ${name}`, `This is a test from the ${name} admin panel, sent by @${a.screen_name}. If you can read it, mail works.`, { kind: "test", userId: a.id });
+		} catch (e: any) {
+			throw new AdminError(`Not sent: ${e.message}`);
+		}
+		await audit(a, "send_test_mail", null, { to });
+		return { sent: true };
+	} },
+	runMailDigests: { role: "admin", run: async () => ({ sent: await mailDigests() }) },
 	cards: { role: "support", run: async () => ({ cards: await listCards() }) },
 	saveCard: { role: "admin", run: async (a, b) => {
 		const id = await saveCard(b).catch((e) => {

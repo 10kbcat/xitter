@@ -40,7 +40,8 @@ copy during setup, and it stays on that machine.
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
   (reactivates on sign-in within 30 days), data archive, email notification
-  settings, sessions list with revoke, account access history (each sign-in
+  settings (activity and new-message digests, sent while you're away), sessions
+  list with revoke, account access history (each sign-in
   with its app and address), two-factor sign-in with an
   authenticator app and backup codes, password reset by email
 - Reporting posts and accounts
@@ -51,7 +52,9 @@ copy during setup, and it stays on that machine.
 
 Not built yet: Spaces and live video, Moments, signing in other apps (Connected
 apps stays empty), push notifications, a verified-email code at sign-up. Email is sent through
-[Resend](https://resend.com) when `RESEND_API_KEY` is set.
+[Resend](https://resend.com) when `RESEND_API_KEY` is set; Admin > Email sends
+a test mail (it shows Resend's answer, e.g. an unverified domain) and lists
+every mail tried.
 
 ## Running it locally
 

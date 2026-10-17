@@ -180,6 +180,7 @@ const PAGES = {
 	badges: { icon: "verified", title: "Badges" },
 	topics: { icon: "tag", title: "Topics" },
 	cards: { icon: "newspaper", title: "Explore cards" },
+	email: { icon: "mail", title: "Email" },
 	apps: { icon: "devices", title: "Client apps" },
 	settings: { icon: "tune", title: "Settings" },
 	audit: { icon: "history", title: "Audit log" },
@@ -308,6 +309,24 @@ const RENDER = {
 			if (!(await ask("Delete this badge? Accounts wearing it lose it."))) return;
 			act(() => api("deleteBadge", { id: b.dataset.del }), "Badge deleted").then(route);
 		});
+	},
+
+	async email(main) {
+		const m = await api("mail");
+		const pill = (st) => '<span class="pill' + (st === "sent" ? "" : " suspended") + '">' + esc(st) + "</span>";
+		main.innerHTML = "<h1>Email</h1>" +
+			'<div class="box" style="margin-bottom:16px"><h2>Sending</h2>' +
+			(m.enabled ? '<p>Mail goes out through Resend from <span class="code">' + esc(m.from) + "</span>.</p>"
+				: '<p>Mail is off: set <span class="code">RESEND_API_KEY</span> (and <span class="code">MAIL_FROM</span>, on a domain verified in Resend) and restart. Until then every mail below is only logged as skipped.</p>') +
+			'<p class="dim small">A test mail shows what Resend answers; if the sending domain isn\'t verified yet, it says so here.</p>' +
+			(can("admin") ? '<div class="row"><input id="mto" placeholder="you@example.org" style="flex:1;min-width:200px"><button class="btn primary" id="msend">Send test mail</button><button class="btn" id="mdigest">Send digests now</button></div>' : "") + "</div>" +
+			'<div class="box"><h2>Recent mail</h2><p class="dim small">Password resets, notification digests for people who turned them on (Settings > Notifications > Email notifications: activity, new messages; only after 30 minutes away, at most every 4 hours) and tests.</p><div class="scroll">' +
+			(m.log.length ? '<table class="table"><tr><th>When</th><th>To</th><th>What</th><th>State</th></tr>' +
+				m.log.map((l) => '<tr><td class="small dim">' + esc(when(l.created_at)) + "</td><td>" + esc(l.to_addr) + (l.screen_name ? ' <span class="dim small">@' + esc(l.screen_name) + "</span>" : "") +
+					"</td><td>" + esc(l.subject) + ' <span class="dim small">' + esc(l.kind) + "</span></td><td>" + pill(l.status) + (l.error ? '<div class="small dim">' + esc(l.error) + "</div>" : "") + "</td></tr>").join("") + "</table>"
+				: '<div class="empty">Nothing sent yet.</div>') + "</div></div>";
+		if ($("#msend")) $("#msend").onclick = () => act(() => api("sendTestMail", { to: $("#mto").value }), "Test mail sent").then(route);
+		if ($("#mdigest")) $("#mdigest").onclick = () => act(async () => { const r = await api("runMailDigests"); notice(r.sent + " digest(s) sent"); }).then(route);
 	},
 
 	async cards(main) {
