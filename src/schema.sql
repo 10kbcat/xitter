@@ -561,6 +561,8 @@ create table if not exists polls (
 	ends_at timestamptz,
 	created_at timestamptz not null default now()
 );
+-- an image poll: one uploaded photo per choice, in choice order
+alter table polls add column if not exists choice_media bigint[];
 
 create table if not exists poll_votes (
 	poll_id bigint not null references polls (id) on delete cascade,

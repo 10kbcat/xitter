@@ -128,6 +128,9 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	// the captured "see_more" links a topic label to a topic page this client no
 	// longer has; any other value gives the label an inline Follow button instead
 	topics_context_controls_followed_variation: { value: "follow_button" },
+	// polls with a photo on each choice (polls.ts IMAGE_POLL)
+	responsive_web_image_poll_composer_enabled: { value: feature("polls") },
+	responsive_web_card_image_poll_enabled: { value: true },
 	responsive_web_edit_tweet_enabled: { value: true },
 	responsive_web_edit_tweet_composition_enabled: { value: true },
 	responsive_web_edit_tweet_perspective_enabled: { value: true },

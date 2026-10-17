@@ -20,7 +20,16 @@ async function session(username: string) {
 		(await fetch(`${origin}/i/api/graphql/q/${op}?variables=${encodeURIComponent(JSON.stringify(variables))}`, { headers })).json();
 	const form = async (path: string, body: Record<string, string>) =>
 		(await fetch(`${origin}/i/api${path}`, { method: "POST", headers, body: new URLSearchParams(body) })).json();
-	return { gql, get, form };
+	// one photo through the chunked upload, for image polls
+	const upload = async (bytes: Uint8Array, type: string) => {
+		const init = await (await fetch(`${origin}/i/media/upload.json?command=INIT&total_bytes=${bytes.length}&media_type=${type}&media_category=tweet_image`, { method: "POST", headers })).json();
+		const body = new FormData();
+		body.set("media", new Blob([bytes]));
+		await fetch(`${origin}/i/media/upload.json?command=APPEND&media_id=${init.media_id_string}&segment_index=0`, { method: "POST", headers, body });
+		await fetch(`${origin}/i/media/upload.json?command=FINALIZE&media_id=${init.media_id_string}`, { method: "POST", headers });
+		return init.media_id_string as string;
+	};
+	return { gql, get, form, upload };
 }
 
 let failures = 0;
@@ -79,5 +88,21 @@ const asA = (await a.get("TweetResultByRestId", { tweetId: post.rest_id })).data
 check("the author sees the count and no choice", binding(asA?.card, "choice2_count")?.string_value === "1" && !binding(asA?.card, "selected_choice"));
 
 await a.gql("DeleteTweet", { tweet_id: post.rest_id });
+
+// image polls: a photo per choice, under the composer's own card name
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+const IMAGE_POLL = "1906814671912599552:poll_choice_images";
+const img1 = await a.upload(PNG, "image/png");
+const img2 = await a.upload(PNG, "image/png");
+const imgCard = await a.form("/v2/cards/create.json", { card_data: JSON.stringify({ "twitter:card": IMAGE_POLL, "twitter:api:api:endpoint": "1", "twitter:long:duration_minutes": 60,
+	"twitter:string:choice1_label": "first", "twitter:image:choice1_image:src:id": `mis://${img1}`, "twitter:string:choice2_label": "second", "twitter:image:choice2_image:src:id": `mis://${img2}` }) });
+check("an image poll card is made", /^card:\/\/\d+$/.test(imgCard.card_uri ?? ""), imgCard);
+const stolen = await b.form("/v2/cards/create.json", { card_data: JSON.stringify({ "twitter:card": IMAGE_POLL, "twitter:string:choice1_label": "x", "twitter:image:choice1_image:src:id": `mis://${img1}`, "twitter:string:choice2_label": "y" }) });
+check("someone else's upload can't be used", !stolen.card_uri);
+const imgPost = (await a.gql("CreateTweet", { tweet_text: "image poll test", card_uri: imgCard.card_uri })).data?.create_tweet?.tweet_results?.result;
+const imgSeen = (await b.get("TweetResultByRestId", { tweetId: imgPost?.rest_id })).data?.tweetResult?.result;
+check("it renders as an image poll", imgSeen?.card?.legacy?.name === IMAGE_POLL && binding(imgSeen?.card, "choice_count")?.string_value === "2", imgSeen?.card?.legacy?.name);
+check("with each choice's photo", !!binding(imgSeen?.card, "choice1_image")?.image_value?.url && !!binding(imgSeen?.card, "choice2_image")?.image_value?.url);
+await a.gql("DeleteTweet", { tweet_id: imgPost?.rest_id });
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
