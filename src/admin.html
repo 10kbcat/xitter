@@ -180,6 +180,7 @@ const PAGES = {
 	badges: { icon: "verified", title: "Badges" },
 	stickers: { icon: "add_reaction", title: "Stickers" },
 	hashflags: { icon: "favorite", title: "Branded hashtags" },
+	switches: { icon: "toggle_on", title: "Feature switches", role: "admin" },
 	topics: { icon: "tag", title: "Topics" },
 	cards: { icon: "newspaper", title: "Explore cards" },
 	email: { icon: "mail", title: "Email" },
@@ -501,6 +502,53 @@ const RENDER = {
 			if (!(await ask("Delete this branded hashtag?"))) return;
 			act(() => api("deleteHashflag", { id: b.dataset.del }), "Deleted").then(route);
 		});
+	},
+
+	async switches(main) {
+		const { switches } = await api("featureSwitches");
+		const effective = (s) => "override" in s ? s.override : "xitter" in s ? s.xitter : s.build;
+		const from = (s) => "override" in s ? "admin" : "xitter" in s ? "Xitter" : "build";
+		const show = (v) => v === undefined ? "unset" : typeof v === "string" ? v : JSON.stringify(v);
+		main.innerHTML = "<h1>Feature switches</h1>" +
+			'<p class="dim">The X client turns its features on and off with these switches. A value set here wins over the pinned build\'s and Xitter\'s own, for everyone, from their next page load. Many switches need server support Xitter doesn\'t have: turn on something new, then check the app. The instance\'s own features are under Settings.</p>' +
+			'<div class="row" style="margin-bottom:12px"><input id="sq" placeholder="Search ' + switches.length + ' switches, e.g. grok, poll, edit_tweet" style="flex:1;min-width:200px">' +
+			'<select id="sf"><option value="">All</option><option value="admin">Set here</option><option value="Xitter">Set by Xitter</option><option value="on">On</option></select></div>' +
+			'<div id="slist"></div>';
+		const list = $("#slist");
+		const draw = () => {
+			const q = $("#sq").value.trim().toLowerCase(), f = $("#sf").value;
+			const hits = switches.filter((s) => (!q || s.name.includes(q)) && (!f || (f === "on" ? effective(s) === true : from(s) === f)));
+			list.innerHTML = (hits.length > 200 ? '<p class="dim small">Showing 200 of ' + hits.length + '; narrow the search.</p>' : "") +
+				'<div class="scroll"><table class="table"><tr><th>Switch</th><th>Value</th><th>From</th><th></th></tr>' +
+				hits.slice(0, 200).map((s) => {
+					const v = effective(s), bool = typeof v === "boolean" || (v === undefined && typeof s.build !== "object");
+					const edit = bool
+						? '<button class="btn' + (v === true ? " primary" : "") + '" data-set="true">On</button> <button class="btn' + (v === false ? " primary" : "") + '" data-set="false">Off</button>'
+						: '<input data-val value="' + esc(typeof v === "string" ? v : JSON.stringify(v ?? "")) + '" style="width:160px"> <button class="btn" data-save>Set</button>';
+					return '<tr data-name="' + esc(s.name) + '"><td class="code small" style="word-break:break-all">' + esc(s.name) + '</td><td class="small" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(show(v)) + '">' + esc(show(v)) +
+						("override" in s ? '<div class="dim small">build: ' + esc(show(s.build)) + "</div>" : "") + '</td><td class="small">' + from(s) + '</td><td style="white-space:nowrap">' + edit +
+						("override" in s ? ' <button class="btn danger" data-reset>Reset</button>' : "") + "</td></tr>";
+				}).join("") + "</table></div>";
+			list.querySelectorAll("tr[data-name]").forEach((tr) => {
+				const name = tr.dataset.name;
+				const set = (value) => act(() => api("setFeatureSwitch", { name, value }), name + " set").then(route);
+				tr.querySelectorAll("[data-set]").forEach((b) => b.onclick = () => set(b.dataset.set === "true"));
+				const save = tr.querySelector("[data-save]");
+				if (save) save.onclick = () => {
+					const raw = tr.querySelector("[data-val]").value.trim();
+					let value = raw;
+					// a number or a JSON list as itself, anything else as text
+					if (/^-?\d+(\.\d+)?$/.test(raw)) value = Number(raw);
+					else if (/^\[.*\]$/.test(raw)) { try { value = JSON.parse(raw); } catch {} }
+					set(value);
+				};
+				const reset = tr.querySelector("[data-reset]");
+				if (reset) reset.onclick = () => act(() => api("setFeatureSwitch", { name, reset: true }), name + " reset").then(route);
+			});
+		};
+		$("#sq").oninput = draw;
+		$("#sf").onchange = draw;
+		draw();
 	},
 
 	async email(main) {

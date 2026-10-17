@@ -400,6 +400,9 @@ export async function pinnedReplyOf(postId: string): Promise<string | null> {
 type Mark = "likes" | "bookmarks";
 
 export async function setMark(table: Mark, userId: string, postId: string, on: boolean) {
+	// a deleted post, or one this account can't see (blocked, protected,
+	// hidden): X's "not found", not a database error
+	if (on && !(await getPost(userId, postId))) throw new PostError("No status found with that ID.", 144);
 	if (table === "likes") {
 		if (on) await sql`insert into likes (user_id, post_id) values (${userId}::bigint, ${postId}::bigint) on conflict do nothing`;
 		else await sql`delete from likes where user_id = ${userId}::bigint and post_id = ${postId}::bigint`;
@@ -412,6 +415,7 @@ export async function setMark(table: Mark, userId: string, postId: string, on: b
 export async function repost(userId: string, postId: string): Promise<string> {
 	// a protected account's posts can't be passed on
 	const [owner] = await sql`select u.protected, u.id::text as owner from posts p join users u on u.id = p.user_id where p.id = ${postId}::bigint`;
+	if (!owner || !(await getPost(userId, postId))) throw new PostError("No status found with that ID.", 144);
 	if (owner?.protected && owner.owner !== userId) throw new PostError("Posts from protected accounts can't be reposted.", 328);
 	const id = newId();
 	const rows = await sql`insert into reposts (id, user_id, post_id) values (${id}::bigint, ${userId}::bigint, ${postId}::bigint)

@@ -7,7 +7,7 @@ import { isId, newId } from "./ids";
 import { cursorEntry, tweetEntry } from "./model";
 import { PUBLIC_ORIGIN } from "./config";
 import { mediaUrl, posterUrl } from "./media";
-import { PostError, folderPosts } from "./posts";
+import { PostError, folderPosts, setMark } from "./posts";
 
 type Vars = Record<string, any>;
 const MAX_FOLDERS = 25;
@@ -74,7 +74,7 @@ export const bookmarkFolderHandlers = {
 		const f = await mine(v.id, folderId(vars));
 		const post = String(vars.tweet_id ?? "");
 		if (!isId(post)) throw new PostError("Invalid post id.", 144);
-		await sql`insert into bookmarks (user_id, post_id) values (${v.id}::bigint, ${post}::bigint) on conflict do nothing`;
+		await setMark("bookmarks", v.id, post, true);
 		await sql`insert into bookmark_folder_posts (folder_id, post_id) values (${f.id}::bigint, ${post}::bigint) on conflict do nothing`;
 		return { data: { bookmark_collection_tweet_put: "Done" } };
 	},

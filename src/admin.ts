@@ -22,6 +22,7 @@ import { mailDigests } from "./mail-digest";
 import { toolActions } from "./admin-tools";
 import { stickerActions } from "./stickers";
 import { hashflagActions } from "./hashflags";
+import { switchActions } from "./feature-switches";
 import { staffGate } from "./staff-access";
 
 type Role = "admin" | "moderator" | "support";
@@ -648,6 +649,7 @@ const ACTIONS: Record<string, Action> = {
 Object.assign(ACTIONS, toolActions);
 Object.assign(ACTIONS, stickerActions);
 Object.assign(ACTIONS, hashflagActions);
+Object.assign(ACTIONS, switchActions);
 
 export async function adminApi(req: Request, action: string, viewer: Viewer | undefined): Promise<Response> {
 	const fail = (message: string, status: number) => Response.json({ error: message }, { status });

@@ -104,8 +104,8 @@ const CLAIMED_FEATURES = Object.fromEntries(["subscriptions_feature_article_comp
 // lists that patch.ts has already rewritten, so the captured value would fail;
 // without the switch the client falls back to its (patched) default.
 const HOST_SWITCHES = ["responsive_web_media_upload_host"];
-const clientSwitches = (config: Record<string, unknown>) => ({
-	...Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k))),
+// Xitter's own values, over the pinned build's
+const ownSwitches = (): Record<string, { value: unknown }> => ({
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
 	responsive_web_pinned_replies_enabled: { value: true },
 	responsive_web_sidebar_ttf_enabled: { value: true },
@@ -135,6 +135,28 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_edit_tweet_composition_enabled: { value: true },
 	responsive_web_edit_tweet_perspective_enabled: { value: true },
 });
+const overrideSwitches = () => Object.fromEntries(Object.entries(settings().switch_overrides).map(([k, value]) => [k, { value }]));
+// the build's, then Xitter's, then an admin's
+const clientSwitches = (config: Record<string, unknown>) => ({
+	...Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k))),
+	...ownSwitches(),
+	...overrideSwitches(),
+});
+
+// every switch the build knows, with where its value comes from (admin panel)
+export function switchReport() {
+	const fs = loadBuild()?.build.featureSwitch;
+	const build = { ...(fs?.defaultConfig ?? {}), ...(fs?.config ?? {}) } as Record<string, { value: unknown }>;
+	const own = ownSwitches();
+	const overrides = settings().switch_overrides;
+	const names = [...new Set([...Object.keys(build), ...Object.keys(own), ...Object.keys(overrides)])].sort();
+	return names.map((name) => ({
+		name,
+		build: build[name]?.value,
+		...(name in own ? { xitter: own[name].value } : {}),
+		...(name in overrides ? { override: overrides[name] } : {}),
+	}));
+}
 
 function initialState(user: User | null, fs: NonNullable<ReturnType<typeof loadBuild>>["build"]["featureSwitch"], inCommunity: boolean, educationFlags: Record<string, number>) {
 	return {

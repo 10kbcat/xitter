@@ -199,6 +199,13 @@ export const TIDY_SCRIPT = `(function(){
 			var path=a.querySelector("svg path");
 			if(path){[].slice.call(a.querySelectorAll("svg path")).slice(1).forEach(function(p){p.remove()});path.setAttribute("d",l.icon);if(l.viewBox)a.querySelector("svg").setAttribute("viewBox",l.viewBox)}
 			a.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();location.assign(l.href)},true);
+			// the client hovers its entries from script, which the copy doesn't
+			// get: X's hover grey for the theme (light, dim, dark)
+			a.addEventListener("mouseenter",function(){
+				var bg=getComputedStyle(document.body).backgroundColor;
+				a.style.backgroundColor=bg==="rgb(255, 255, 255)"?"rgb(247, 249, 249)":bg==="rgb(21, 32, 43)"?"rgb(30, 39, 50)":"rgb(22, 24, 28)";
+			});
+			a.addEventListener("mouseleave",function(){a.style.backgroundColor=""});
 			row.parentNode.insertBefore(box,row);
 		});
 	}
