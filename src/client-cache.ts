@@ -1,7 +1,7 @@
 // Local archive of the pinned web client. Files are stored exactly as the CDN
 // served them; patching happens at serve time so the archive stays pristine.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 
 export const CLIENT_DIR = process.env.CLIENT_DIR ?? "client";
@@ -15,7 +15,8 @@ function localPath(cdnPath: string): string | undefined {
 
 export function readCached(cdnPath: string): Buffer | undefined {
 	const p = localPath(cdnPath);
-	return p && existsSync(p) ? readFileSync(p) : undefined;
+	// a directory (someone asked for /abs/.../) is not a file to serve
+	return p && existsSync(p) && statSync(p).isFile() ? readFileSync(p) : undefined;
 }
 
 // Returns the file from the archive, downloading it from the CDN on first use.
@@ -23,7 +24,7 @@ export async function getClientFile(cdnPath: string, allowFetch = true): Promise
 	const cached = readCached(cdnPath);
 	if (cached || !allowFetch) return cached;
 	const p = localPath(cdnPath);
-	if (!p) return undefined;
+	if (!p || (existsSync(p) && !statSync(p).isFile())) return undefined;
 	const res = await fetch(CDN_ORIGIN + cdnPath);
 	if (!res.ok) return undefined;
 	const buf = Buffer.from(await res.arrayBuffer());
