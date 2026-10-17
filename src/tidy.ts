@@ -59,14 +59,17 @@ export function hideCss(): string {
 // invites while members can make them (member-invites.ts), the organisation
 // page for organisations, their affiliates and people they asked (org-manage.ts)
 const TICKET = "M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5V10a2 2 0 0 0 0 4v3.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5V14a2 2 0 0 0 0-4V6.5zM5 7v1.8a4 4 0 0 1 0 6.4V17h14v-1.8a4 4 0 0 1 0-6.4V7H5z";
+// Material Symbols "code"
+const CODE = "M320-240 80-480l240-240 57 57-184 184 183 183-56 56Zm320 0-57-57 184-184-183-183 56-56 240 240-240 240Z";
 const BUILDING = "M4 21V3h11v4h5v14H4zm2-2h3v-3h2v3h2V5H6v14zm9 0h3V9h-3v10zM8 7h3v2H8V7zm0 4h3v2H8v-2z";
-export type MenuLink = { href: string; text: string; icon: string };
+export type MenuLink = { href: string; text: string; icon: string; viewBox?: string };
 export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const links: MenuLink[] = [];
 	if (settings().invite_quota.enabled && settings().signup_mode === "invite") links.push({ href: "/account/invites", text: "Invites", icon: TICKET });
 	const [org] = await sql`select 1 from users u where u.id = ${userId}::bigint and (u.verified_type = 'business'
 		or exists (select 1 from affiliations where user_id = u.id) or exists (select 1 from affiliation_requests where user_id = u.id))`;
 	if (org) links.push({ href: "/account/organisation", text: "Organisation", icon: BUILDING });
+	links.push({ href: "/account/api", text: "API", icon: CODE, viewBox: "0 -960 960 960" });
 	return links;
 }
 
@@ -194,7 +197,7 @@ export const TIDY_SCRIPT = `(function(){
 			var label=[].find.call(a.querySelectorAll("span"),function(n){return !n.childElementCount&&n.textContent.trim()});
 			if(label)label.textContent=l.text;
 			var path=a.querySelector("svg path");
-			if(path){[].slice.call(a.querySelectorAll("svg path")).slice(1).forEach(function(p){p.remove()});path.setAttribute("d",l.icon)}
+			if(path){[].slice.call(a.querySelectorAll("svg path")).slice(1).forEach(function(p){p.remove()});path.setAttribute("d",l.icon);if(l.viewBox)a.querySelector("svg").setAttribute("viewBox",l.viewBox)}
 			a.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();location.assign(l.href)},true);
 			row.parentNode.insertBefore(box,row);
 		});

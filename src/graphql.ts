@@ -972,6 +972,10 @@ Object.assign(handlers, analyticsHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 
+// an operation's result as the client would get it, for the public API
+// (public-api.ts); errors are thrown as they are
+export const callOperation = (name: string, viewer: Viewer, vars: Vars) => handlers[name](viewer, vars);
+
 export async function runOperation(name: string, viewer: Viewer, vars: Vars): Promise<Response> {
 	try {
 		return Response.json(await handlers[name](viewer, vars));

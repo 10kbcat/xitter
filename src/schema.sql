@@ -843,3 +843,16 @@ create table if not exists stickers (
 	created_at timestamptz not null default now()
 );
 create index if not exists stickers_pack_idx on stickers (pack_id, position);
+
+-- Personal API tokens (/account/api) for the public API under /api/v1. Only
+-- the SHA-256 of a token is kept; "read" or "write" (which includes read).
+create table if not exists api_tokens (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	name text not null check (char_length(name) between 1 and 40),
+	token_hash text not null unique,
+	scope text not null check (scope in ('read', 'write')),
+	created_at timestamptz not null default now(),
+	last_used_at timestamptz
+);
+create index if not exists api_tokens_user_idx on api_tokens (user_id);

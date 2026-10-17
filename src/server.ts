@@ -35,6 +35,8 @@ import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
 import { hit, limitApi, limitedResponse } from "./ratelimit";
 import { stickerImage, stickerPacks } from "./stickers";
+import { apiTokensRoute, publicApi } from "./public-api";
+import { apiDocsPage } from "./api-docs";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
 import { emailRoute } from "./email-address";
@@ -238,6 +240,9 @@ async function route(req: Request): Promise<Response | undefined> {
 		if (!raw) return new Response("no pinned chat build", { status: 404 });
 		return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
 	}
+	// the public API signs in with its own tokens, never cookies
+	if (p.startsWith("/api/v1/") || p === "/api/v1") return publicApi(req, url);
+	if (p === "/api" || p === "/api/") return apiDocsPage();
 	if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 	if (p === "/login" && req.method === "POST") {
 		const h = hit("auth", requestIp(req) ?? "unknown");
@@ -290,6 +295,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
 	if (p === "/account/notices" && viewer) return noticesPage(viewer);
 	if (p === "/account/invites" && viewer) return memberInvitesRoute(req, viewer);
+	if (p === "/account/api" && viewer) return apiTokensRoute(req, viewer);
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// uploads stay inside the instance: only signed-in users get them
