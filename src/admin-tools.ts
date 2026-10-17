@@ -193,13 +193,22 @@ export const toolActions: Record<string, Action> = {
 		},
 	},
 
+	// earlier handles, newest first; old links to them stop working once changed
+	handleHistory: {
+		role: "support",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			await guard(a, id);
+			return { changes: await sql`select old_name, new_name, changed_at from username_changes where user_id = ${id}::bigint order by changed_at desc limit 50` };
+		},
+	},
 	// signed-in browsers; the token itself never leaves the server
 	userSessions: {
 		role: "support",
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			await guard(a, id);
-			return { sessions: await sql`select id::text, created_at, last_seen_at, user_agent, token = ${a.token} as current from sessions where user_id = ${id}::bigint order by last_seen_at desc` };
+			return { sessions: await sql`select id::text, created_at, last_seen_at, user_agent, ip, token = ${a.token} as current from sessions where user_id = ${id}::bigint order by last_seen_at desc` };
 		},
 	},
 	revokeSession: {

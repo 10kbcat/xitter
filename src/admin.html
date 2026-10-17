@@ -708,13 +708,14 @@ function userTable(users, orgs = false, pick = false) {
 async function renderUser(main, id) {
 	const { user: u, invited, log } = await api("user", { id });
 	const isOrg = u.verified_type === "business";
-	const [affiliates, { badges }, { notes }, { messages }, sessions] = await Promise.all([
+	const [affiliates, { badges }, { notes }, { messages }, sessions, handles] = await Promise.all([
 		isOrg ? api("affiliates", { orgId: id }).then((r) => r.affiliates) : [],
 		api("badges"),
 		api("staffNotes", { id }),
 		api("staffMessages", { id }),
 		// staff at the viewer's level or above keep their sessions to themselves
 		api("userSessions", { id }).then((r) => r.sessions, () => null),
+		api("handleHistory", { id }).then((r) => r.changes, () => []),
 	]);
 	const badgeOptions = (selected, none) => '<option value="">' + none + "</option>" + badges.map((b) => '<option value="' + esc(b.id) + '"' + (selected === b.id ? " selected" : "") + ">" + esc(b.name) + "</option>").join("");
 	const self = me && me.id === u.id;
@@ -771,9 +772,10 @@ async function renderUser(main, id) {
 		'<div class="box"><h2>Staff notes</h2><p class="dim small">Only staff see these.</p>' +
 		(notes.length ? '<div class="list" style="margin-bottom:12px">' + notes.map((n) => '<p style="white-space:pre-wrap">' + esc(n.body) + '<br><span class="dim small">@' + esc(n.actor ?? "?") + " · " + esc(when(n.created_at)) + "</span></p>").join("") + "</div>" : "") +
 		'<div class="field"><textarea id="noteBody" maxlength="2000" placeholder="Context for other staff"></textarea></div><button class="btn primary" id="addNote">Add note</button></div>' +
+		(handles.length ? '<div class="box"><h2>Handle history</h2><div class="list">' + handles.map((h) => "<p>@" + esc(h.old_name) + " → @" + esc(h.new_name) + ' <span class="dim small">' + esc(when(h.changed_at)) + "</span></p>").join("") + "</div></div>" : "") +
 		'<div class="box"><h2>Sessions</h2>' + (sessions === null ? '<p class="dim small">Hidden: this account is staff at your level or above.</p>'
 			: sessions.length ? '<div class="list">' + sessions.slice(0, 10).map((s) => "<p>" + esc(browser(s.user_agent)) + (s.current ? ' <span class="pill staff">you, now</span>' : "") +
-				'<br><span class="dim small">signed in ' + esc(when(s.created_at)) + " · last active " + esc(when(s.last_seen_at)) + "</span>" +
+				'<br><span class="dim small">' + (s.ip ? esc(s.ip) + " · " : "") + "signed in " + esc(when(s.created_at)) + " · last active " + esc(when(s.last_seen_at)) + "</span>" +
 				(s.current ? "" : ' <button class="btn" data-session="' + esc(s.id) + '">Sign out</button>') + "</p>").join("") +
 				(sessions.length > 10 ? '<p class="dim small">and ' + (sessions.length - 10) + ' older (Access → Sign out everywhere ends them all)</p>' : "") + "</div>"
 			: '<p class="dim small">Not signed in anywhere.</p>') + "</div>" +
