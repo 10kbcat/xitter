@@ -106,6 +106,8 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
 	responsive_web_pinned_replies_enabled: { value: true },
 	responsive_web_sidebar_ttf_enabled: { value: true },
+	// the checkmark sheet's "Upgrade to Premium" leads to X's checkout; there is nothing to buy here
+	responsive_web_user_badge_education_get_verified_button_enabled: { value: false },
 	// on, it drops every post label but reposts, pins and communities, topics included
 	rweb_home_mixer_enable_social_context_filter_social_contexts: { value: false },
 	// the captured "see_more" links a topic label to a topic page this client no

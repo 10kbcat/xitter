@@ -22,7 +22,10 @@ export type User = {
 	// staff only: admin, moderator or support
 	role?: "admin" | "moderator" | "support" | null;
 	// the organisation this account is an affiliate of
-	org?: { id: string; name: string; screen_name: string; avatar_url: string | null } | null;
+	// when the badge was given ("Verified since")
+	verified_at?: Date | null;
+	// `since`: when the account joined the organisation
+	org?: { id: string; name: string; screen_name: string; avatar_url: string | null; since?: string } | null;
 	// for organisations: how many affiliates they have
 	affiliates?: number;
 	// posts only for approved followers

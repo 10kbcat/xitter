@@ -571,10 +571,6 @@ const handlers: Record<string, Handler> = {
 							location_accurate: true,
 							username_changes: { count: String(extra.changes), ...(extra.last_change ? { last_changed_at_msec: String(extra.last_change.getTime()) } : {}) },
 						},
-						verification_info: {
-							is_identity_verified: false,
-							...(user.verified_type && extra.verified_at ? { reason: { verified_since_msec: String(extra.verified_at.getTime()) } } : {}),
-						},
 					},
 				},
 			},

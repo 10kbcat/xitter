@@ -34,6 +34,38 @@ const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toSt
 // badge, as on X, even without a badge of their own.
 export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
 
+// The sheet a checkmark opens: why the account wears it, and since when. The
+// client draws the organisation's row itself from the badge label. Entity
+// offsets count code points; x.com links stay inside the app.
+function verificationInfo(u: User) {
+	if (!isVerified(u)) return { is_identity_verified: false };
+	const instance = settings().instance_name;
+	const parts: (string | { text: string; url: string })[] = u.org
+		? ["This account is Premium because it’s an affiliate of ", { text: `@${u.org.screen_name}`, url: `https://x.com/${u.org.screen_name}` }, ` on ${instance}. `]
+		: u.verified_type === "business"
+			? [`This account is verified because it’s an organisation on ${instance}. `]
+			: u.verified_type === "government"
+				? [`This account is verified because it’s a government or official account on ${instance}. `]
+				: [`This account is Premium because the ${instance} team verified it. `];
+	parts.push({ text: "Learn more", url: `${PUBLIC_ORIGIN}/rules` });
+	let text = "";
+	const entities = [];
+	for (const p of parts) {
+		if (typeof p === "string") {
+			text += p;
+			continue;
+		}
+		const from = [...text].length;
+		text += p.text;
+		entities.push({ from_index: from, to_index: [...text].length, ref: { url: p.url, url_type: "ExternalUrl" } });
+	}
+	const since = u.org?.since ? new Date(u.org.since) : u.verified_at;
+	return {
+		is_identity_verified: false,
+		reason: { description: { text, entities }, ...(since ? { verified_since_msec: String(new Date(since).getTime()) } : {}) },
+	};
+}
+
 function verification(u: User) {
 	if (u.verified_type === "business") return { verified: false, verified_type: "Business" };
 	if (u.verified_type === "government") return { verified: false, verified_type: "Government" };
@@ -117,6 +149,7 @@ export function userResult(u: User) {
 		user_seed_tweet_count: u.stats?.articles ?? 0,
 		highlights_info: { can_highlight_tweets: true, highlighted_tweets: String(u.stats?.highlights ?? 0) },
 		verification: verification(u),
+		verification_info: verificationInfo(u),
 		verified_user_profiles: { super_follows_user_profile: { is_active: false } },
 		website: { url: u.website ?? "" },
 	};
