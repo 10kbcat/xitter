@@ -61,7 +61,10 @@ check("but can't edit profiles", (await t.admin("updateUser", { id: org.id, name
 const [adminRow] = await sql`select id::text as id from users where lower(screen_name) = lower(${adminName})`;
 check("or suspend an admin", (await t.admin("setStatus", { id: adminRow.id, status: "suspended" })).status === 403);
 await a.admin("setRole", { id: target.id, role: target.role });
-check("the last admin can't step down", (await a.admin("setRole", { id: adminRow.id, role: null })).status === 400);
+// with other admins about (a real one on a dev instance), stepping down would succeed and lock the test out
+const [{ admins }] = await sql`select count(*)::int as admins from users where role = 'admin'`;
+if (admins === 1) check("the last admin can't step down", (await a.admin("setRole", { id: adminRow.id, role: null })).status === 400);
+else console.log(`skip the last admin can't step down (${admins} admins)`);
 
 // standing
 const post = (await t.gql("CreateTweet", { tweet_text: "admin test: before" })).data.create_tweet.tweet_results.result.rest_id;
