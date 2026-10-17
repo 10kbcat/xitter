@@ -202,6 +202,18 @@ check("a password reset gives a working password", !!(await session(targetName, 
 const log = (await a.admin("audit")).entries ?? [];
 check("the audit log records it all", ["set_status", "add_affiliate", "delete_post", "reset_password", "set_signup_mode"].every((x) => log.some((e: any) => e.action === x)));
 
+// a second admin: the owner (the first admin) outranks them, not the other way round
+const ownerFirst = (await sql`select id::text from users where role = 'admin' order by created_at, id limit 1`)[0]?.id === adminRow.id;
+if (ownerFirst) {
+	await a.admin("setRole", { id: org.id, role: "admin" });
+	const o2 = (await session(orgName))!;
+	check("owner: another admin can't edit the owner", (await o2.admin("updateUser", { id: adminRow.id, location: "nope" })).status === 403);
+	check("owner: nor demote them", (await o2.admin("setRole", { id: adminRow.id, role: null })).status === 403);
+	check("owner: the owner can edit another admin", (await a.admin("updateUser", { id: org.id, location: "set by owner" })).status === 200);
+	await a.admin("updateUser", { id: org.id, location: "" });
+	check("owner: and take their role away", (await a.admin("setRole", { id: org.id, role: null })).status === 200);
+} else console.log(`skip owner checks: ${adminName} isn't the first admin`);
+
 // put things back
 await sql`update users set password_hash = ${await Bun.password.hash(password)} where id = ${target.id}::bigint`;
 await sql`delete from users where screen_name like ${`${name}%`}`;

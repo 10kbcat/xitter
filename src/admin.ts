@@ -56,10 +56,18 @@ async function userRow(id: string) {
 }
 
 // nobody acts on an account ranked at or above their own, except on themselves
+// The owner, the longest-standing admin, outranks the other admins: they can't
+// change the owner's account, the owner can change theirs. Admins otherwise
+// can't touch each other.
+const ownerId = async () => (await sql`select id::text from users where role = 'admin' order by created_at, id limit 1`)[0]?.id as string | undefined;
+const rankOf = (role: string | null, isOwner: boolean) => (isOwner ? 4 : role ? RANK[role as Role] : 0);
+
 export async function guard(actor: Viewer, targetId: string) {
 	const u = await userRow(targetId);
-	if (targetId !== actor.id && u.role && RANK[u.role as Role] >= RANK[actor.role as Role])
-		throw new AdminError("That account is staff at your level or above.", 403);
+	if (targetId === actor.id || !u.role) return u;
+	const owner = await ownerId();
+	if (rankOf(u.role, targetId === owner) >= rankOf(actor.role ?? null, actor.id === owner))
+		throw new AdminError(targetId === owner ? "That account is the instance owner." : "That account is staff at your level or above.", 403);
 	return u;
 }
 
@@ -331,7 +339,8 @@ const ACTIONS: Record<string, Action> = {
 				const [{ n }] = await sql`select count(*)::int as n from users where role = 'admin'`;
 				if (n <= 1) throw new AdminError("You are the last admin.");
 			}
-			await userRow(id);
+			// nobody demotes staff at or above their own rank, the owner included
+			await guard(a, id);
 			await sql`update users set role = ${role} where id = ${id}::bigint`;
 			await audit(a, "set_role", id, { role });
 			return {};
