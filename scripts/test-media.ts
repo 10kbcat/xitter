@@ -2,7 +2,9 @@
 // server, the way the client calls them.
 // usage: bun scripts/test-media.ts <user> <password> <image> [banner image]
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const [user, password, imagePath, bannerPath] = process.argv.slice(2);
@@ -75,6 +77,33 @@ if (flaggedPost?.rest_id) await gql("DeleteTweet", { tweet_id: flaggedPost.rest_
 const avatar = await upload(imagePath, "profile_image", 1);
 const a = await (await fetch(`${origin}/i/api/1.1/account/update_profile_image.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: avatar, return_user: "true" }) })).json();
 check("avatar set", String(a.profile_image_url_https).includes(avatar), a.profile_image_url_https);
+// an animated GIF avatar the way the patched client sends one: whole, with
+// the crop box after the trailer (patch.ts)
+const ffmpeg = process.env.FFMPEG ?? "ffmpeg";
+const ffprobe = process.env.FFPROBE ?? "ffprobe";
+const dir = mkdtempSync(join(tmpdir(), "xitter-gif-"));
+const gifPath = join(dir, "anim.gif");
+if (Bun.spawnSync([ffmpeg, "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=60x40:rate=5", "-t", "1", gifPath]).exitCode !== 0) {
+	console.log("skip animated GIF avatar checks: no ffmpeg");
+} else {
+	const frames = (file: string) =>
+		Number(Bun.spawnSync([ffprobe, "-v", "error", "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", file]).stdout.toString().trim());
+	const gif = readFileSync(gifPath);
+	writeFileSync(join(dir, "crop.gif"), Buffer.concat([gif, Buffer.from("xitter-crop:10,5,30,30")]));
+	writeFileSync(join(dir, "full.gif"), Buffer.concat([gif, Buffer.from("xitter-crop:0,0,60,40")]));
+	const cropped = await upload(join(dir, "crop.gif"), "avatar_image", 2);
+	const g = await (await fetch(`${origin}/i/api/1.1/account/update_profile_image.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: cropped }) })).json();
+	const served = await fetch(String(g.profile_image_url_https), { headers });
+	const body = Buffer.from(await served.arrayBuffer());
+	writeFileSync(join(dir, "served.gif"), body);
+	check("GIF avatar is served as a GIF", served.headers.get("content-type") === "image/gif", served.headers.get("content-type"));
+	check("GIF avatar is cropped to the box", body.readUInt16LE(6) === 30 && body.readUInt16LE(8) === 30, [body.readUInt16LE(6), body.readUInt16LE(8)]);
+	check("GIF avatar keeps its frames", frames(join(dir, "served.gif")) === frames(gifPath), [frames(join(dir, "served.gif")), frames(gifPath)]);
+	const full = await upload(join(dir, "full.gif"), "avatar_image", 1);
+	const kept = Buffer.from(await (await fetch(`${origin}/media/${full}`, { headers })).arrayBuffer());
+	check("an uncropped GIF is stored as it was sent, minus the crop box", kept.equals(gif), [kept.length, gif.length]);
+}
+rmSync(dir, { recursive: true, force: true });
 if (bannerPath) {
 	const banner = await upload(bannerPath, "banner_image", 3);
 	const b = await (await fetch(`${origin}/i/api/1.1/account/update_profile_banner.json`, { method: "POST", headers, body: new URLSearchParams({ media_id: banner }) })).json();

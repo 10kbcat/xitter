@@ -1,7 +1,8 @@
 // Uploads: the client's chunked upload (INIT, APPEND, FINALIZE, STATUS),
 // storage on disk, serving, and the media objects attached to posts.
-// Images are stored as uploaded; GIFs are served as images, so they animate
-// without a video conversion step. Videos are converted by video.ts.
+// Images are stored as uploaded (a GIF may be cropped first); GIFs are served
+// as images, so they animate without a video conversion step. Videos are
+// converted by video.ts.
 
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { settings } from "./settings";
-import { maxVideoBytes, posterFile, progress, queueVideo, sourceFile, videoError, videoSupported } from "./video";
+import { cropGif, maxVideoBytes, posterFile, progress, queueVideo, sourceFile, videoError, videoSupported } from "./video";
 
 export const MEDIA_DIR = process.env.MEDIA_DIR ?? "media";
 const maxImage = () => settings().limits.image_mb * 1024 * 1024;
@@ -93,10 +94,32 @@ function idFields(id: string) {
 	return { media_id: Number(id), media_id_string: id, media_key: `3_${id}` };
 }
 
+// A GIF the client was asked to crop (an avatar or banner) arrives whole, with
+// "xitter-crop:left,top,width,height" after the GIF trailer (patch.ts). If
+// ffmpeg is missing or fails, the uncropped GIF is kept: avatars are drawn
+// center-cropped anyway.
+const CROP_NOTE = /xitter-crop:(\d+),(\d+),(\d+),(\d+)$/;
+
+async function croppedGif(id: string, data: Buffer, image: Image): Promise<{ data: Buffer; image: Image }> {
+	const note = CROP_NOTE.exec(data.toString("latin1", Math.max(0, data.length - 64)));
+	if (!note) return { data, image };
+	const gif = data.subarray(0, data.length - note[0].length);
+	if (image.width < 1 || image.height < 1) return { data: gif, image };
+	const [left, top, width, height] = note.slice(1).map(Number);
+	const x = Math.min(left, image.width - 1);
+	const y = Math.min(top, image.height - 1);
+	const w = Math.max(1, Math.min(width, image.width - x));
+	const h = Math.max(1, Math.min(height, image.height - y));
+	if (x === 0 && y === 0 && w === image.width && h === image.height) return { data: gif, image };
+	const out = await cropGif(MEDIA_DIR, id, gif, { x, y, w, h });
+	const cropped = out && sniffImage(out);
+	return out && cropped ? { data: out, image: cropped } : { data: gif, image };
+}
+
 async function finalize(id: string, p: Pending): Promise<Response> {
 	pending.delete(id);
 	const parts = [...p.chunks].sort((a, b) => a[0] - b[0]).map((c) => c[1]);
-	const data = Buffer.concat(parts);
+	let data = Buffer.concat(parts);
 	if (data.length !== p.total) return uploadError("File size does not match the size announced at INIT.");
 	if (p.video) {
 		mkdirSync(MEDIA_DIR, { recursive: true });
@@ -106,10 +129,11 @@ async function finalize(id: string, p: Pending): Promise<Response> {
 		queueVideo(MEDIA_DIR, id);
 		return Response.json({ ...idFields(id), size: data.length, expires_after_secs: 86400, processing_info: { state: "pending", check_after_secs: 1 } });
 	}
-	const image = sniffImage(data);
+	let image = sniffImage(data);
 	if (!image) return uploadError("Unsupported file. Images only: JPEG, PNG, GIF or WebP.");
 	if (data.length > (image.mime === "image/gif" ? MAX_GIF : maxImage())) return uploadError("File is too large.");
 	mkdirSync(MEDIA_DIR, { recursive: true });
+	if (image.mime === "image/gif") ({ data, image } = await croppedGif(id, data, image));
 	writeFileSync(fileOf(id), data);
 	await sql`insert into media (id, user_id, kind, mime, size, width, height)
 		values (${id}::bigint, ${p.userId}::bigint, 'photo', ${image.mime}, ${data.length}, ${image.width}, ${image.height})`;

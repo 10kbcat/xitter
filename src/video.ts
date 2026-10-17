@@ -4,7 +4,7 @@
 // the client polls the upload STATUS command meanwhile.
 
 import { settings } from "./settings";
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "./db";
 
@@ -110,6 +110,21 @@ async function convert(dir: string, id: string) {
 		progress.delete(id);
 		rmSync(src, { force: true });
 		rmSync(tmp, { force: true });
+	}
+}
+
+// a cropped GIF avatar or banner (see media.ts); one palette for all frames
+export async function cropGif(dir: string, id: string, gif: Buffer, box: { x: number; y: number; w: number; h: number }): Promise<Buffer | undefined> {
+	if (!(await videoSupported())) return undefined;
+	const src = join(dir, `${id}.crop-in.gif`);
+	const out = join(dir, `${id}.crop.gif`);
+	try {
+		writeFileSync(src, gif);
+		const filter = `crop=${box.w}:${box.h}:${box.x}:${box.y},split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse`;
+		return (await run(["-i", src, "-filter_complex", filter, "-f", "gif", out], id, 0)) ? readFileSync(out) : undefined;
+	} finally {
+		rmSync(src, { force: true });
+		rmSync(out, { force: true });
 	}
 }
 

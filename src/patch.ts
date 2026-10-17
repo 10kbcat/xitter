@@ -41,6 +41,15 @@ const RULES: [RegExp, string][] = [
 	// cookie domain; a cookie scoped to the original domain is dropped by the browser
 	[/"\.x\.com"/g, `"${PUBLIC_HOSTNAME}"`],
 	[new RegExp(X_VAPID.replace(/[()[\]]/g, (c) => `\\${c}`), "g"), `new Uint8Array([${[...vapidPublicKey].join(",")}])`],
+	// The image resizer crops by drawing one frame on a canvas, so it refuses a
+	// GIF that needs a crop (any non-square avatar). Instead it sends the whole
+	// GIF with the crop box after the GIF trailer, where decoders don't look;
+	// media.ts crops every frame. A GIF over the size or dimension limits is
+	// still refused.
+	[
+		/(\{cropData:\w+,maxDimension:(\w+)=\w+,maxFileSize:(\w+)=\w+,targetQuality:\w+=\w+\}=\w+\|\|\{\},(\w+)=\w+\((\w+),\w+\);[^{}]*?)if\(\5\.isGif\)(return Promise\.reject\(new [\w.]+\("Gifs cannot be processed\.",\w+\.GIF_IS_TOO_LARGE\)\);)/g,
+		'$1if($5.isGif){if($5.size>$3||$5.width>$2||$5.height>$2)$6return Promise.resolve(new File([$5.fileHandle,"xitter-crop:"+[$4.left,$4.top,$4.width,$4.height].map(Math.round)],"image.gif",{type:"image/gif"}))}',
+	],
 ];
 
 // Only for the chat app's files: its own list of API hosts, which it sends the
