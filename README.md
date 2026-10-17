@@ -10,7 +10,7 @@ copy during setup, and it stays on that machine.
 ## What works
 
 - Posting, replies, quotes, reposts, likes, bookmarks (with folders), pinned
-  posts, highlights, @mentions and hashtags; editing posts, polls, scheduling,
+  posts, pinned replies, highlights, @mentions and hashtags; editing posts, polls, scheduling,
   places
 - Who can reply (everyone, followed accounts, verified, mentioned), post views,
   reposts, likes and quotes lists
@@ -38,7 +38,7 @@ copy during setup, and it stays on that machine.
   badges, roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements and an audit log
 
-Not built yet: Spaces and live video, topics and Moments, pinned replies,
+Not built yet: Spaces and live video, topics and Moments,
 saved searches, account notification bells, connected apps and login history,
 push notifications, a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set.

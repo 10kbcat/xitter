@@ -465,13 +465,22 @@ export const gridEntry = (posts: PostRow[], sortIndex: string, grid = GRID) => (
 });
 export const gridAppend = (posts: PostRow[], grid = GRID) => ({ type: "TimelineAddToModule", moduleEntryId: grid, moduleItems: gridItems(posts, grid) });
 
-// one reply shown as its own thread under the opened post
-export const replyEntry = (p: PostRow, sortIndex: string) => ({
+// One reply shown as its own thread under the opened post. `feedbackKey` points
+// at a TweetDetail responseObjects feedback action (the pin/unpin menu item).
+export const replyEntry = (p: PostRow, sortIndex: string, opts: { pinned?: boolean; feedbackKey?: string } = {}) => ({
 	content: {
 		__typename: "TimelineTimelineModule",
 		displayType: "VerticalConversation",
 		entryType: "TimelineTimelineModule",
-		items: [{ entryId: `conversationthread-${p.id}-tweet-${p.id}`, item: { itemContent: tweetItem(tweetResult(p)) } }],
+		items: [
+			{
+				entryId: `conversationthread-${p.id}-tweet-${p.id}`,
+				item: {
+					itemContent: tweetItem(tweetResult(p), opts.pinned ? { type: "TimelineGeneralContext", contextType: "ReplyPin", text: "Pinned" } : undefined),
+					...(opts.feedbackKey ? { feedbackInfo: { feedbackKeys: [opts.feedbackKey] } } : {}),
+				},
+			},
+		],
 		metadata: { conversationMetadata: { allTweetIds: [p.id], enableDeduplication: true } },
 	},
 	entryId: `conversationthread-${p.id}`,

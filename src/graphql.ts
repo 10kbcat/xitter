@@ -41,6 +41,8 @@ import {
 	repost,
 	setMark,
 	setPinned,
+	setPinnedReply,
+	pinnedReplyOf,
 	unrepost,
 } from "./posts";
 import { affiliatesOf, followList, suggestedUsers, userById, userByName, usersByIds } from "./users";
@@ -146,16 +148,26 @@ const home =
 const tweetDetail: Handler = async (viewer, vars) => {
 	const id = postId(vars, "focalTweetId");
 	const entries: unknown[] = [];
+	const feedbackActions: unknown[] = [];
 	// the whole conversation is returned at once, so a cursor request has nothing more
 	if (!vars.cursor) {
 		const focal = await getPost(viewer.id, id);
 		if (!focal) throw new PostError("No status found with that ID.", 144);
 		const above = focal.reply_to_id ? await ancestors(viewer.id, focal.reply_to_id) : [];
 		const below = await replies(viewer.id, id);
+		// a pinned reply leads the replies to the first post of a conversation
+		const pinned = focal.reply_to_id ? null : await pinnedReplyOf(id);
+		const at = below.findIndex((p) => p.id === pinned);
+		if (at > 0) below.unshift(...below.splice(at, 1));
+		const canPin = !focal.reply_to_id && focal.author.id === viewer.id;
 		let sort = BigInt(newId());
 		for (const p of above) entries.push(tweetEntry(p, (sort--).toString()));
 		entries.push(tweetEntry(focal, (sort--).toString()));
-		for (const p of below) entries.push(replyEntry(p, (sort--).toString()));
+		for (const p of below) {
+			const isPinned = p.id === pinned;
+			entries.push(replyEntry(p, (sort--).toString(), { pinned: isPinned, ...(canPin ? { feedbackKey: isPinned ? PIN_KEYS.Pinned : PIN_KEYS.Pinnable } : {}) }));
+		}
+		if (canPin) feedbackActions.push(...pinActions());
 	}
 	return {
 		data: {
@@ -167,9 +179,29 @@ const tweetDetail: Handler = async (viewer, vars) => {
 					{ type: "TimelineTerminateTimeline", direction: "Bottom" },
 				],
 				metadata: { scribeConfig: { page: "ranked_replies" } },
+				...(feedbackActions.length ? { responseObjects: { feedbackActions } } : {}),
 			},
 		},
 	};
+};
+
+// The reply menu's "Pin"/"Unpin" item: the client picks its own wording from
+// the pin state and calls PinReply/UnpinReply with the reply's id.
+const PIN_KEYS = { Pinnable: "reply-pin-pinnable", Pinned: "reply-pin-pinned" } as const;
+const pinActions = () =>
+	(["Pinnable", "Pinned"] as const).map((state) => ({
+		key: PIN_KEYS[state],
+		value: {
+			feedbackType: "RichBehavior",
+			hasUndoAction: false,
+			richBehavior: { type: "TimelineRichFeedbackBehaviorReplyPinState", replyPinState: state },
+			clientEventInfo: { component: "pinned_reply", element: state === "Pinned" ? "unpin" : "pin" },
+		},
+	}));
+
+const pinReply = (on: boolean): Handler => async (viewer, vars) => {
+	const done = isId(vars.conversationId) && isId(vars.tweetId) && (await setPinnedReply(viewer.id, vars.conversationId, vars.tweetId, on));
+	return { data: { [on ? "create_conversation_pinned_tweet" : "delete_conversation_pinned_tweet"]: { success: !!done } } };
 };
 
 const bookmarks: Handler = async (viewer, vars) => {
@@ -549,6 +581,8 @@ const handlers: Record<string, Handler> = {
 	},
 	UserTweets: profileFeed(false, "both"),
 	UserRepostsTimeline: profileFeed(false, "reposts"),
+	PinReply: pinReply(true),
+	UnpinReply: pinReply(false),
 	PinTweet: async (v, vars) => {
 		if (!(await setPinned(v.id, postId(vars)))) throw new PostError("You can only pin your own posts.", 144);
 		return { data: { pin_one_tweet: { result: "Done" } } };

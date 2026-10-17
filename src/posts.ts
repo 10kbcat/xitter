@@ -376,6 +376,25 @@ export async function setPinned(userId: string, postId: string | null): Promise<
 	return rows.length > 0;
 }
 
+// The author of a conversation's first post may pin one direct reply to it.
+export async function setPinnedReply(userId: string, conversationId: string, replyId: string, on: boolean): Promise<boolean> {
+	if (!on) {
+		const rows = await sql`update posts set pinned_reply_id = null
+			where id = ${conversationId}::bigint and user_id = ${userId}::bigint and pinned_reply_id = ${replyId}::bigint returning id`;
+		return rows.length > 0;
+	}
+	const rows = await sql`update posts set pinned_reply_id = ${replyId}::bigint
+		where id = ${conversationId}::bigint and user_id = ${userId}::bigint and reply_to_id is null
+			and exists (select 1 from posts r where r.id = ${replyId}::bigint and r.reply_to_id = ${conversationId}::bigint and not r.hidden)
+		returning id`;
+	return rows.length > 0;
+}
+
+export async function pinnedReplyOf(postId: string): Promise<string | null> {
+	const [row] = await sql`select pinned_reply_id::text as id from posts where id = ${postId}::bigint`;
+	return row?.id ?? null;
+}
+
 type Mark = "likes" | "bookmarks";
 
 export async function setMark(table: Mark, userId: string, postId: string, on: boolean) {

@@ -104,6 +104,7 @@ const HOST_SWITCHES = ["responsive_web_media_upload_host"];
 const clientSwitches = (config: Record<string, unknown>) => ({
 	...Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k))),
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
+	responsive_web_pinned_replies_enabled: { value: true },
 	responsive_web_edit_tweet_enabled: { value: true },
 	responsive_web_edit_tweet_composition_enabled: { value: true },
 	responsive_web_edit_tweet_perspective_enabled: { value: true },
