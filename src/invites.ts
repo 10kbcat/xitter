@@ -44,8 +44,11 @@ export async function usernameState(raw: string): Promise<"available" | "taken" 
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-// `source`, `country`: the app and country of the sign-up, for "About this account"
-export async function signUp(f: { code: string; screenName: string; name: string; password: string; email: string; flag?: string; source?: string | null; country?: string | null }): Promise<string> {
+type SignupForm = { code: string; screenName: string; name: string; password: string; email: string; flag?: string };
+
+// The checks sign-up makes before anything is stored, so the emailed-code step
+// (onboarding.ts) can refuse a bad form before sending a code.
+export async function checkSignup(f: SignupForm) {
 	const email = f.email.trim().toLowerCase();
 	if (!EMAIL.test(email) || email.length > 254) throw new SignupError("Enter a valid email address.");
 	const screenName = f.screenName.trim().replace(/^@/, "");
@@ -54,10 +57,22 @@ export async function signUp(f: { code: string; screenName: string; name: string
 	if (RESERVED.has(screenName.toLowerCase())) throw new SignupError("That username is reserved.");
 	if ([...name].length > 50) throw new SignupError("Names are at most 50 characters.");
 	if (f.password.length < 8) throw new SignupError("Passwords are at least 8 characters.");
+	if ((await getSetting("signup_mode")) === "closed") throw new SignupError("Sign-up is closed on this instance.");
+	if ((await sql`select 1 from users where lower(screen_name) = lower(${screenName})`).length) throw new SignupError("That username is taken.");
+	if ((await sql`select 1 from users where lower(email) = ${email}`).length) throw new SignupError("That email is already used by another account.");
+	return { email, screenName, name };
+}
+
+// `source`, `country`: the app and country of the sign-up, for "About this account".
+// `passwordHash`: the password, already hashed, when the form was checked and
+// kept while the emailed code was entered; `emailVerified` then too.
+export async function signUp(
+	f: Omit<SignupForm, "password"> & { password?: string; passwordHash?: string; emailVerified?: boolean; source?: string | null; country?: string | null },
+): Promise<string> {
+	const { email, screenName, name } = await checkSignup({ ...f, password: f.passwordHash ? "--------" : (f.password ?? "") });
 	const flag = isFlag(f.flag) ? f.flag : null;
 	const mode = await getSetting("signup_mode");
-	if (mode === "closed") throw new SignupError("Sign-up is closed on this instance.");
-	const hash = await Bun.password.hash(f.password);
+	const hash = f.passwordHash ?? (await Bun.password.hash(f.password ?? ""));
 	const code = normalizeCode(f.code);
 	const id = newId();
 	await sql.begin(async (tx) => {
@@ -72,8 +87,8 @@ export async function signUp(f: { code: string; screenName: string; name: string
 				: await tx`update invites set uses = uses + 1
 					where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now()) returning code, org_id`;
 		if (!invite && !(mode === "open" && !code)) throw new SignupError("That invite code is not valid or has been used up.");
-		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag, email, signup_source, signup_country)
-			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag}, ${email}, ${f.source ?? null}, ${f.country ?? null})`;
+		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag, email, email_verified, signup_source, signup_country)
+			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag}, ${email}, ${!!f.emailVerified}, ${f.source ?? null}, ${f.country ?? null})`;
 		// an organisation's invite makes the new account its affiliate
 		if (invite?.org_id) await tx`insert into affiliations (org_id, user_id) values (${invite.org_id}::bigint, ${id}::bigint)`;
 		// the accounts the admin panel says everyone starts out following

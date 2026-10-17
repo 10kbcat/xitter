@@ -37,7 +37,8 @@ copy during setup, and it stays on that machine.
   who let themselves be found by email
 - Direct messages, end-to-end encrypted, with key backup
 - Community Notes
-- Invite-only sign-up with a required email, pride flag badges, organisations
+- Invite-only sign-up with a required email (proven with a mailed 6-digit code
+  when mail is set up; Settings > Email changes it by a confirmation link), pride flag badges, organisations
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
   (reactivates on sign-in within 30 days), data archive, email notification
@@ -53,7 +54,7 @@ copy during setup, and it stays on that machine.
   feature switches, announcements, topics, Explore cards and an audit log
 
 Not built yet: Spaces and live video, Moments, signing in other apps (Connected
-apps stays empty), a verified-email code at sign-up. Email is sent through
+apps stays empty). Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set; Admin > Email sends
 a test mail (it shows Resend's answer, e.g. an unverified domain) and lists
 every mail tried.

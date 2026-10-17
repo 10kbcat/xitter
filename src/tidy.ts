@@ -147,6 +147,8 @@ export const TIDY_SCRIPT = `(function(){
 	function ownScreens(){
 		var p=location.pathname;
 		if(p.indexOf("/i/flow/signup")===0)location.replace("/");
+		// Settings > Email's "Update email address": our page, not X's flow
+		if(p.indexOf("/i/flow/add_email")===0)location.replace("/account/email");
 	}
 	// the signed-out footer ends with X's copyright: the instance's name and source instead
 	function footer(){

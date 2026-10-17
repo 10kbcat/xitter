@@ -18,6 +18,7 @@ import { dataExportRoute } from "./data-export";
 import { addressBook, deleteContacts, uploadContacts } from "./contacts";
 import { exploreSettings, searchLocations, setExploreSettings } from "./explore-settings";
 import { loginHistory } from "./login-history";
+import { emailInfo, resendConfirmation } from "./email-address";
 import { pushSettingsRoute } from "./push";
 import { answerRequest, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 
@@ -154,9 +155,11 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	const exported = await dataExportRoute(method, path, viewer, req);
 	if (exported) return exported;
 	// Settings pages that only read: email on file, personalisation (we keep none)
-	if (method === "GET" && path === "/1.1/users/email_phone_info.json") {
-		const [u] = await sql`select email from users where id = ${viewer.id}::bigint`;
-		return Response.json({ email: u?.email ?? null, email_verified: !!u?.email, phone_number: null, phone_verified: false });
+	// the client keeps this as its "devices" data: a list of emails, confirmed or not
+	if (method === "GET" && path === "/1.1/users/email_phone_info.json") return Response.json(await emailInfo(viewer.id));
+	if (method === "POST" && path === "/1.1/account/resend_confirmation_email.json") {
+		const problem = await resendConfirmation(viewer);
+		return problem ? Response.json({ errors: [{ code: 214, message: problem }] }, { status: 400 }) : Response.json({});
 	}
 	if (method === "GET" && path === "/1.1/account/personalization/p13n_preferences.json")
 		return Response.json({ interest_preferences: { disabled_interests: [], partner_interests: [] }, personalization_enabled: false });

@@ -17,9 +17,11 @@ import { answerChallenge, startChallenge } from "./two-factor";
 import { sql } from "./db";
 import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
-import { CODE_DIGITS, SignupError, normalizeCode, signUp, usernameState } from "./invites";
+import { CODE_DIGITS, SignupError, checkSignup, normalizeCode, signUp, usernameState } from "./invites";
 import { requestReset } from "./password-reset";
 import { platformSource } from "./platforms";
+import { mailEnabled } from "./mail";
+import { checkSignupCode, sendSignupCode } from "./email-address";
 import { countryFromHeader } from "./countries";
 import { settings } from "./settings";
 
@@ -149,6 +151,13 @@ const TEXTS: Record<string, () => string> = {
 	"Choose a name, username, and password.": () => `Welcome to ${settings().instance_name}. Choose a name, username, and password.`,
 };
 
+// sign-up's emailed code, on the same six-box screen
+const emailCodeTexts = (email: string): Record<string, string> => ({
+	"We sent you a security code": "We sent you a code",
+	"The code was sent to your device": `Enter it below to confirm ${email}.`,
+	"Didn't receive a code? ": "",
+});
+
 const TWO_FACTOR_TEXTS: Record<string, string> = {
 	"We sent you a security code": "Enter your authentication code",
 	"The code was sent to your device": "Open your authenticator app and enter the 6-digit code, or one of your backup codes.",
@@ -262,6 +271,26 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		}
 		const s = await pending(token);
 		if (!s) return respond(fieldError("code", STALE));
+		// the code mailed at sign-up: the account is made once it's right
+		const [held] = await sql`select pending from signup_sessions where token = ${token}::uuid and pending is not null`;
+		if (held) {
+			const result = await checkSignupCode(token, String(f.code ?? ""));
+			if (result !== "ok") return respond(fieldError("code", result === "wrong" ? "That code isn't right." : "That code has expired. Go back and start again."));
+			const p = held.pending;
+			let userId: string;
+			try {
+				userId = await signUp({ code: s.code, screenName: p.screenName, name: p.name, email: p.email, passwordHash: p.passwordHash, emailVerified: true, source: p.source, country: p.country });
+			} catch (e) {
+				if (e instanceof SignupError) return respond(fieldError("code", e.message));
+				throw e;
+			}
+			await sql`delete from signup_sessions where token = ${token}::uuid`;
+			const session = await startSession(userId);
+			const headers = new Headers();
+			for (const c of await signInCookies(req, session)) headers.append("set-cookie", c);
+			headers.append("set-cookie", "xitter_invite=; Path=/; Max-Age=0");
+			return respond(fill(templates.success, { user_id: userId, username: p.screenName }), false, headers);
+		}
 		const code = await validCode(String(f.code ?? ""));
 		if (!code) return respond(fieldError("code", "That invite code is not valid or has been used up."));
 		await sql`update signup_sessions set code = ${code} where token = ${token}::uuid`;
@@ -272,6 +301,26 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		const token = String(f.session_token ?? "");
 		const s = await pending(token);
 		if (!s) return respond(fieldError("username", STALE));
+		const fieldOf = (e: Error) => (/email/i.test(e.message) ? "email" : /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : "username");
+		// with mail set up, the address is proven first: the checked form waits for the code
+		if (mailEnabled()) {
+			const given = { code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? ""), email: String(f.email ?? "") };
+			let checked: Awaited<ReturnType<typeof checkSignup>>;
+			try {
+				checked = await checkSignup(given);
+			} catch (e) {
+				if (!(e instanceof SignupError)) throw e;
+				return respond(fieldError(fieldOf(e), e.message));
+			}
+			const held = { ...checked, passwordHash: await Bun.password.hash(given.password), source: await platformSource(req), country: countryFromHeader(req.headers.get("cf-ipcountry")) ?? null };
+			await sql`update signup_sessions set pending = ${JSON.stringify(held)}::text::jsonb where token = ${token}::uuid`;
+			try {
+				await sendSignupCode(token, checked.email);
+			} catch (e: any) {
+				return respond(fieldError("email", `We couldn't send a code to that address: ${e.message}`));
+			}
+			return respond(fill(templates.twoFactor, { session_token: token }, emailCodeTexts(checked.email)));
+		}
 		try {
 			await signUp({
 				code: s.code,

@@ -761,3 +761,19 @@ create index if not exists push_subscriptions_user_idx on push_subscriptions (us
 
 -- X's translator globe after the name: translator (blue), moderator (gold), approver (yellow)
 alter table users add column if not exists translator text check (translator in ('translator', 'moderator', 'approver'));
+
+-- email-address.ts: whether the address was proven (a sign-up code or a confirmation link)
+alter table users add column if not exists email_verified boolean not null default false;
+create table if not exists email_confirmations (
+	token_hash text primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	email text not null,
+	used boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create index if not exists email_confirmations_user_idx on email_confirmations (user_id);
+-- a sign-up waiting for its emailed code keeps its checked form here (password hashed)
+alter table signup_sessions add column if not exists pending jsonb;
+alter table signup_sessions add column if not exists email_code_hash text;
+alter table signup_sessions add column if not exists email_code_at timestamptz;
+alter table signup_sessions add column if not exists email_attempts integer not null default 0;

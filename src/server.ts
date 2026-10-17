@@ -29,6 +29,7 @@ import { cardImage } from "./explore-cards";
 import { rememberIp } from "./login-history";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
+import { emailRoute } from "./email-address";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -194,6 +195,8 @@ const server = Bun.serve({
 		}
 		// people sign in and up on the signed-out home page; an invite link's code
 		// is kept for the dialog, which then skips asking for it
+		// X's own add-email flow: ours is a page
+		if (p === "/i/flow/add_email") return Response.redirect("/account/email", 302);
 		if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
 			const headers = new Headers({ location: "/" });
 			const code = url.searchParams.get("code");
@@ -215,6 +218,7 @@ const server = Bun.serve({
 		}
 		if (p === "/account/reset") return resetRoute(req, url);
 		if (p === "/account/forgot") return forgotRoute(req, url);
+		if (p === "/account/email" || p === "/account/email/confirm") return emailRoute(req, url, viewer);
 		if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
 		if (p === "/account/notices" && viewer) return noticesPage(viewer);
 		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
