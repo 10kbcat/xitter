@@ -22,7 +22,8 @@ copy during setup, and it stays on that machine.
 - Lists (with banners) and communities (rules, members, moderation tools,
   community label on posts)
 - Home timeline: a ranked "For you" and a chronological "Following"
-- Notifications with unread counts
+- Notifications with unread counts; the profile bell (new posts from that
+  account arrive as notifications) and turning an account's reposts off
 - Search with X's operators, trends, Explore
 - Topics: staff define them with keywords; people follow them from "Topics to
   follow" or a post's menu, and "For you" brings in and labels matching posts
@@ -41,7 +42,7 @@ copy during setup, and it stays on that machine.
   feature switches, announcements, topics and an audit log
 
 Not built yet: Spaces and live video, Moments,
-saved searches, account notification bells, connected apps and login history,
+saved searches, connected apps and login history,
 push notifications, a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set.
 

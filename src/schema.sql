@@ -652,3 +652,19 @@ create table if not exists topic_not_interested (
 	primary key (user_id, topic_id)
 );
 create index if not exists topic_not_interested_topic_idx on topic_not_interested (topic_id);
+
+-- the bell on a profile: tell the user about every new post of target_id
+create table if not exists post_notifications (
+	user_id bigint not null references users (id) on delete cascade,
+	target_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (user_id, target_id)
+);
+create index if not exists post_notifications_target_idx on post_notifications (target_id);
+-- "Turn off reposts": target_id's reposts stay out of user_id's home feeds
+create table if not exists repost_mutes (
+	user_id bigint not null references users (id) on delete cascade,
+	target_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (user_id, target_id)
+);

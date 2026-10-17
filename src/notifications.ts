@@ -1,7 +1,7 @@
 // Notifications, worked out from what already happened instead of being
 // stored: likes and reposts of the viewer's posts (grouped per post), new
-// followers (grouped per day), and replies, quotes and mentions (shown as the
-// posts themselves). Entries sort by time in milliseconds, which is also what
+// followers (grouped per day), new posts from accounts the viewer rang the bell
+// for, and replies, quotes and mentions (shown as the posts themselves). Entries sort by time in milliseconds, which is also what
 // the cursors and the read marker hold.
 
 import { blockedFor, hasMutedWord, mutedFor, suspendedFor } from "./blocks";
@@ -17,7 +17,7 @@ import { usersByIds } from "./users";
 // how many names a grouped notification lists before "and N others"
 const SHOWN_USERS = 3;
 
-type Group = { kind: "like" | "repost" | "follow"; key: string; at: number; users: string[]; total: number; postId?: string };
+type Group = { kind: "like" | "repost" | "follow" | "bell"; key: string; at: number; users: string[]; total: number; postId?: string };
 type Mention = { kind: "post"; postId: string; at: number; reason: "reply" | "quote" | "mention" };
 // a message, warning or strike from staff, or the decision on an appeal
 type Staff = { kind: "staff"; key: string; at: number; text: string };
@@ -57,6 +57,14 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			having max(f.created_at) >= ${lo} and max(f.created_at) < ${hi}
 			order by at desc limit ${opts.limit}`;
 		for (const r of follows) out.push({ kind: "follow", key: `follow-${ms(r.day)}`, at: ms(r.at), users: r.users.map(String), total: r.total });
+
+		// posts made after the bell was rung; replies don't count, as on X
+		const rung = await sql`select p.id, p.user_id, p.created_at as at from posts p
+			join post_notifications pn on pn.target_id = p.user_id and pn.user_id = ${viewerId}::bigint
+			where p.reply_to_id is null and not p.hidden and p.created_at > pn.created_at and p.user_id not in ${hidden}
+				and p.created_at >= ${lo} and p.created_at < ${hi}
+			order by p.created_at desc limit ${opts.limit}`;
+		for (const r of rung) out.push({ kind: "bell", key: `bell-${r.id}`, at: ms(r.at), users: [String(r.user_id)], total: 1, postId: String(r.id) });
 
 		const team = `the ${settings().instance_name} team`;
 		const messages = await sql`select id, kind, body, created_at as at from staff_messages
@@ -99,14 +107,15 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 	return out.slice(0, opts.limit);
 }
 
-const ICON = { like: "heart_icon", repost: "retweet_icon", follow: "person_icon" } as const;
-const VERB = { like: "liked your post", repost: "reposted your post", follow: "followed you" } as const;
+const ICON = { like: "heart_icon", repost: "retweet_icon", follow: "person_icon", bell: "bell_icon" } as const;
+const VERB = { like: "liked your post", repost: "reposted your post", follow: "followed you", bell: "" } as const;
 
 // "A", "A and B", "A, B and C", "A and 5 others" with each name linked to its account
-function message(users: User[], total: number, verb: string) {
+function message(users: User[], total: number, verb: string, prefix = "") {
 	const names = users.map((u) => u.name || u.screen_name);
 	let parts: (string | User)[];
-	if (total === 1) parts = [users[0]];
+	if (prefix) parts = [prefix, users[0]];
+	else if (total === 1) parts = [users[0]];
 	else if (total === 2 && users.length >= 2) parts = [users[0], " and ", users[1]];
 	else if (total === 3 && users.length >= 3) parts = [users[0], ", ", users[1], " and ", users[2]];
 	else parts = [users[0], ` and ${total - 1} others`];
@@ -122,7 +131,7 @@ function message(users: User[], total: number, verb: string) {
 		entities.push({ fromIndex: text.length, toIndex: text.length + name.length, ref });
 		text += name;
 	}
-	text += ` ${verb}`;
+	if (verb) text += ` ${verb}`;
 	return { rtl: false, text, entities };
 }
 
@@ -132,7 +141,7 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 	if (!from.length || (g.postId && !post)) return undefined;
 	// the client opens only x.com and twitter.com addresses inside the app (as
 	// their path); any other address, ours included, opens in a new tab
-	const url = post ? `${IN_APP}/${viewer.screen_name}/status/${post.id}` : `${IN_APP}/${from[0].screen_name}`;
+	const url = post ? `${IN_APP}/${post.author.screen_name}/status/${post.id}` : `${IN_APP}/${from[0].screen_name}`;
 	return {
 		entryId: `notification-${g.key}`,
 		sortIndex: String(g.at),
@@ -144,7 +153,7 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 				itemType: "TimelineNotification",
 				id: g.key,
 				notification_icon: ICON[g.kind],
-				rich_message: message(from, g.total, VERB[g.kind]),
+				rich_message: g.kind === "bell" ? message(from, 1, "", "New post from ") : message(from, g.total, VERB[g.kind]),
 				notification_url: { url, urlType: "ExternalUrl" },
 				template: {
 					__typename: "TimelineNotificationAggregateUserActions",
@@ -154,7 +163,10 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 				// a number: the client passes it straight to Date
 				timestamp_ms: g.at,
 			},
-			clientEventInfo: { component: "urt", element: `user_${g.kind === "follow" ? "followed" : g.kind === "like" ? "liked_tweet" : "retweeted_tweet"}` },
+			clientEventInfo: {
+				component: "urt",
+				element: g.kind === "bell" ? "device_follow_tweet_notification" : `user_${g.kind === "follow" ? "followed" : g.kind === "like" ? "liked_tweet" : "retweeted_tweet"}`,
+			},
 		},
 	};
 }

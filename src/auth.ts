@@ -49,6 +49,9 @@ export type User = {
 		blocking?: boolean;
 		blockedBy?: boolean;
 		muting?: boolean;
+		// the viewer's bell for this account, and whether they turned its reposts off
+		notifying?: boolean;
+		repostsMuted?: boolean;
 	};
 };
 

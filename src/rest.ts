@@ -15,7 +15,33 @@ import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
 import { accountSettingsRoute, changeUsername, revokeSessionsRoute } from "./account-settings";
 import { dataExportRoute } from "./data-export";
-import { answerRequest, pendingRequests, setFollow, setProtected, userById, userByName, usersByIds } from "./users";
+import { answerRequest, pendingRequests, setFollow, setProtected, updateFriendship, userById, userByName, usersByIds } from "./users";
+
+// friendships/show's shape, from the viewer's side (source) and the other account's (target)
+async function relationship(viewer: Viewer, targetId: string) {
+	const u = await userById(viewer.id, targetId);
+	const st = u?.stats;
+	return {
+		relationship: {
+			source: {
+				id_str: viewer.id,
+				screen_name: viewer.screen_name,
+				following: !!st?.followedByViewer,
+				followed_by: !!st?.followsViewer,
+				following_requested: !!st?.requestedByViewer,
+				notifications_enabled: !!st?.notifying,
+				want_retweets: !st?.repostsMuted,
+				blocking: !!st?.blocking,
+				blocked_by: !!st?.blockedBy,
+				muting: !!st?.muting,
+				can_dm: false,
+				all_replies: false,
+				marked_spam: false,
+			},
+			target: { id_str: targetId, screen_name: u?.screen_name ?? "", following: !!st?.followsViewer, followed_by: !!st?.followedByViewer, following_requested: false },
+		},
+	};
+}
 
 const profileError = (message: string) => Response.json({ errors: [{ code: 120, message }] }, { status: 403 });
 
@@ -144,6 +170,23 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const user = await userById(viewer.id, target);
 		if (!user) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
 		return Response.json(legacyUser(user));
+	}
+	// the profile bell (device=) and "Turn off reposts" (retweets=)
+	if (method === "POST" && /^\/1\.1\/friendships\/update(?:\.json)?$/.test(path)) {
+		const f = await form(req);
+		const target = f.id ?? f.user_id ?? (f.screen_name ? (await userByName(viewer.id, f.screen_name))?.id : undefined);
+		const flag = (v: string | undefined) => (v === undefined ? undefined : v === "true" || v === "1");
+		if (!isId(target) || !(await updateFriendship(viewer.id, target, { device: flag(f.device), retweets: flag(f.retweets) })))
+			return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		return Response.json(await relationship(viewer, target));
+	}
+	// the account menu asks whether reposts are on before offering to turn them off
+	if (method === "GET" && /^\/1\.1\/friendships\/(list|show)(?:\.json)?$/.test(path)) {
+		const q = new URL(req.url).searchParams;
+		const target = q.get("user_id") ?? q.get("target_id") ?? (q.get("screen_name") ? (await userByName(viewer.id, q.get("screen_name")!))?.id : undefined);
+		if (!isId(target)) return Response.json({ errors: [{ code: 50, message: "User not found." }] }, { status: 404 });
+		const r = await relationship(viewer, target);
+		return Response.json(path.includes("show") ? r : [r]);
 	}
 	// accounts by id or handle, up to 100 (the follower requests list asks for these)
 	if (path === "/1.1/users/lookup.json" && (method === "GET" || method === "POST")) {

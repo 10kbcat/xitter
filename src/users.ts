@@ -28,7 +28,9 @@ export const userCols = (viewerId: string) => sql`
 	exists (select 1 from follow_requests x where x.requester_id = ${viewerId}::bigint and x.target_id = u.id) as a_requested,
 	exists (select 1 from blocks x where x.blocker_id = ${viewerId}::bigint and x.blocked_id = u.id) as a_blocking,
 	exists (select 1 from blocks x where x.blocker_id = u.id and x.blocked_id = ${viewerId}::bigint) as a_blocked_by,
-	exists (select 1 from mutes x where x.muter_id = ${viewerId}::bigint and x.muted_id = u.id) as a_muting`;
+	exists (select 1 from mutes x where x.muter_id = ${viewerId}::bigint and x.muted_id = u.id) as a_muting,
+	exists (select 1 from post_notifications x where x.user_id = ${viewerId}::bigint and x.target_id = u.id) as a_notifying,
+	exists (select 1 from repost_mutes x where x.user_id = ${viewerId}::bigint and x.target_id = u.id) as a_reposts_muted`;
 
 export function toUser(r: any): User {
 	return {
@@ -64,6 +66,8 @@ export function toUser(r: any): User {
 			blocking: r.a_blocking,
 			blockedBy: r.a_blocked_by,
 			muting: r.a_muting,
+			notifying: !!r.a_notifying,
+			repostsMuted: !!r.a_reposts_muted,
 		},
 	};
 }
@@ -165,4 +169,15 @@ export async function suggestedUsers(viewerId: string, limit = 20, exclude: stri
 			(select count(*) from follows x where x.followee_id = u.id) desc, u.created_at desc
 		limit ${limit}`;
 	return rows.map(toUser);
+}
+
+// The profile bell (device) and "Turn off reposts" (retweets), both set
+// through friendships/update.
+export async function updateFriendship(viewerId: string, targetId: string, change: { device?: boolean; retweets?: boolean }): Promise<boolean> {
+	if (targetId === viewerId || (await isBlockedEitherWay(viewerId, targetId))) return false;
+	if (change.device === true) await sql`insert into post_notifications (user_id, target_id) values (${viewerId}::bigint, ${targetId}::bigint) on conflict do nothing`;
+	if (change.device === false) await sql`delete from post_notifications where user_id = ${viewerId}::bigint and target_id = ${targetId}::bigint`;
+	if (change.retweets === false) await sql`insert into repost_mutes (user_id, target_id) values (${viewerId}::bigint, ${targetId}::bigint) on conflict do nothing`;
+	if (change.retweets === true) await sql`delete from repost_mutes where user_id = ${viewerId}::bigint and target_id = ${targetId}::bigint`;
+	return true;
 }
