@@ -21,7 +21,7 @@ const select = (viewerId: string) => sql`
 		exists (select 1 from posts r where r.id = p.conversation_id and r.reply_policy is not null and r.user_id <> ${viewerId}::bigint and not (
 			(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${viewerId}::bigint))
 			or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${viewerId}::bigint))
-			or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${viewerId}::bigint and x.verified_type is not null))
+			or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${viewerId}::bigint and (x.verified_type is not null or exists (select 1 from affiliations af where af.user_id = x.id))))
 		)) as reply_limited,
 		(select cr.reply_policy from posts cr where cr.id = p.conversation_id) as conversation_policy,
 		(select cu.screen_name from posts cr join users cu on cu.id = cr.user_id where cr.id = p.conversation_id) as conversation_owner,
@@ -336,7 +336,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		const [limited] = await sql`select exists (select 1 from posts r where r.id = ${conversationId}::bigint and r.reply_policy is not null and r.user_id <> ${userId}::bigint and not (
 				(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${userId}::bigint))
 				or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${userId}::bigint))
-				or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${userId}::bigint and x.verified_type is not null)))) as no`;
+				or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${userId}::bigint and (x.verified_type is not null or exists (select 1 from affiliations af where af.user_id = x.id)))))) as no`;
 		if (limited.no) throw new PostError("The author of the original post limited who can reply to it.", 433);
 	}
 	if (opts.quoteId) {

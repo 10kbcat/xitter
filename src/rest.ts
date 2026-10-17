@@ -6,7 +6,7 @@ import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKey
 import { sql } from "./db";
 import { isFlag } from "./flags";
 import { isId } from "./ids";
-import { legacyUser } from "./model";
+import { isVerified, legacyUser } from "./model";
 import { markSeen } from "./notifications";
 import { PollError, createCard, vote } from "./polls";
 import { placeById, searchPlaces } from "./places";
@@ -243,7 +243,7 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 			num_results: users.size + tags.length,
 			users: [...users.values()].map((u) => ({
 				...legacyUser(u),
-				ext_is_blue_verified: u.verified_type !== null,
+				ext_is_blue_verified: isVerified(u),
 				social_context: { following: u.stats?.followedByViewer ?? false, followed_by: u.stats?.followsViewer ?? false },
 			})),
 			topics: tags.map((topic) => ({ topic, rounded_score: 0, tokens: [{ token: topic }], inline: false, result_context: { display_string: "", types: [] } })),

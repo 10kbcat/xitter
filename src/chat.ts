@@ -103,7 +103,7 @@ async function hasKey(userIds: string[]): Promise<Set<string>> {
 function verificationOf(u: User) {
 	return {
 		__typename: "UserVerification",
-		is_blue_verified: u.verified_type === "blue",
+		is_blue_verified: u.verified_type === "blue" || (!u.verified_type && !!u.org),
 		is_verified_organization: u.verified_type === "business",
 		is_verified_organization_affiliate: !!u.org,
 		verified: false,

@@ -83,13 +83,17 @@ check("reinstated: can sign in again", !!t);
 // organisations
 check("the organisation is listed", (await a.admin("orgs")).orgs?.some((x: any) => x.id === org.id));
 await a.admin("addAffiliate", { orgId: org.id, screen_name: targetName });
-const label = (await o.get("UserByScreenName", { screen_name: targetName })).data.user.result.affiliates_highlighted_label?.label;
+const affiliate = (await o.get("UserByScreenName", { screen_name: targetName })).data.user.result;
+const label = affiliate.affiliates_highlighted_label?.label;
 check("an affiliate shows the organisation's badge", label?.description && label?.url?.url?.includes(orgName), label);
+check("and X's checkmark", affiliate.is_blue_verified === true);
 const orgUser = (await t.get("UserByScreenName", { screen_name: orgName })).data.user.result;
 check("the organisation counts its affiliates", orgUser.business_account?.affiliates_count >= 1, orgUser.business_account);
 check("and lists them on its Affiliates tab", userIds((await t.get("UserBusinessProfileTeamTimeline", { userId: org.id, count: 20 })).data.user.result.timeline.timeline).includes(target.id));
 await a.admin("removeAffiliate", { orgId: org.id, userId: target.id });
-check("removed affiliates lose the badge", !(await o.get("UserByScreenName", { screen_name: targetName })).data.user.result.affiliates_highlighted_label?.label?.url);
+const removed = (await o.get("UserByScreenName", { screen_name: targetName })).data.user.result;
+check("removed affiliates lose the badge", !removed.affiliates_highlighted_label?.label?.url);
+check("and the checkmark", removed.is_blue_verified === false);
 
 // invites and sign-up mode
 const { codes } = await a.admin("createInvite", { count: 1, uses: 1, orgId: org.id });

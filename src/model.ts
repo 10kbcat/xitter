@@ -30,6 +30,10 @@ export function apiDate(d: Date): string {
 
 const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toString("base64");
 
+// Affiliates of an organisation wear X's checkmark next to the organisation's
+// badge, as on X, even without a badge of their own.
+export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
+
 function verification(u: User) {
 	if (u.verified_type === "business") return { verified: false, verified_type: "Business" };
 	if (u.verified_type === "government") return { verified: false, verified_type: "Government" };
@@ -84,7 +88,7 @@ export function userResult(u: User) {
 		follow_request_sent: !!u.stats?.requestedByViewer,
 		has_graduated_access: true,
 		id: globalId("User", u.id),
-		is_blue_verified: u.verified_type !== null,
+		is_blue_verified: isVerified(u),
 		location: { location: u.location },
 		media_permissions: { can_media_tag: true },
 		notifications_settings: { notifications_enabled: false },
@@ -142,7 +146,7 @@ export function legacyUser(u: User) {
 		statuses_count: u.stats?.posts ?? 0,
 		url: u.website ?? "",
 		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
-		is_blue_verified: u.verified_type !== null,
+		is_blue_verified: isVerified(u),
 		...(u.verified_type === "business" ? { verified_type: "Business" } : {}),
 		...(u.verified_type === "government" ? { verified_type: "Government" } : {}),
 		super_follow_eligible: false,
