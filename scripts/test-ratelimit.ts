@@ -41,6 +41,13 @@ const body = refused ? await refused.json() : undefined;
 check(body?.errors?.[0]?.code === 88, "with X's code 88", body);
 check(Number(refused?.headers.get("x-rate-limit-remaining")) === 0 && Number(refused?.headers.get("x-rate-limit-reset")) > Date.now() / 1000, "and the x-rate-limit headers");
 
+// the client's own background posts (event logging) don't use up writes:
+// more of them than the write limit, then a real write still goes through
+for (let i = 0; i < RULES.write.limit + 100; i++)
+	await fetch(`${origin}/i/api/1.1/flow/timeline.json`, { method: "POST", headers: { cookie: headers.cookie, "x-csrf-token": headers["x-csrf-token"] }, body: "log=x" });
+const write = await gql("DeleteTweet", { tweet_id: made.pop()! });
+check(write.status === 200, "background event logging doesn't use up the write limit", write.status);
+
 // other buckets are untouched: a like still works
 const like = await gql("FavoriteTweet", { tweet_id: made[0] });
 check(like.status === 200, "a like still goes through", like.status);

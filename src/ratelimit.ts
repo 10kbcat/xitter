@@ -50,8 +50,11 @@ export function hit(bucket: Bucket, who: string): Hit {
 	const now = Date.now();
 	let w = windows.get(key);
 	if (!w || w.reset <= now) windows.set(key, (w = { count: 0, reset: now + window }));
+	// a refused request isn't counted: a client retrying while limited would
+	// otherwise keep its window full for good
+	if (w.count >= limit) return { ok: false, limit, remaining: 0, reset: w.reset };
 	w.count++;
-	return { ok: w.count <= limit, limit, remaining: Math.max(0, limit - w.count), reset: w.reset };
+	return { ok: true, limit, remaining: limit - w.count, reset: w.reset };
 }
 
 export const limitHeaders = (h: Hit) => ({
@@ -67,10 +70,16 @@ const POST_OPS = /^(CreateTweet|CreateNoteTweet|CreateScheduledTweet|CreateDraft
 const ENGAGE_OPS = /^(FavoriteTweet|UnfavoriteTweet|CreateRetweet|DeleteRetweet|CreateBookmark|DeleteBookmark|bookmarkTweetToFolder|PinTweet|UnpinTweet)$/;
 const ENGAGE_REST = /^\/1\.1\/(friendships\/(create|destroy)|favorites\/(create|destroy)|statuses\/(retweet|unretweet))/;
 const DM_OPS = /XChat|SendMessageEvent|ConversationEvent/;
+// what the client posts on its own all the time (event logging, its error
+// reports, read markers): about 40 a minute, which would use up "write" in a
+// quarter of an hour of reading
+const BACKGROUND = /^\/(1\.1\/(jot|flow|graphql\/app_context|keyregistry)|2\/notifications\/[^/]+\/last_seen_cursor|xitter\/client_error|live_pipeline)/;
+const BACKGROUND_OPS = /^(viewer_context\.json|app_context\.json|p2)$/;
 
 // The buckets one API request counts against, beside "read" for every call.
 export function bucketsFor(method: string, path: string, operation: string | undefined, url: URL): Bucket[] {
 	if (/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path)) return url.searchParams.get("command") === "INIT" ? ["upload"] : [];
+	if (BACKGROUND.test(path) || (operation && BACKGROUND_OPS.test(operation))) return [];
 	if (operation) {
 		if (POST_OPS.test(operation)) return ["post"];
 		if (ENGAGE_OPS.test(operation)) return ["engage"];
