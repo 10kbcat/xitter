@@ -4,6 +4,7 @@
 import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { feature, settings } from "./settings";
+import { STICKER_PICKER_CSS, STICKER_PICKER_SCRIPT } from "./sticker-picker";
 import { FORGOT_SCRIPT, FRESH_SCRIPT, type MenuLink, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { ERROR_SCRIPT } from "./errors";
@@ -229,7 +230,8 @@ export function shell(user: User | null, multi = false, inCommunity = false, edu
 <link rel="icon" type="image/png" href="/public/favicon.png" /><link rel="apple-touch-icon" href="/public/icon-light.png" />
 <style>html,body{height:100%}body{margin:0;background-color:#000;overflow-y:scroll}${LOGO_CSS}
 ${hideCss()}
-${FLAG_PICKER_CSS}</style>
+${FLAG_PICKER_CSS}
+${STICKER_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags))};window.__META_DATA__=${inline(meta)};</script>
 <script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links) })};
@@ -238,6 +240,7 @@ ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}
 ${FORGOT_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
+${user ? STICKER_PICKER_SCRIPT : ""}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}</script>
 <script id="nonce-csp"></script>

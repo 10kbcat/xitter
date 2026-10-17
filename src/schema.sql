@@ -824,3 +824,22 @@ create table if not exists profile_visits (
 	primary key (profile_id, visitor_id, day)
 );
 create index if not exists post_views_created_idx on post_views (created_at);
+
+-- Sticker packs made by staff. A sticker is an image the composer attaches
+-- like any other upload; the packs only feed the picker.
+create table if not exists sticker_packs (
+	id bigint primary key,
+	name text not null check (char_length(name) between 1 and 40),
+	position int not null default 0,
+	created_at timestamptz not null default now()
+);
+create table if not exists stickers (
+	id bigint primary key,
+	pack_id bigint not null references sticker_packs (id) on delete cascade,
+	name text not null default '' check (char_length(name) <= 40),
+	image bytea not null,
+	mime text not null,
+	position int not null default 0,
+	created_at timestamptz not null default now()
+);
+create index if not exists stickers_pack_idx on stickers (pack_id, position);

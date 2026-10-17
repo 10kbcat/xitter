@@ -47,6 +47,11 @@ copy during setup, and it stays on that machine.
   with its app and address), two-factor sign-in with an
   authenticator app and backup codes, password reset by email
 - Reporting posts and accounts
+- Account analytics (Overview, Content and each post's page) from the
+  instance's own counts
+- Sticker packs made by staff (Admin > Stickers), picked from a button beside
+  the composer's emoji button and posted as images
+- Rate limits per account and address (`src/ratelimit.ts`)
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges (blue, gold organisation, grey government organisation or official),
   translator globes (blue translator, gold translator moderator, yellow approver),

@@ -34,6 +34,7 @@ import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
 import { hit, limitApi, limitedResponse } from "./ratelimit";
+import { stickerImage, stickerPacks } from "./stickers";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
 import { emailRoute } from "./email-address";
@@ -62,6 +63,8 @@ async function servePublic(p: string): Promise<Response> {
 	const name = p.slice("/public/".length);
 	const badge = /^badge-(\d{1,19})\.png$/.exec(name);
 	if (badge) return badgeImage(badge[1]);
+	const sticker = /^sticker-(\d{1,19})\.(png|gif|webp)$/.exec(name);
+	if (sticker) return stickerImage(sticker[1]);
 	const card = /^card-(\d{1,19})\.img$/.exec(name);
 	if (card) return cardImage(card[1]);
 	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
@@ -150,6 +153,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
 	if (path === "/xitter/gif") return gifProxy(url);
+	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
 	const parts = path.split("/").filter(Boolean);
 	const gql = parts.indexOf("graphql");
@@ -157,8 +161,13 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (limited) return limited;
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
 	// the client reports its own render errors through telemetry
-	if (process.env.LOG_REQUESTS === "errors" && req.method === "POST") {
-		const body = decodeURIComponent(await req.clone().text()).replace(/\+/g, " ");
+	// (not uploads: a binary body isn't URI-encoded text)
+	if (process.env.LOG_REQUESTS === "errors" && req.method === "POST" && !path.includes("/media/upload")) {
+		const raw = await req.clone().text();
+		let body = raw;
+		try {
+			body = decodeURIComponent(raw.replace(/\+/g, " "));
+		} catch {}
 		for (const m of body.matchAll(/.{0,160}(?:[Ee]rror|exception|stack).{0,400}/g)) console.log(`client-report ${path}: ${m[0]}`);
 	}
 	if (/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path)) return mediaUpload(req, url, viewer);

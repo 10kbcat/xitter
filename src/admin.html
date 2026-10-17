@@ -178,6 +178,7 @@ const PAGES = {
 	media: { icon: "photo_library", title: "Media" },
 	invites: { icon: "confirmation_number", title: "Invites" },
 	badges: { icon: "verified", title: "Badges" },
+	stickers: { icon: "add_reaction", title: "Stickers" },
 	topics: { icon: "tag", title: "Topics" },
 	cards: { icon: "newspaper", title: "Explore cards" },
 	email: { icon: "mail", title: "Email" },
@@ -404,6 +405,56 @@ const RENDER = {
 		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
 			if (!(await ask("Delete this badge? Accounts wearing it lose it."))) return;
 			act(() => api("deleteBadge", { id: b.dataset.del }), "Badge deleted").then(route);
+		});
+	},
+
+	async stickers(main) {
+		const { packs } = await api("stickers");
+		const admin = can("admin");
+		main.innerHTML = "<h1>Stickers</h1>" +
+			'<p class="dim">Packs show in the sticker button beside the composer\'s emoji button. A sticker is posted as an image, so it shows anywhere images do. PNG, GIF or WebP, up to 1024×1024 and 1 MB; transparency is kept.</p>' +
+			(admin ? '<div class="box" style="margin-bottom:16px"><h2>New pack</h2><div class="row"><input id="pn" placeholder="Pack name" maxlength="40" style="flex:1;min-width:180px"><button class="btn primary" id="pc">Create</button></div></div>' : "") +
+			(packs.length ? packs.map((p, i) => '<div class="box" style="margin-bottom:16px" data-pack="' + esc(p.id) + '">' +
+				'<div class="row" style="justify-content:space-between"><h2 style="margin:0">' + esc(p.name) + ' <span class="dim small">' + p.stickers.length + " sticker" + (p.stickers.length === 1 ? "" : "s") + "</span></h2>" +
+				(admin ? '<div class="row"><button class="btn" data-up' + (i ? "" : " disabled") + '><span class="icon">arrow_upward</span></button><button class="btn" data-down' + (i < packs.length - 1 ? "" : " disabled") + '><span class="icon">arrow_downward</span></button><button class="btn" data-rename>Rename</button><button class="btn danger" data-delpack>Delete pack</button></div>' : "") + "</div>" +
+				'<div class="row" style="flex-wrap:wrap;gap:8px;margin:12px 0">' + (p.stickers.length ? p.stickers.map((s) =>
+					'<div style="position:relative;width:88px;text-align:center"><img alt="" src="' + esc(s.url) + '" style="width:80px;height:80px;object-fit:contain;border-radius:6px;background:repeating-conic-gradient(#8882 0 25%,transparent 0 50%) 0 0/12px 12px">' +
+					'<div class="small dim" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || "") + "</div>" +
+					(admin ? '<button class="btn danger small" data-delsticker="' + esc(s.id) + '" title="Delete" style="position:absolute;top:0;right:0;padding:0 4px"><span class="icon">close</span></button>' : "") + "</div>").join("")
+					: '<div class="empty" style="width:100%">No stickers in this pack yet.</div>') + "</div>" +
+				(admin ? '<div class="row"><input data-sname placeholder="Sticker name (optional)" maxlength="40" style="flex:1;min-width:160px"><label class="btn">Choose images<input type="file" data-sfile accept="image/png,image/gif,image/webp" multiple hidden></label><span class="dim small" data-sfname></span><button class="btn primary" data-add>Add</button></div>' : "") +
+				"</div>").join("") : '<div class="empty">No sticker packs yet.</div>');
+		const read = (file) => new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = () => fail(new Error("Couldn't read " + file.name + ".")); r.readAsDataURL(file); });
+		if ($("#pc")) $("#pc").onclick = () => act(() => api("createStickerPack", { name: $("#pn").value }), "Pack created").then(route);
+		main.querySelectorAll("[data-pack]").forEach((box) => {
+			const id = box.dataset.pack;
+			const on = (sel, fn) => { const el = box.querySelector(sel); if (el) el.onclick = fn; };
+			on("[data-up]", () => act(() => api("moveStickerPack", { id, dir: "up" })).then(route));
+			on("[data-down]", () => act(() => api("moveStickerPack", { id, dir: "down" })).then(route));
+			on("[data-rename]", async () => {
+				const name = prompt("New name for the pack", box.querySelector("h2").firstChild.textContent.trim());
+				if (name) act(() => api("renameStickerPack", { id, name }), "Renamed").then(route);
+			});
+			on("[data-delpack]", async () => {
+				if (!(await ask("Delete this pack and its stickers? Posts that used them keep their images."))) return;
+				act(() => api("deleteStickerPack", { id }), "Pack deleted").then(route);
+			});
+			const input = box.querySelector("[data-sfile]");
+			if (input) input.onchange = () => box.querySelector("[data-sfname]").textContent = [...input.files].map((f) => f.name).join(", ");
+			on("[data-add]", () => act(async () => {
+				const files = [...(input?.files ?? [])];
+				if (!files.length) throw new Error("Choose an image first.");
+				const name = box.querySelector("[data-sname]").value;
+				// one name for a single image; several images are named after their files
+				for (const f of files) {
+					if (f.size > 1024 * 1024) throw new Error(f.name + " is over 1 MB.");
+					await api("addSticker", { pack: id, name: files.length === 1 && name ? name : f.name.replace(/\.[^.]+$/, "").slice(0, 40), image: await read(f) });
+				}
+			}, "Stickers added").then(route));
+			box.querySelectorAll("[data-delsticker]").forEach((b) => b.onclick = async () => {
+				if (!(await ask("Delete this sticker? Posts that used it keep their image."))) return;
+				act(() => api("deleteSticker", { id: b.dataset.delsticker }), "Sticker deleted").then(route);
+			});
 		});
 	},
 
