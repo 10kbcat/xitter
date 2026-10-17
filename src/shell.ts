@@ -108,6 +108,8 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_sidebar_ttf_enabled: { value: true },
 	// the checkmark sheet's "Upgrade to Premium" leads to X's checkout; there is nothing to buy here
 	responsive_web_user_badge_education_get_verified_button_enabled: { value: false },
+	// the guest set has 0, which offers "reload for the new version" on every service worker update
+	responsive_web_service_worker_update_toast_interval_hours: { value: 168 },
 	// on, it drops every post label but reposts, pins and communities, topics included
 	rweb_home_mixer_enable_social_context_filter_social_contexts: { value: false },
 	// the captured "see_more" links a topic label to a topic page this client no

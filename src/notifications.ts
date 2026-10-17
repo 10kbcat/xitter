@@ -274,3 +274,37 @@ export async function markSeen(viewerId: string, cursorOrIndex: string | null) {
 	const at = m ? new Date(Math.min(Number(m[1]) + 1, Date.now())) : new Date();
 	await sql`update users set notifications_seen_at = greatest(notifications_seen_at, ${at}) where id = ${viewerId}::bigint`;
 }
+
+// For push: what arrived after `sinceMs`, as text and an in-app path
+export type PushItem = { kind: "like" | "repost" | "follow" | "bell" | "reply" | "mention" | "quote" | "staff"; key: string; at: number; text: string; url: string };
+
+export async function pushItems(viewerId: string, sinceMs: number): Promise<PushItem[]> {
+	const list = await items(viewerId, { after: sinceMs, limit: 20, mentionsOnly: false });
+	const userIds = [...new Set(list.flatMap((i) => (i.kind === "post" || i.kind === "staff" ? [] : i.users)))];
+	const postIds = [...new Set(list.flatMap((i) => (i.kind === "staff" || !i.postId ? [] : [i.postId])))];
+	const [users, posts] = await Promise.all([usersByIds(viewerId, userIds), postsByIds(viewerId, postIds)]);
+	const name = (u?: User) => (u ? u.name || u.screen_name : "Someone");
+	const snippet = (p?: PostRow) => (p ? `: ${clip(p.text)}` : "");
+	const out: PushItem[] = [];
+	for (const i of list) {
+		if (i.kind === "staff") {
+			out.push({ kind: "staff", key: i.key, at: i.at, text: i.text, url: "/account/notices" });
+			continue;
+		}
+		const post = i.postId ? posts.get(i.postId) : undefined;
+		const path = post ? `/${post.author.screen_name}/status/${post.id}` : "/notifications";
+		if (i.kind === "post") {
+			if (!post) continue;
+			const verb = i.reason === "reply" ? "replied" : i.reason === "quote" ? "quoted your post" : "mentioned you";
+			out.push({ kind: i.reason, key: `${i.reason}-${post.id}`, at: i.at, text: `${name(post.author)} ${verb}${snippet(post)}`, url: path });
+			continue;
+		}
+		const from = i.users.map((id) => users.get(id)).filter((u): u is User => !!u);
+		if (!from.length) continue;
+		const who = i.total > 1 ? `${name(from[0])} and ${i.total - 1} other${i.total === 2 ? "" : "s"}` : name(from[0]);
+		const text =
+			i.kind === "bell" ? `New post from ${name(from[0])}${snippet(post)}` : i.kind === "follow" ? `${who} followed you` : `${who} ${i.kind === "like" ? "liked" : "reposted"} your post${snippet(post)}`;
+		out.push({ kind: i.kind, key: i.key, at: i.at, text, url: i.kind === "follow" ? `/${from[0].screen_name}` : path });
+	}
+	return out;
+}

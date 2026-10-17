@@ -2,6 +2,11 @@
 // Applied when a file is served; the archive keeps the original bytes.
 
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
+import { vapidPublicKey } from "./push";
+
+// X's VAPID public key, which the client subscribes to push with; pushes can
+// only be signed with the private half, so the instance's own goes in its place
+const X_VAPID = "new Uint8Array([4,94,104,18,141,49,13,74,96,202,82,131,78,91,29,242,150,102,197,0,53,149,230,8,54,38,62,173,43,28,89,130,191,222,213,128,147,62,21,49,187,95,212,194,196,253,140,157,234,34,8,234,143,158,221,15,83,8,222,111,100,204,213,48,75])";
 
 // API hosts the client knows; their paths are served from our root
 // Both brand families: the client rewrites "twitter.com" into the current brand
@@ -34,6 +39,7 @@ const RULES: [RegExp, string][] = [
 	[/"x\.com"/g, `"${PUBLIC_HOSTNAME}"`],
 	// cookie domain; a cookie scoped to the original domain is dropped by the browser
 	[/"\.x\.com"/g, `"${PUBLIC_HOSTNAME}"`],
+	[new RegExp(X_VAPID.replace(/[()[\]]/g, (c) => `\\${c}`), "g"), `new Uint8Array([${[...vapidPublicKey].join(",")}])`],
 ];
 
 // Only for the chat app's files: its own list of API hosts, which it sends the

@@ -22,7 +22,8 @@ copy during setup, and it stays on that machine.
 - Lists (with banners) and communities (rules, members, moderation tools,
   custom banners, a topic from the instance's topics, community label on posts)
 - Home timeline: a ranked "For you" and a chronological "Following"
-- Notifications with unread counts; the profile bell (new posts from that
+- Notifications with unread counts, browser push (with the instance's own VAPID
+  key, made on first start in `data/push-vapid.json`); the profile bell (new posts from that
   account arrive as notifications) and turning an account's reposts off
 - Search with X's operators, trends, Explore; trends by location (Explore
   settings: worldwide, a country, or yours with "Trends for you")
@@ -51,7 +52,7 @@ copy during setup, and it stays on that machine.
   feature switches, announcements, topics, Explore cards and an audit log
 
 Not built yet: Spaces and live video, Moments, signing in other apps (Connected
-apps stays empty), push notifications, a verified-email code at sign-up. Email is sent through
+apps stays empty), a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set; Admin > Email sends
 a test mail (it shows Resend's answer, e.g. an unverified domain) and lists
 every mail tried.

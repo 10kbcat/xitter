@@ -28,6 +28,7 @@ import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
 import { rememberIp } from "./login-history";
 import { startMailDigests } from "./mail-digest";
+import { SERVICE_WORKER, startPush } from "./push";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -201,7 +202,8 @@ const server = Bun.serve({
 		}
 		if (p.startsWith("/public/")) return servePublic(p);
 		if (p === "/favicon.ico") return servePublic("/public/favicon.png");
-		if (p === "/sw.js" || p === "/manifest.json") return new Response(null, { status: 404 });
+		if (p === "/sw.js") return new Response(SERVICE_WORKER, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
+		if (p === "/manifest.json") return new Response(null, { status: 404 });
 
 		const viewer = await getViewer(req);
 		// a suspended account can't sign in, so it appeals here with its password
@@ -251,4 +253,5 @@ const server = Bun.serve({
 
 startScheduler();
 startMailDigests();
+startPush();
 console.log(`xitter listening on ${PUBLIC_ORIGIN}`);

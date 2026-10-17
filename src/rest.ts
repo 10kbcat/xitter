@@ -18,6 +18,7 @@ import { dataExportRoute } from "./data-export";
 import { addressBook, deleteContacts, uploadContacts } from "./contacts";
 import { exploreSettings, searchLocations, setExploreSettings } from "./explore-settings";
 import { loginHistory } from "./login-history";
+import { pushSettingsRoute } from "./push";
 import { answerRequest, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 
 // friendships/show's shape, from the viewer's side (source) and the other account's (target)
@@ -201,6 +202,12 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const like = q.get("user_id");
 		const users = await suggestedUsers(viewer.id, Math.min(Math.max(Number(q.get("limit")) || 20, 1), 50), [], isId(like) && like !== viewer.id ? like : undefined);
 		return Response.json(users.map((u) => ({ user_id: u.id, token: `xitter-${u.id}`, user: legacyUser(u) })));
+	}
+	// browser push subscriptions and their switches
+	const pushSettings = /^\/1\.1\/notifications\/settings\/(login|checkin|save|logout)(?:\.json)?$/.exec(path);
+	if (method === "POST" && pushSettings) {
+		const answer = await pushSettingsRoute(viewer.id, pushSettings[1], await req.json().catch(() => ({})));
+		if (answer) return answer;
 	}
 	// Explore settings: where trends come from
 	if (method === "GET" && /^\/2\/guide\/get_explore_settings(?:\.json)?$/.test(path)) return Response.json(await exploreSettings(viewer.id));

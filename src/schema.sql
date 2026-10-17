@@ -745,3 +745,16 @@ create index if not exists mail_log_created_idx on mail_log (created_at desc);
 -- when the activity and message digests last went to this account
 alter table users add column if not exists activity_mailed_at timestamptz;
 alter table users add column if not exists messages_mailed_at timestamptz;
+
+-- browser push subscriptions (push.ts); settings are the per-type switches
+create table if not exists push_subscriptions (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	endpoint text not null unique,
+	p256dh text not null,
+	auth text not null,
+	settings jsonb not null default '{}',
+	last_pushed_at timestamptz not null default now(),
+	created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_user_idx on push_subscriptions (user_id);
