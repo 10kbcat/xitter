@@ -51,6 +51,10 @@ copy during setup, and it stays on that machine.
   instance's own counts
 - Sticker packs made by staff (Admin > Stickers), picked from a button beside
   the composer's emoji button and posted as images
+- Branded hashtags (X's branded likes and hashmoji, Admin > Branded
+  hashtags): for a set time, liking a post with the hashtag plays a custom
+  Lottie animation, and the hashtag shows an emoji (optionally with hashfetti)
+- Polls with a photo on each choice
 - Rate limits per account and address (`src/ratelimit.ts`)
 - A public JSON API under `/api/v1` with personal tokens (`/account/api`,
   read or read and write); `/api` documents it

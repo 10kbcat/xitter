@@ -1,5 +1,6 @@
 // The few REST endpoints the client still uses next to GraphQL.
 
+import { hashflagsJson } from "./hashflags";
 import { accountsRoute } from "./accounts";
 import type { Viewer } from "./auth";
 import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKeyword } from "./blocks";
@@ -357,7 +358,8 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		});
 	}
 	if (path === "/1.1/account/settings.json") return Response.json(settingsFor(viewer) ?? {});
-	if (path === "/1.1/hashflags.json") return Response.json([]);
+	// branded hashtags (hashflags.ts)
+	if (path === "/1.1/hashflags.json") return Response.json(await hashflagsJson());
 	if (path === "/1.1/help/settings.json") return Response.json({});
 	if (path === "/fleets/v1/fleetline") return Response.json({ threads: [], hydrated_threads: [], refresh_delay_secs: 300 });
 	if (path === "/fleets/v1/avatar_content") return Response.json({ users: {}, refresh_delay_secs: 0 });

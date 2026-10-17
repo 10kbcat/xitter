@@ -37,6 +37,7 @@ import { hit, limitApi, limitedResponse } from "./ratelimit";
 import { stickerImage, stickerPacks } from "./stickers";
 import { apiTokensRoute, publicApi } from "./public-api";
 import { apiDocsPage } from "./api-docs";
+import { hashflagAsset } from "./hashflags";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
 import { emailRoute } from "./email-address";
@@ -67,6 +68,8 @@ async function servePublic(p: string): Promise<Response> {
 	if (badge) return badgeImage(badge[1]);
 	const sticker = /^sticker-(\d{1,19})\.(png|gif|webp)$/.exec(name);
 	if (sticker) return stickerImage(sticker[1]);
+	const hashflag = /^hashflag-(\d{1,19})\.(json|png|gif|webp)$/.exec(name);
+	if (hashflag) return hashflagAsset(hashflag[1], hashflag[2]);
 	const card = /^card-(\d{1,19})\.img$/.exec(name);
 	if (card) return cardImage(card[1]);
 	const flag = /^flag-([a-z]+)\.svg$/.exec(name);

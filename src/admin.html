@@ -179,6 +179,7 @@ const PAGES = {
 	invites: { icon: "confirmation_number", title: "Invites" },
 	badges: { icon: "verified", title: "Badges" },
 	stickers: { icon: "add_reaction", title: "Stickers" },
+	hashflags: { icon: "favorite", title: "Branded hashtags" },
 	topics: { icon: "tag", title: "Topics" },
 	cards: { icon: "newspaper", title: "Explore cards" },
 	email: { icon: "mail", title: "Email" },
@@ -455,6 +456,50 @@ const RENDER = {
 				if (!(await ask("Delete this sticker? Posts that used it keep their image."))) return;
 				act(() => api("deleteSticker", { id: b.dataset.delsticker }), "Sticker deleted").then(route);
 			});
+		});
+	},
+
+	async hashflags(main) {
+		const { hashflags } = await api("hashflags");
+		const admin = can("admin");
+		const local = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16); };
+		const now = Date.now();
+		const state = (h) => new Date(h.ends_at) <= now ? "ended" : new Date(h.starts_at) > now ? "upcoming" : "running";
+		main.innerHTML = "<h1>Branded hashtags</h1>" +
+			'<p class="dim">X\'s branded likes and hashmoji. While one runs, liking a post that has its hashtag plays the like animation instead of the heart, and the hashtag shows its emoji. The animation is a Lottie JSON file (After Effects with Bodymovin, or LottieFiles), square, like X\'s own heart. With hashfetti on, the emoji rains over the hashtag\'s search results. People see a change after they reload.</p>' +
+			(admin ? '<div class="box" style="margin-bottom:16px"><h2>New branded hashtag</h2>' +
+				'<div class="field"><label>Hashtag</label><input id="hh" placeholder="#SuperMarioMovie" maxlength="101"></div>' +
+				'<div class="row"><div class="field" style="flex:1"><label>Starts</label><input id="hs" type="datetime-local" value="' + local(now) + '"></div><div class="field" style="flex:1"><label>Ends</label><input id="he" type="datetime-local" value="' + local(now + 7 * 864e5) + '"></div></div>' +
+				'<div class="row"><label class="btn">Like animation (.json)<input type="file" id="ha" accept="application/json,.json" hidden></label><span class="dim small" id="han">Lottie JSON, up to 1 MB</span></div>' +
+				'<div class="row" style="margin-top:8px"><label class="btn">Emoji<input type="file" id="hm" accept="image/png,image/gif,image/webp" hidden></label><span class="dim small" id="hmn">PNG, GIF or WebP, up to 512×512 and 256 KB</span></div>' +
+				'<label class="row" style="margin:12px 0"><input type="checkbox" id="hf"> Hashfetti (needs an emoji)</label>' +
+				'<button class="btn primary" id="hc">Create</button></div>' : "") +
+			'<div class="scroll">' + (hashflags.length
+				? '<table class="table"><tr><th>Hashtag</th><th>Like</th><th>Emoji</th><th>When</th><th>State</th><th></th></tr>' +
+					hashflags.map((h) => '<tr><td>#' + esc(h.hashtag) + (h.hashfetti ? ' <span class="dim small">hashfetti</span>' : "") + "</td><td>" +
+						(h.like_url ? '<a href="' + esc(h.like_url) + '" target="_blank">animation</a>' : '<span class="dim">—</span>') + "</td><td>" +
+						(h.emoji_url ? '<img alt="" src="' + esc(h.emoji_url) + '" width="20" height="20" style="vertical-align:middle">' : '<span class="dim">—</span>') +
+						'</td><td class="small">' + esc(when(h.starts_at)) + " → " + esc(when(h.ends_at)) + '</td><td><span class="pill' + (state(h) === "ended" ? " suspended" : "") + '">' + state(h) + "</span></td><td>" +
+						(admin ? (state(h) !== "ended" ? '<button class="btn" data-end="' + esc(h.id) + '">End now</button> ' : "") + '<button class="btn danger" data-del="' + esc(h.id) + '">Delete</button>' : "") + "</td></tr>").join("") + "</table>"
+				: '<div class="empty">No branded hashtags yet.</div>') + "</div>";
+		const read = (file) => new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = () => fail(new Error("Couldn't read " + file.name + ".")); r.readAsDataURL(file); });
+		if ($("#ha")) $("#ha").onchange = () => $("#han").textContent = $("#ha").files[0]?.name || "";
+		if ($("#hm")) $("#hm").onchange = () => $("#hmn").textContent = $("#hm").files[0]?.name || "";
+		if ($("#hc")) $("#hc").onclick = () => act(async () => {
+			const anim = $("#ha").files[0], emoji = $("#hm").files[0];
+			await api("createHashflag", {
+				hashtag: $("#hh").value,
+				starts_at: new Date($("#hs").value).toISOString(),
+				ends_at: new Date($("#he").value).toISOString(),
+				like_animation: anim ? await read(anim) : undefined,
+				emoji: emoji ? await read(emoji) : undefined,
+				hashfetti: $("#hf").checked,
+			});
+		}, "Branded hashtag created").then(route);
+		main.querySelectorAll("[data-end]").forEach((b) => b.onclick = () => act(() => api("endHashflag", { id: b.dataset.end }), "Ended").then(route));
+		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+			if (!(await ask("Delete this branded hashtag?"))) return;
+			act(() => api("deleteHashflag", { id: b.dataset.del }), "Deleted").then(route);
 		});
 	},
 

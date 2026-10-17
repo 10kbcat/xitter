@@ -858,3 +858,19 @@ create table if not exists api_tokens (
 	last_used_at timestamptz
 );
 create index if not exists api_tokens_user_idx on api_tokens (user_id);
+
+-- Branded hashtags (X's hashflags): for a while, posts with the hashtag get a
+-- custom like animation (Lottie JSON), and the hashtag an emoji after it.
+create table if not exists hashflags (
+	id bigint primary key,
+	hashtag text not null,
+	starts_at timestamptz not null,
+	ends_at timestamptz not null,
+	like_animation text,
+	emoji bytea,
+	emoji_mime text,
+	hashfetti boolean not null default false,
+	created_at timestamptz not null default now(),
+	check (ends_at > starts_at),
+	check (like_animation is not null or emoji is not null)
+);
