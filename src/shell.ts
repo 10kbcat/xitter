@@ -3,7 +3,7 @@
 
 import type { User } from "./auth";
 import { loadBuild } from "./build";
-import { settings } from "./settings";
+import { feature, settings } from "./settings";
 import { FORGOT_SCRIPT, FRESH_SCRIPT, type MenuLink, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { ERROR_SCRIPT } from "./errors";
@@ -108,6 +108,9 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
 	responsive_web_pinned_replies_enabled: { value: true },
 	responsive_web_sidebar_ttf_enabled: { value: true },
+	// the side bar has one slot for both: History (its Bookmarks tab inside) when
+	// the feature is on, the client's own Bookmarks link when it is off
+	responsive_web_history_screen_enabled: { value: feature("history") },
 	// the checkmark sheet's "Upgrade to Premium" leads to X's checkout; there is nothing to buy here
 	responsive_web_user_badge_education_get_verified_button_enabled: { value: false },
 	// the guest set has 0, which offers "reload for the new version" on every service worker update
