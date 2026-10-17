@@ -139,11 +139,16 @@ export async function hashtagsLike(prefix: string, limit: number): Promise<strin
 }
 
 // hashtags of the last days with how many posts used them, for Explore
-export async function trendingHashtags(days: number, limit: number): Promise<{ tag: string; posts: number }[]> {
-	const rows = await sql`select tag, count(distinct id)::int as n from (
-			select p.id, lower((regexp_matches(p.text, ${HASHTAG_RE}, 'g'))[1]) as tag from posts p
-			where p.created_at > now() - make_interval(days => ${days})) t
-		group by tag order by n desc, tag limit ${limit}`;
+// `country`: only posts by accounts based there. `followedBy`: posts by accounts
+// that viewer follows count twice (personalized trends).
+export async function trendingHashtags(days: number, limit: number, scope: { country?: string | null; followedBy?: string } = {}): Promise<{ tag: string; posts: number }[]> {
+	const rows = await sql`select tag, count(distinct id)::int as n, sum(w)::int as score from (
+			select p.id, lower((regexp_matches(p.text, ${HASHTAG_RE}, 'g'))[1]) as tag,
+				${scope.followedBy ? sql`case when p.user_id in (select followee_id from follows where follower_id = ${scope.followedBy}::bigint) then 2 else 1 end` : sql`1`} as w
+			from posts p
+			where p.created_at > now() - make_interval(days => ${days})
+				${scope.country ? sql`and p.user_id in (select id from users where country = ${scope.country})` : sql``}) t
+		group by tag order by score desc, n desc, tag limit ${limit}`;
 	// an admin can hide hashtags and put others first (Settings, Trends)
 	const { hidden_trends: hidden, promoted_trends: promoted } = settings().operations;
 	const found = rows.filter((r: any) => !hidden.includes(r.tag)).map((r: any) => ({ tag: `#${r.tag}`, posts: r.n }));

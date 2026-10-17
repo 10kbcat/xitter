@@ -16,6 +16,7 @@ import { hashtagsLike, searchUsers } from "./search";
 import { accountSettingsRoute, changeUsername, revokeSessionsRoute } from "./account-settings";
 import { dataExportRoute } from "./data-export";
 import { addressBook, deleteContacts, uploadContacts } from "./contacts";
+import { exploreSettings, searchLocations, setExploreSettings } from "./explore-settings";
 import { answerRequest, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 
 // friendships/show's shape, from the viewer's side (source) and the other account's (target)
@@ -196,6 +197,20 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const users = await suggestedUsers(viewer.id, Math.min(Math.max(Number(q.get("limit")) || 20, 1), 50), [], isId(like) && like !== viewer.id ? like : undefined);
 		return Response.json(users.map((u) => ({ user_id: u.id, token: `xitter-${u.id}`, user: legacyUser(u) })));
 	}
+	// Explore settings: where trends come from
+	if (method === "GET" && /^\/2\/guide\/get_explore_settings(?:\.json)?$/.test(path)) return Response.json(await exploreSettings(viewer.id));
+	if (method === "POST" && /^\/2\/guide\/set_explore_settings(?:\.json)?$/.test(path)) {
+		const text = await req.text();
+		let body: Record<string, unknown> = {};
+		try {
+			body = JSON.parse(text);
+		} catch {
+			body = Object.fromEntries(new URLSearchParams(text));
+		}
+		return Response.json(await setExploreSettings(viewer.id, body ?? {}));
+	}
+	if (method === "GET" && /^\/2\/guide\/explore_locations_with_auto_complete(?:\.json)?$/.test(path))
+		return Response.json(searchLocations(new URL(req.url).searchParams.get("prefix") ?? new URL(req.url).searchParams.get("q") ?? ""));
 	// Settings > Contacts: the uploaded address book, and removing it
 	if (method === "GET" && /^\/1\.1\/contacts\/addressbook(?:\.json)?$/.test(path)) {
 		const q = new URL(req.url).searchParams;

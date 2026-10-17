@@ -14,6 +14,7 @@ import { noteHandlers } from "./notes";
 import { sessionsList, usernameAvailable } from "./account-settings";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { trendScope } from "./explore-settings";
 import { blockedIds, blockedFor, outOfView, protectedFor } from "./blocks";
 import { settings } from "./settings";
 import { rankedFeed } from "./ranking";
@@ -888,31 +889,34 @@ async function search(viewer: Viewer, vars: Vars) {
 	return searchTimeline([{ type: "TimelineAddEntries", entries }]);
 }
 
-const trendItem = (t: { tag: string; posts: number }, i: number) => ({
+const trendItem = (t: { tag: string; posts: number }, i: number, label = "Trending") => ({
 	__typename: "TimelineTrend",
 	itemType: "TimelineTrend",
 	name: t.tag,
 	rank: String(i + 1),
 	trend_url: { url: `twitter://search/?query=${encodeURIComponent(t.tag)}&src=trend_click&vertical=trends`, urlType: "DeepLink" },
-	trend_metadata: { domain_context: "Trending", meta_description: `${t.posts} post${t.posts === 1 ? "" : "s"}` },
+	trend_metadata: { domain_context: label, meta_description: `${t.posts} post${t.posts === 1 ? "" : "s"}` },
 });
 
-// Explore: hashtags used most in the last week, as trends
-async function explorePage() {
-	const trends = await trendingHashtags(7, 20);
+// Explore: hashtags used most in the last week, as trends, from where the
+// viewer's Explore settings say
+async function explorePage(viewer: Viewer) {
+	const scope = await trendScope(viewer.id);
+	const trends = await trendingHashtags(7, 20, scope);
 	const base = BigInt(newId());
 	const entries = trends.map((t, i) => ({
 		entryId: `trend-${t.tag.slice(1)}`,
 		sortIndex: (base - BigInt(i)).toString(),
-		content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: trendItem(t, i) },
+		content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: trendItem(t, i, scope.label) },
 	}));
 	const timeline = { instructions: [{ type: "TimelineAddEntries", entries }] };
 	return { data: { explore_page: { id: globalId("ExplorePage", "explore"), body: { __typename: "Timeline", timeline } } } };
 }
 
 // the "What's happening" box beside every page: the top few trends
-async function exploreSidebar() {
-	const trends = await trendingHashtags(7, 5);
+async function exploreSidebar(viewer: Viewer) {
+	const scope = await trendScope(viewer.id);
+	const trends = await trendingHashtags(7, 5, scope);
 	const id = newId();
 	const entries = trends.length
 		? [
@@ -925,7 +929,7 @@ async function exploreSidebar() {
 						displayType: "Vertical",
 						header: { displayType: "Classic", text: "What’s happening" },
 						footer: { displayType: "Classic", text: "Show more", landingUrl: { url: "twitter://explore", urlType: "DeepLink" } },
-						items: trends.map((t, i) => ({ entryId: `trend-${id}-trend-${t.tag}`, item: { itemContent: trendItem(t, i) } })),
+						items: trends.map((t, i) => ({ entryId: `trend-${id}-trend-${t.tag}`, item: { itemContent: trendItem(t, i, scope.label) } })),
 					},
 				},
 			]
@@ -948,8 +952,8 @@ async function editHistory(viewer: Viewer, vars: Vars) {
 Object.assign(handlers, {
 	SearchTimeline: (v: Viewer, vars: Vars) => search(v, vars),
 	TweetEditHistory: editHistory,
-	ExplorePage: () => explorePage(),
-	ExploreSidebar: () => exploreSidebar(),
+	ExplorePage: (v: Viewer) => explorePage(v),
+	ExploreSidebar: (v: Viewer) => exploreSidebar(v),
 } satisfies Record<string, Handler>);
 
 // the chat app's operations

@@ -24,7 +24,8 @@ copy during setup, and it stays on that machine.
 - Home timeline: a ranked "For you" and a chronological "Following"
 - Notifications with unread counts; the profile bell (new posts from that
   account arrive as notifications) and turning an account's reposts off
-- Search with X's operators, trends, Explore
+- Search with X's operators, trends, Explore; trends by location (Explore
+  settings: worldwide, a country, or yours with "Trends for you")
 - Topics: staff define them with keywords; people follow them from "Topics to
   follow" or a post's menu, and "For you" brings in and labels matching posts
 - Blocks, mutes and muted words
