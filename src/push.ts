@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { newId } from "./ids";
-import { MAIL_FROM } from "./mail";
+import { mailFrom } from "./mail";
 import { type PushItem, pushItems } from "./notifications";
 import { settings } from "./settings";
 
@@ -59,7 +59,8 @@ export function encryptPayload(payload: Buffer, p256dh: Buffer, auth: Buffer, fi
 
 // RFC 8292: a short-lived token for the push service the endpoint belongs to
 function vapidHeader(endpoint: string): string {
-	const mail = /<([^>]+)>/.exec(MAIL_FROM)?.[1] ?? MAIL_FROM;
+	const from = mailFrom();
+	const mail = /<([^>]+)>/.exec(from)?.[1] ?? from;
 	const claims = { aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: mail.includes("@") ? `mailto:${mail}` : PUBLIC_ORIGIN };
 	const unsigned = `${b64url(Buffer.from(JSON.stringify({ typ: "JWT", alg: "ES256" })))}.${b64url(Buffer.from(JSON.stringify(claims)))}`;
 	const signature = sign("sha256", Buffer.from(unsigned), { key: createPrivateKey(keys.privatePem), dsaEncoding: "ieee-p1363" });

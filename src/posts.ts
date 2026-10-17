@@ -7,6 +7,7 @@ import { articlesByIds } from "./articles";
 import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, suspendedFor } from "./blocks";
 import { mediaForPosts } from "./media";
 import { communityObjects } from "./community-model";
+import { webSource } from "./platforms";
 import { pollCard, pollsByIds } from "./polls";
 import { toUser, userCols, usersByIds } from "./users";
 
@@ -352,7 +353,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		if (!m) throw new PostError("Only members can post in this community.", 187);
 	}
 	await sql`insert into posts (id, user_id, text, reply_to_id, conversation_id, quote_id, article_id, source, community_id, place_id, reply_policy)
-		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? "Xitter for Web"}, ${opts.communityId ?? null}::bigint, ${opts.placeId ?? null}, ${opts.replyToId ? null : opts.replyPolicy ?? null})`;
+		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? webSource()}, ${opts.communityId ?? null}::bigint, ${opts.placeId ?? null}, ${opts.replyToId ? null : opts.replyPolicy ?? null})`;
 	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
 	if (names.length)
 		await sql`insert into post_mentions (post_id, user_id)

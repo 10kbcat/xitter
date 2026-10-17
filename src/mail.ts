@@ -3,9 +3,12 @@
 // ones skipped for want of a key, so it shows whether mail would have gone out.
 import { sql } from "./db";
 import { newId } from "./ids";
+import { settings } from "./settings";
 
 const KEY = process.env.RESEND_API_KEY;
-export const MAIL_FROM = process.env.MAIL_FROM ?? "Xitter <noreply@xit.chococat.lol>";
+const FROM_ADDRESS = "noreply@xit.chococat.lol";
+// without MAIL_FROM the sender is named after the instance; quoted, as a name may hold commas
+export const mailFrom = () => process.env.MAIL_FROM ?? `${JSON.stringify(settings().instance_name)} <${FROM_ADDRESS}>`;
 
 export const mailEnabled = () => !!KEY;
 
@@ -23,7 +26,7 @@ export async function sendMail(to: string, subject: string, text: string, meta: 
 	const r = await fetch("https://api.resend.com/emails", {
 		method: "POST",
 		headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
-		body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, text }),
+		body: JSON.stringify({ from: mailFrom(), to: [to], subject, text }),
 	}).catch((e: Error) => e);
 	if (r instanceof Error || !r.ok) {
 		// Resend explains itself, e.g. that the sending domain isn't verified yet

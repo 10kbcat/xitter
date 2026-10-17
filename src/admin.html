@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin · Xitter</title>
+<title>Admin · {{instance}}</title>
 <link rel="icon" type="image/png" href="/public/favicon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0">
 <style>
@@ -97,7 +97,7 @@
 <body>
 <div class="app">
 	<nav id="nav">
-		<img class="logo" src="/public/logo-dark.png" alt="Xitter">
+		<img class="logo" src="/public/logo-dark.png" alt="{{instance}}">
 	</nav>
 	<main id="main"></main>
 </div>
@@ -419,13 +419,13 @@ const RENDER = {
 	async apps(main) {
 		const { platforms } = await api("platforms");
 		main.innerHTML = "<h1>Client apps</h1>" +
-			'<p class="dim">Posts show the app they came from after their time, like "Xitter for Web". Give another app (your Android build, a bot) a token here; posts sent with it show its name. People still sign in as usual: the token only names the app.</p>' +
-			(can("admin") ? '<div class="box" style="margin-bottom:16px"><h2>New app</h2><div class="row"><input id="al" placeholder="Xitter for Android" maxlength="80" style="flex:1;min-width:200px"><button class="btn primary" id="ac">Create token</button></div><div id="asecret"></div></div>' : "") +
+			'<p class="dim">Posts show the app they came from after their time, like "{{instance}} for Web". Give another app (your Android build, a bot) a token here; posts sent with it show its name. People still sign in as usual: the token only names the app.</p>' +
+			(can("admin") ? '<div class="box" style="margin-bottom:16px"><h2>New app</h2><div class="row"><input id="al" placeholder="{{instance}} for Android" maxlength="80" style="flex:1;min-width:200px"><button class="btn primary" id="ac">Create token</button></div><div id="asecret"></div></div>' : "") +
 			'<div class="scroll">' + (platforms.length
 				? '<table class="table"><tr><th>Shown as</th><th>Made</th><th>State</th><th></th></tr>' +
 					platforms.map((p) => "<tr><td>" + esc(p.label) + '</td><td class="small dim">' + esc(when(p.created_at)) + "</td><td>" + (p.revoked ? '<span class="pill suspended">revoked</span>' : '<span class="pill">active</span>') +
 						"</td><td>" + (can("admin") && !p.revoked ? '<button class="btn danger" data-revoke="' + esc(p.id) + '">Revoke</button>' : "") + "</td></tr>").join("") + "</table>"
-				: '<div class="empty">No apps yet. Posts from the web app show "Xitter for Web".</div>') + "</div>";
+				: '<div class="empty">No apps yet. Posts from the web app show "{{instance}} for Web".</div>') + "</div>";
 		if ($("#ac")) $("#ac").onclick = () => act(async () => {
 			const r = await api("createPlatform", { label: $("#al").value });
 			await route();
@@ -601,7 +601,7 @@ const RENDER = {
 			Object.entries(modes).map(([k, v]) => '<label class="row" style="margin:6px 0"><input type="radio" name="mode" value="' + k + '"' + (s.signup_mode === k ? " checked" : "") + dis + "> " + esc(v) + "</label>").join("") +
 			'<div class="field" style="margin-top:12px"><label>New accounts follow (handles, comma separated)</label><input id="follows" value="' + esc(s.default_follows.map((h) => "@" + h).join(", ")) + '"' + dis + "></div>" +
 			(admin ? '<button class="btn primary" id="saveFollows">Save</button>' : "") + "</div>" +
-			'<div class="box"><h2>Name and source</h2><div class="field"><label>Instance name (page titles, sign-in page)</label><input id="name" maxlength="30" value="' + esc(s.instance_name) + '"' + dis + "></div>" +
+			'<div class="box"><h2>Name and source</h2><div class="field"><label>Instance name (page titles, text in the app, sign-in page, mail)</label><input id="name" maxlength="30" value="' + esc(s.instance_name) + '"' + dis + "></div>" +
 			'<div class="field"><label>Source code link (AGPL-3.0: shown on the sign-in pages)</label><input id="source" value="' + esc(s.source_url) + '"' + dis + "></div>" +
 			(admin ? '<button class="btn primary" id="saveName">Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Features</h2><p class="dim small">Switched-off features disappear from everyone\'s menus and composer.</p>' +
@@ -838,11 +838,11 @@ async function renderUser(main, id) {
 		me = await api("me");
 		flags = await (await fetch("/admin/flags.json")).json();
 	} catch (e) {
-		$("#main").innerHTML = '<div class="empty">' + esc(e.message) + ' <a href="/home">Back to Xitter</a></div>';
+		$("#main").innerHTML = '<div class="empty">' + esc(e.message) + ' <a href="/home">Back to {{instance}}</a></div>';
 		return;
 	}
 	$("#nav").insertAdjacentHTML("beforeend", Object.entries(PAGES).map(([k, p]) => '<button data-page="' + k + '"><span class="icon">' + p.icon + "</span>" + esc(p.title) + "</button>").join("") +
-		'<button onclick="location.href=\'/home\'"><span class="icon">arrow_back</span>Back to Xitter</button>' +
+		'<button onclick="location.href=\'/home\'"><span class="icon">arrow_back</span>Back to {{instance}}</button>' +
 		'<div class="who">@' + esc(me.screen_name) + " · " + esc(me.role) + "</div>");
 	document.querySelectorAll("nav [data-page]").forEach((b) => b.onclick = () => go(b.dataset.page));
 	refreshCounts();

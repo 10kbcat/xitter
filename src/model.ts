@@ -7,6 +7,7 @@ import type { ArticleEntity } from "./articles";
 import { FLAGS } from "./flags";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 import { placeById } from "./places";
+import { webSource } from "./platforms";
 import { settings } from "./settings";
 
 // a note's text with its links marked, as the note box and the note page expect
@@ -384,7 +385,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 			full_text: p.text,
 			possibly_sensitive: !!p.sensitive,
 			...(placeById(p.place_id) ? { place: placeById(p.place_id) } : {}),
-			source: (p.source ?? "Xitter for Web").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
+			source: (p.source ?? webSource()).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
 			id_str: p.id,
 			...(p.reply_to_id && p.reply_user_id
 				? {

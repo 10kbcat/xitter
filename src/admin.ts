@@ -14,10 +14,10 @@ import { createInvite } from "./invites";
 import { REASONS } from "./reports";
 import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
-import { createPlatform } from "./platforms";
+import { createPlatform, renameWebSource } from "./platforms";
 import { TopicError, deleteTopic, listTopics, saveTopic } from "./topics";
 import { CardError, deleteCard, listCards, saveCard } from "./explore-cards";
-import { MAIL_FROM, mailEnabled, sendMail } from "./mail";
+import { mailEnabled, mailFrom, sendMail } from "./mail";
 import { mailDigests } from "./mail-digest";
 import { toolActions } from "./admin-tools";
 
@@ -101,7 +101,7 @@ const ACTIONS: Record<string, Action> = {
 	} },
 	mail: { role: "support", run: async () => ({
 		enabled: mailEnabled(),
-		from: MAIL_FROM,
+		from: mailFrom(),
 		log: await sql`select m.id::text, m.to_addr, m.kind, m.subject, m.status, m.error, m.created_at, u.screen_name
 			from mail_log m left join users u on u.id = m.user_id order by m.created_at desc limit 50`,
 	}) },
@@ -522,6 +522,9 @@ const ACTIONS: Record<string, Action> = {
 			if (typeof b.instance_name === "string") {
 				const name = b.instance_name.trim();
 				if (!name || [...name].length > 30) throw new AdminError("The name is 1 to 30 characters.");
+				// it goes into the client's ICU messages (patch.ts), where these are syntax
+				if (/[{}<>#\p{Cc}]/u.test(name)) throw new AdminError("The name can't contain { } < > or #.");
+				await renameWebSource(s.instance_name, name);
 				await setSetting("instance_name", name);
 				changed.push("instance_name");
 			}

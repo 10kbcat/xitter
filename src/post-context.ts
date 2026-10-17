@@ -1,4 +1,4 @@
-// The app a post came from ("Xitter for Web"), after the time on the post's own
+// The app a post came from ("Xitter for Web", named after the instance), after the time on the post's own
 // page, as Twitter used to show it. The client still gets `source` in the post
 // data but no longer draws it.
 

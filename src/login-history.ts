@@ -9,7 +9,7 @@
 import { countryFromHeader, countryName } from "./countries";
 import { sql } from "./db";
 import { newId } from "./ids";
-import { platformSource } from "./platforms";
+import { platformSource, webSource } from "./platforms";
 
 const socketIps = new WeakMap<Request, string>();
 export const rememberIp = (req: Request, ip: string | undefined) => {
@@ -20,7 +20,7 @@ export const requestIp = (req: Request): string | null => req.headers.get("cf-co
 export async function recordSignIn(req: Request, session: { token: string; userId: string }) {
 	const ip = requestIp(req);
 	const country = countryFromHeader(req.headers.get("cf-ipcountry")) ?? null;
-	const app = (await platformSource(req)) ?? "Xitter for Web";
+	const app = (await platformSource(req)) ?? webSource();
 	await sql`insert into login_events (id, user_id, ip, country, app, user_agent)
 		values (${newId()}::bigint, ${session.userId}::bigint, ${ip}, ${country}, ${app}, ${(req.headers.get("user-agent") ?? "").slice(0, 500)})`;
 	await sql`update sessions set ip = ${ip} where token = ${session.token}`;

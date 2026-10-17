@@ -70,7 +70,8 @@ export function settingsFor(user: User): Record<string, unknown> {
 // bar is narrow, the word mark when it is wide. The bar's width depends on the
 // window and on the page (Chat keeps it narrow), so tidy.ts measures it and sets
 // data-wide-nav on <html>. The client marks its dark themes with color-scheme on <html>.
-const LOGO = 'header h1 a[aria-label="X"]';
+// The link's label is the instance's name (patch.ts), so it is found by place.
+const LOGO = "header h1 a";
 const DARK = 'html[style*="color-scheme: dark"]';
 const WIDE = "html[data-wide-nav]";
 // the X drawn at the top of the sign-in dialog, known by its path

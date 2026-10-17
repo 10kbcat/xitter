@@ -3,6 +3,7 @@
 
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { vapidPublicKey } from "./push";
+import { settings } from "./settings";
 
 // X's VAPID public key, which the client subscribes to push with; pushes can
 // only be signed with the private half, so the instance's own goes in its place
@@ -54,6 +55,26 @@ const CHAT_RULES: [RegExp, string][] = [
 	[/https:\/\/ton\.x\.com/g, PUBLIC_ORIGIN],
 ];
 
+// The translation files hold most sentences the client shows ("Sign up for X";
+// "Home / X" is built from the one string "X"), so there the brand becomes the
+// instance's name inside every string literal. Newer parts (Chat, the share
+// sheet, embeds) keep their messages in the code, where "X" is also a plain
+// value (a variable, an enum member) and a regular expression can't tell
+// strings from code reliably: there only literals that read as prose change,
+// three words or more and nothing that looks like code. Check a new client
+// build with scripts/test-branding.ts.
+const I18N = /^\/responsive-web\/client-web\/i18n\//;
+const STRING = /"(?:[^"\\\n]|\\.)*"/g;
+const PROSE = /^"[^();=`]*"$/;
+const WORDS = /\S\s+\S+\s+\S/;
+// a whole word, not "X.com", "SpaceX", "@X", "X-Large" or "Mac OS X"
+const BRAND = /(?<![\w.@/$-]|OS )X(?![\w$-]|\.com)/g;
+
+export function brandText(text: string, name: string, code = false): string {
+	const literal = JSON.stringify(name).slice(1, -1);
+	return text.replace(STRING, (s) => (!code || (PROSE.test(s) && WORDS.test(s)) ? s.replace(BRAND, () => literal) : s));
+}
+
 export function patchText(text: string, chat = false): string {
 	let out = text;
 	for (const [re, to] of chat ? [...CHAT_RULES, ...RULES] : RULES) out = out.replace(re, to);
@@ -62,11 +83,17 @@ export function patchText(text: string, chat = false): string {
 
 const cache = new Map<string, Buffer>();
 
+// the name can change while the server runs, so script files are cached per name
 export function patchFile(key: string, raw: Buffer): Buffer {
-	let hit = cache.get(key);
+	const js = key.endsWith(".js");
+	const name = settings().instance_name;
+	const slot = js ? `${key}\0${name}` : key;
+	let hit = cache.get(slot);
 	if (!hit) {
-		hit = Buffer.from(patchText(raw.toString("utf8"), key.startsWith("/x-web/xchat/")));
-		cache.set(key, hit);
+		let text = patchText(raw.toString("utf8"), key.startsWith("/x-web/xchat/"));
+		if (js) text = brandText(text, name, !I18N.test(key));
+		hit = Buffer.from(text);
+		cache.set(slot, hit);
 	}
 	return hit;
 }

@@ -150,11 +150,12 @@ export const TIDY_SCRIPT = `(function(){
 		// Settings > Email's "Update email address": our page, not X's flow
 		if(p.indexOf("/i/flow/add_email")===0)location.replace("/account/email");
 	}
-	// the signed-out footer ends with X's copyright: the instance's name and source instead
+	// the signed-out footer ends with X's copyright (its name already the
+	// instance's, patch.ts): the instance's name and source instead
 	function footer(){
 		var nav=document.querySelector('nav[aria-label="Footer"]');
 		if(!nav||nav.querySelector("[data-xitter-source]"))return;
-		var c=[].find.call(nav.querySelectorAll("span"),function(s){return /X Corp/.test(s.textContent)});
+		var c=[].find.call(nav.querySelectorAll("span"),function(s){return /^\u00a9 \d{4} .* Corp\.$/.test(s.textContent)});
 		if(!c)return;
 		c.textContent=T.instance+" · ";
 		var a=document.createElement("a");
@@ -206,10 +207,8 @@ export const TIDY_SCRIPT = `(function(){
 		if(location.pathname.indexOf("/i/birdwatch")===0||location.pathname.indexOf("/i/communitynotes")===0)document.querySelectorAll("span").forEach(function(n){
 			if(n.childElementCount)return;
 			var text=n.textContent;
-			if(text==="Note statuses aren’t defined by majority rule")n.textContent="Xitter uses a local rating rule";
+			if(text==="Note statuses aren’t defined by majority rule")n.textContent=T.instance+" uses a local rating rule";
 			else if(text&&text.indexOf("To identify notes that are helpful to a wide range of people, note statuses require agreement")===0)n.textContent="Notes appear on posts after at least three ratings, when two thirds rate them Helpful. Authors cannot rate their own notes.";
-			else if(text==="Shown on X")n.textContent="Shown on "+T.instance;
-			else if(text==="Not shown on X")n.textContent="Not shown on "+T.instance;
 		});
 		ownScreens();
 		footer();

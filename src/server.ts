@@ -77,7 +77,15 @@ const unknown = new Map<string, number>();
 
 const apiError = (status: number, code: number, message: string) => Response.json({ errors: [{ code, message }] }, { status });
 
-const etags = new Map<string, string>();
+const etags = new WeakMap<Buffer, string>();
+
+// The panel names the instance in its markup and in its scripts' single-quoted
+// strings; as entities the name is safe in both.
+const ADMIN_ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "\\": "&#92;" };
+const adminPage = async () => {
+	const name = settings().instance_name.replace(/[&<>"'\\]/g, (c) => ADMIN_ENTITIES[c]);
+	return (await Bun.file(new URL("./admin.html", import.meta.url)).text()).replaceAll("{{instance}}", () => name);
+};
 
 async function serveClient(req: Request, pathname: string): Promise<Response> {
 	const cdnPath = pathname.slice("/abs".length);
@@ -91,10 +99,10 @@ async function serveClient(req: Request, pathname: string): Promise<Response> {
 	// The file name stays the same when our patches change, so patched files are
 	// revalidated against a hash of what we actually serve.
 	const body = patchFile(cdnPath, raw);
-	let etag = etags.get(cdnPath);
+	let etag = etags.get(body);
 	if (!etag) {
 		etag = `"${Bun.hash(body).toString(36)}"`;
-		etags.set(cdnPath, etag);
+		etags.set(body, etag);
 	}
 	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
 	return new Response(new Uint8Array(body), { headers: { "content-type": type, "cache-control": "no-cache", etag } });
@@ -228,7 +236,7 @@ const server = Bun.serve({
 		if (p.startsWith("/admin/api/")) return adminApi(req, p.slice("/admin/api/".length), viewer);
 		if (p === "/admin/flags.json" && viewer?.role) return Response.json(flagPickerData(null).flags);
 		if ((p === "/admin" || p === "/admin/") && viewer?.role)
-			return new Response(Bun.file(new URL("./admin.html", import.meta.url)), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+			return new Response(await adminPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 		if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
 		if (API_PREFIX.test(p) || req.method !== "GET") {
 			// the event stream must outlive the default idle timeout
