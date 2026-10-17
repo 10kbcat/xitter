@@ -628,3 +628,27 @@ create table if not exists bookmark_folder_posts (
 
 -- the reply the conversation's author pinned under their post
 alter table posts add column if not exists pinned_reply_id bigint references posts (id) on delete set null;
+
+-- topics (topics.ts): staff name a subject and its keywords; people follow it or turn it down
+create table if not exists topics (
+	id bigint primary key,
+	name text not null check (char_length(name) between 1 and 50),
+	description text not null default '',
+	keywords text[] not null,
+	created_at timestamptz not null default now()
+);
+create unique index if not exists topics_name_key on topics (lower(name));
+create table if not exists topic_follows (
+	user_id bigint not null references users (id) on delete cascade,
+	topic_id bigint not null references topics (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (user_id, topic_id)
+);
+create index if not exists topic_follows_topic_idx on topic_follows (topic_id);
+create table if not exists topic_not_interested (
+	user_id bigint not null references users (id) on delete cascade,
+	topic_id bigint not null references topics (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (user_id, topic_id)
+);
+create index if not exists topic_not_interested_topic_idx on topic_not_interested (topic_id);

@@ -156,6 +156,7 @@ const PAGES = {
 	media: { icon: "photo_library", title: "Media" },
 	invites: { icon: "confirmation_number", title: "Invites" },
 	badges: { icon: "verified", title: "Badges" },
+	topics: { icon: "tag", title: "Topics" },
 	apps: { icon: "devices", title: "Client apps" },
 	settings: { icon: "tune", title: "Settings" },
 	audit: { icon: "history", title: "Audit log" },
@@ -283,6 +284,34 @@ const RENDER = {
 		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
 			if (!confirm("Delete this badge? Accounts wearing it lose it.")) return;
 			act(() => api("deleteBadge", { id: b.dataset.del }), "Badge deleted").then(route);
+		});
+	},
+
+	async topics(main) {
+		const { topics } = await api("topics");
+		const form = (t = {}) => '<div class="row"><input data-f="name" placeholder="Name, like Space" maxlength="50" style="flex:1;min-width:160px" value="' + esc(t.name ?? "") + '">' +
+			'<input data-f="keywords" placeholder="Keywords, comma separated: nasa, rocket, #space" style="flex:2;min-width:220px" value="' + esc((t.keywords ?? []).join(", ")) + '"></div>' +
+			'<div class="row" style="margin-top:8px"><input data-f="description" placeholder="Description (optional)" maxlength="200" style="flex:1" value="' + esc(t.description ?? "") + '"></div>';
+		const read = (box) => Object.fromEntries([...box.querySelectorAll("[data-f]")].map((i) => [i.dataset.f, i.value]));
+		main.innerHTML = "<h1>Topics</h1>" +
+			'<p class="dim">People follow topics from "Topics to follow" in the side bar and from a post\'s menu. A post matches a topic when it has one of its keywords (with or without #). "For you" lifts posts on followed topics and labels the ones from accounts people don\'t follow; "Not interested" keeps them out.</p>' +
+			(can("admin") ? '<div class="box" style="margin-bottom:16px" id="tnew"><h2>New topic</h2>' + form() + '<div class="row" style="margin-top:8px"><button class="btn primary" id="tc">Create</button></div></div>' : "") +
+			'<div class="scroll">' + (topics.length
+				? '<table class="table"><tr><th>Topic</th><th>Keywords</th><th>Followers</th><th></th></tr>' +
+					topics.map((t) => '<tr data-topic="' + esc(t.id) + '"><td><b>' + esc(t.name) + '</b><div class="small dim">' + esc(t.description) + "</div></td><td class=\"small\">" + esc(t.keywords.join(", ")) + "</td><td>" + t.followers +
+						"</td><td>" + (can("admin") ? '<button class="btn" data-edit="' + esc(t.id) + '">Edit</button> <button class="btn danger" data-del="' + esc(t.id) + '">Delete</button>' : "") + "</td></tr>").join("") + "</table>"
+				: '<div class="empty">No topics yet.</div>') + "</div>";
+		if ($("#tc")) $("#tc").onclick = () => act(() => api("saveTopic", read($("#tnew"))), "Topic created").then(route);
+		main.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
+			const t = topics.find((x) => x.id === b.dataset.edit);
+			const row = b.closest("tr");
+			row.innerHTML = '<td colspan="4"><div class="box">' + form(t) + '<div class="row" style="margin-top:8px"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel>Cancel</button></div></div></td>';
+			row.querySelector("[data-save]").onclick = () => act(() => api("saveTopic", { id: t.id, ...read(row) }), "Topic saved").then(route);
+			row.querySelector("[data-cancel]").onclick = route;
+		});
+		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+			if (!confirm("Delete this topic? Its followers lose it.")) return;
+			act(() => api("deleteTopic", { id: b.dataset.del }), "Topic deleted").then(route);
 		});
 	},
 

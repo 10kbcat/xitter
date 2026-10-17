@@ -24,6 +24,8 @@ copy during setup, and it stays on that machine.
 - Home timeline: a ranked "For you" and a chronological "Following"
 - Notifications with unread counts
 - Search with X's operators, trends, Explore
+- Topics: staff define them with keywords; people follow them from "Topics to
+  follow" or a post's menu, and "For you" brings in and labels matching posts
 - Blocks, mutes and muted words
 - Direct messages, end-to-end encrypted, with key backup
 - Community Notes
@@ -36,9 +38,9 @@ copy during setup, and it stays on that machine.
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges, roles, organisations, posts, reports, invites, instance settings,
-  feature switches, announcements and an audit log
+  feature switches, announcements, topics and an audit log
 
-Not built yet: Spaces and live video, topics and Moments,
+Not built yet: Spaces and live video, Moments,
 saved searches, account notification bells, connected apps and login history,
 push notifications, a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set.

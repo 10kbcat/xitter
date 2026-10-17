@@ -45,6 +45,7 @@ import {
 	pinnedReplyOf,
 	unrepost,
 } from "./posts";
+import { TopicError, setTopicState, suggestedTopics, topicById, topicContext, topicFeedbackActions, topicFeedbackKeys, topicResult, topicsForPosts } from "./topics";
 import { affiliatesOf, followList, suggestedUsers, userById, userByName, usersByIds } from "./users";
 
 type Vars = Record<string, any>;
@@ -68,12 +69,13 @@ function pageOf(vars: Vars) {
 	return { count, at, newer: cursor[0] === "t" && !!at };
 }
 
-const homeResponse = (entries: unknown[]) => ({
+const homeResponse = (entries: unknown[], feedbackActions: unknown[] = []) => ({
 	data: {
 		home: {
 			home_timeline_urt: {
 				instructions: [{ type: "TimelineAddEntries", entries }],
 				metadata: { scribeConfig: { page: "following" } },
+				...(feedbackActions.length ? { responseObjects: { feedbackActions } } : {}),
 			},
 		},
 	},
@@ -105,11 +107,16 @@ const forYou: Handler = async (viewer, vars) => {
 	const page = await rankedFeed(viewer.id, { asOf, offset, limit: count });
 	// sort indexes run down from asOf in ranked order, below anything newer
 	const base = BigInt(asOf);
-	const entries: unknown[] = page.items.map((item, i) => feedEntry(item, (base - BigInt(offset + i) - 1n).toString()));
+	const topics = await topicsForPosts(viewer.id, page.items.filter((i) => !i.repost).map((i) => ({ id: i.post.id, authorId: i.post.author.id })));
+	const feedbackActions = [...new Map([...topics.values()].map((t) => [t.id, t])).values()].flatMap(topicFeedbackActions);
+	const entries: unknown[] = page.items.map((item, i) => {
+		const topic = item.repost ? undefined : topics.get(item.post.id);
+		return feedEntry(item, (base - BigInt(offset + i) - 1n).toString(), topic && { context: topicContext(topic), feedbackKeys: topicFeedbackKeys(topic) });
+	});
 	if (!ranked) entries.unshift(cursorEntry("Top", `t${asOf}`, inc(asOf)));
 	if (page.next !== undefined) entries.push(cursorEntry("Bottom", `r${page.next}.${asOf}`, (base - BigInt(page.next) - 1n).toString()));
 	await globalPin(viewer,entries,!cursor);
-	return homeResponse(entries);
+	return homeResponse(entries, feedbackActions);
 };
 
 const home =
@@ -198,6 +205,15 @@ const pinActions = () =>
 			clientEventInfo: { component: "pinned_reply", element: state === "Pinned" ? "unpin" : "pin" },
 		},
 	}));
+
+const topicState = (what: Parameters<typeof setTopicState>[2]): Handler => async (v, vars) => {
+	try {
+		return { data: { topic: topicResult(await setTopicState(v.id, String(vars.topicId ?? ""), what)) } };
+	} catch (e) {
+		if (e instanceof TopicError) throw new PostError(e.message, 144);
+		throw e;
+	}
+};
 
 const pinReply = (on: boolean): Handler => async (viewer, vars) => {
 	const done = isId(vars.conversationId) && isId(vars.tweetId) && (await setPinnedReply(viewer.id, vars.conversationId, vars.tweetId, on));
@@ -581,6 +597,36 @@ const handlers: Record<string, Handler> = {
 	},
 	UserTweets: profileFeed(false, "both"),
 	UserRepostsTimeline: profileFeed(false, "reposts"),
+	TopicByRestId: async (v, vars) => {
+		const t = await topicById(v.id, String(vars.topicId ?? ""));
+		return { data: t ? { topic: topicResult(t) } : {} };
+	},
+	TopicFollow: topicState("follow"),
+	TopicUnfollow: topicState("unfollow"),
+	TopicNotInterested: topicState("not_interested"),
+	TopicUndoNotInterested: topicState("undo_not_interested"),
+	TopicToFollowSidebar: async (v) => {
+		const topics = await suggestedTopics(v.id);
+		const entries = topics.length
+			? [
+					{
+						entryId: "topics-to-follow",
+						sortIndex: "1",
+						content: {
+							__typename: "TimelineTimelineModule",
+							entryType: "TimelineTimelineModule",
+							displayType: "Vertical",
+							header: { text: "Topics to follow", sticky: false },
+							items: topics.map((t) => ({
+								entryId: `topics-to-follow-topic-${t.id}`,
+								item: { itemContent: { __typename: "TimelineTopic", itemType: "TimelineTopic", topic: topicResult(t), topicDisplayType: "Pill", topicFunctionalityType: "Recommendation" } },
+							})),
+						},
+					},
+				]
+			: [];
+		return { data: { user: { result: { __typename: "User", timeline: { timeline: { instructions: [{ type: "TimelineAddEntries", entries }] } } } } } };
+	},
 	PinReply: pinReply(true),
 	UnpinReply: pinReply(false),
 	PinTweet: async (v, vars) => {

@@ -15,6 +15,7 @@ import { REASONS } from "./reports";
 import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 import { createPlatform } from "./platforms";
+import { TopicError, deleteTopic, listTopics, saveTopic } from "./topics";
 import { toolActions } from "./admin-tools";
 
 type Role = "admin" | "moderator" | "support";
@@ -93,6 +94,22 @@ const ACTIONS: Record<string, Action> = {
 		const rows = await sql`update client_platforms set revoked = true where id = ${id}::bigint returning id`;
 		if (!rows.length) throw new AdminError("No such platform.", 404);
 		await audit(a, "revoke_platform", id);
+		return {};
+	} },
+	topics: { role: "support", run: async () => ({ topics: await listTopics() }) },
+	saveTopic: { role: "admin", run: async (a, b) => {
+		const id = await saveTopic({ ...b, id: b.id ? idOf(b.id) : undefined }).catch((e) => {
+			throw e instanceof TopicError ? new AdminError(e.message) : e;
+		});
+		await audit(a, b.id ? "edit_topic" : "create_topic", id, { name: b.name, keywords: b.keywords });
+		return { id };
+	} },
+	deleteTopic: { role: "admin", run: async (a, b) => {
+		const id = idOf(b.id);
+		await deleteTopic(id).catch((e) => {
+			throw e instanceof TopicError ? new AdminError(e.message, 404) : e;
+		});
+		await audit(a, "delete_topic", id);
 		return {};
 	} },
 	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role }) },

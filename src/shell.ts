@@ -105,6 +105,12 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	...Object.fromEntries(Object.entries(config ?? {}).filter(([k]) => !HOST_SWITCHES.includes(k))),
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
 	responsive_web_pinned_replies_enabled: { value: true },
+	responsive_web_sidebar_ttf_enabled: { value: true },
+	// on, it drops every post label but reposts, pins and communities, topics included
+	rweb_home_mixer_enable_social_context_filter_social_contexts: { value: false },
+	// the captured "see_more" links a topic label to a topic page this client no
+	// longer has; any other value gives the label an inline Follow button instead
+	topics_context_controls_followed_variation: { value: "follow_button" },
 	responsive_web_edit_tweet_enabled: { value: true },
 	responsive_web_edit_tweet_composition_enabled: { value: true },
 	responsive_web_edit_tweet_perspective_enabled: { value: true },

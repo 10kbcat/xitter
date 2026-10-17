@@ -416,7 +416,9 @@ export function repostResult(id: string, by: User, createdAt: Date, original: Po
 	};
 }
 
-type SocialContext = { type: "TimelineGeneralContext"; contextType: string; text: string; landingUrl?: { url: string; urlType: string } };
+type SocialContext =
+	| { type: "TimelineGeneralContext"; contextType: string; text: string; landingUrl?: { url: string; urlType: string } }
+	| { type: "TimelineTopicContext"; topic: unknown; functionalityType: string };
 
 const tweetItem = (result: unknown, socialContext?: SocialContext, displayType = "Tweet") => ({
 	__typename: "TimelineTweet",
@@ -426,8 +428,13 @@ const tweetItem = (result: unknown, socialContext?: SocialContext, displayType =
 	...(socialContext ? { socialContext } : {}),
 });
 
-const itemEntry = (id: string, result: unknown, sortIndex: string, socialContext?: SocialContext) => ({
-	content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: tweetItem(result, socialContext) },
+const itemEntry = (id: string, result: unknown, sortIndex: string, socialContext?: SocialContext, feedbackKeys?: string[]) => ({
+	content: {
+		__typename: "TimelineTimelineItem",
+		entryType: "TimelineTimelineItem",
+		itemContent: tweetItem(result, socialContext),
+		...(feedbackKeys ? { feedbackInfo: { feedbackKeys } } : {}),
+	},
 	entryId: `tweet-${id}`,
 	sortIndex,
 });
@@ -444,9 +451,18 @@ export const tweetEntry = (p: PostRow, sortIndex: string) => itemEntry(p.id, twe
 export const pinnedEntry = (p: PostRow, sortIndex: string) =>
 	itemEntry(p.id, tweetResult(p), sortIndex, { type: "TimelineGeneralContext", contextType: "Pin", text: "Pinned" });
 
-// a post or a repost from feed(); entry ids are item ids, so both fit in one timeline
-export const feedEntry = (item: { id: string; post: PostRow; repost?: { by: User; created_at: Date } }, sortIndex: string) =>
-	item.repost ? itemEntry(item.id, repostResult(item.id, item.repost.by, item.repost.created_at, item.post), sortIndex) : tweetEntry(item.post, sortIndex);
+// a post or a repost from feed(); entry ids are item ids, so both fit in one timeline.
+// `topic`: the followed topic that brought a stranger's post into "For you".
+export const feedEntry = (
+	item: { id: string; post: PostRow; repost?: { by: User; created_at: Date } },
+	sortIndex: string,
+	topic?: { context: SocialContext; feedbackKeys: string[] },
+) =>
+	item.repost
+		? itemEntry(item.id, repostResult(item.id, item.repost.by, item.repost.created_at, item.post), sortIndex)
+		: topic
+			? itemEntry(item.post.id, tweetResult(item.post), sortIndex, topic.context, topic.feedbackKeys)
+			: tweetEntry(item.post, sortIndex);
 
 // the Media tab: one grid module, later pages append to it
 const GRID = "profile-grid-0";

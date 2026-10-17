@@ -5,12 +5,14 @@
 // Weights relative to a like, from the 2023 release's heavy ranker: a repost is
 // worth 2, a reply 27, and a reply the author answered 150. A post from someone
 // the viewer follows, or that people they follow liked or reposted, gets a
-// boost, as does an author the viewer often likes or replies to. The total
-// falls with age, so new posts can still rise past old popular ones.
+// boost, as does an author the viewer often likes or replies to, or a post on a
+// topic they follow. The total falls with age, so new posts can still rise past
+// old popular ones.
 
 import { sql } from "./db";
 import { idTime } from "./ids";
 import { type FeedItem, communityVisible, homeHidden, itemsFromRows } from "./posts";
+import { followedTopicMatch, unwantedTopicMatch } from "./topics";
 
 // how many candidates are ranked; the feed ends after them
 const CANDIDATES = 600;
@@ -30,6 +32,7 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 			select f.*, (select x.user_id from posts x where x.id = f.post_id) as original_author
 			from feed_items f
 			where not f.is_reply and f.item_id <= ${opts.asOf}::bigint and ${homeHidden(viewerId)} and ${communityVisible(viewerId)}
+				and not ${unwantedTopicMatch(viewerId, sql`f.post_id`, sql`(select x.user_id from posts x where x.id = f.post_id)`)}
 			order by f.item_id desc limit ${CANDIDATES * 3}
 		),
 		scored as (
@@ -47,6 +50,7 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 						where l.post_id = c.post_id and fw.follower_id = ${viewerId}::bigint)
 					or exists (select 1 from reposts r join follows fw on fw.followee_id = r.user_id
 						where r.post_id = c.post_id and fw.follower_id = ${viewerId}::bigint) then 1.5 else 1.0 end)
+				* (case when ${followedTopicMatch(viewerId, sql`c.post_id`)} then 1.5 else 1.0 end)
 				-- authors the viewer engaged with in the last month, up to double
 				* (1 + least(1.0, 0.1 * (
 					(select count(*) from likes l join posts lp on lp.id = l.post_id
