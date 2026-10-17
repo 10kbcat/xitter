@@ -99,7 +99,9 @@ export const STICKER_PICKER_SCRIPT = `(function(){
 			var svg=button.querySelector("svg");
 			if(svg){svg.setAttribute("viewBox","0 -960 960 960");svg.innerHTML='<g><path d="${ICON}"></path></g>'}
 			button.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();if(open)close();else show(button,toolbar)},true);
-			slot.parentElement.insertBefore(copy,slot.nextSibling);
+			// last in the row: on a narrow screen the row scrolls, and an extra
+			// button in the middle pushed the client's own (schedule, location) out of view
+			slot.parentElement.appendChild(copy);
 		});
 	}
 	new MutationObserver(add).observe(document.documentElement,{childList:true,subtree:true});
