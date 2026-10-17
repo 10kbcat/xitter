@@ -16,6 +16,7 @@ import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, setti
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 import { createPlatform } from "./platforms";
 import { TopicError, deleteTopic, listTopics, saveTopic } from "./topics";
+import { CardError, deleteCard, listCards, saveCard } from "./explore-cards";
 import { toolActions } from "./admin-tools";
 
 type Role = "admin" | "moderator" | "support";
@@ -94,6 +95,22 @@ const ACTIONS: Record<string, Action> = {
 		const rows = await sql`update client_platforms set revoked = true where id = ${id}::bigint returning id`;
 		if (!rows.length) throw new AdminError("No such platform.", 404);
 		await audit(a, "revoke_platform", id);
+		return {};
+	} },
+	cards: { role: "support", run: async () => ({ cards: await listCards() }) },
+	saveCard: { role: "admin", run: async (a, b) => {
+		const id = await saveCard(b).catch((e) => {
+			throw e instanceof CardError ? new AdminError(e.message) : e;
+		});
+		await audit(a, b.id ? "edit_explore_card" : "create_explore_card", id, { title: b.title, kind: b.kind });
+		return { id };
+	} },
+	deleteCard: { role: "admin", run: async (a, b) => {
+		const id = idOf(b.id);
+		await deleteCard(id).catch((e) => {
+			throw e instanceof CardError ? new AdminError(e.message, 404) : e;
+		});
+		await audit(a, "delete_explore_card", id);
 		return {};
 	} },
 	topics: { role: "support", run: async () => ({ topics: await listTopics() }) },

@@ -26,6 +26,8 @@ copy during setup, and it stays on that machine.
   account arrive as notifications) and turning an account's reposts off
 - Search with X's operators, trends, Explore; trends by location (Explore
   settings: worldwide, a country, or yours with "Trends for you")
+- News and sports cards at the top of Explore, written by staff (Admin >
+  Explore cards); sports cards are scoreboards you update as the game goes
 - Topics: staff define them with keywords; people follow them from "Topics to
   follow" or a post's menu, and "For you" brings in and labels matching posts
 - Blocks, mutes and muted words
@@ -43,7 +45,7 @@ copy during setup, and it stays on that machine.
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges, roles, organisations, posts, reports, invites, instance settings,
-  feature switches, announcements, topics and an audit log
+  feature switches, announcements, topics, Explore cards and an audit log
 
 Not built yet: Spaces and live video, Moments, connected apps and login history,
 push notifications, a verified-email code at sign-up. Email is sent through

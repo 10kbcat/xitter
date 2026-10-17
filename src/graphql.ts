@@ -15,6 +15,7 @@ import { sessionsList, usernameAvailable } from "./account-settings";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { trendScope } from "./explore-settings";
+import { activeCards, cardsEntry } from "./explore-cards";
 import { blockedIds, blockedFor, outOfView, protectedFor } from "./blocks";
 import { settings } from "./settings";
 import { rankedFeed } from "./ranking";
@@ -904,11 +905,13 @@ async function explorePage(viewer: Viewer) {
 	const scope = await trendScope(viewer.id);
 	const trends = await trendingHashtags(7, 20, scope);
 	const base = BigInt(newId());
-	const entries = trends.map((t, i) => ({
+	const entries: unknown[] = trends.map((t, i) => ({
 		entryId: `trend-${t.tag.slice(1)}`,
 		sortIndex: (base - BigInt(i)).toString(),
 		content: { __typename: "TimelineTimelineItem", entryType: "TimelineTimelineItem", itemContent: trendItem(t, i, scope.label) },
 	}));
+	const cards = await activeCards();
+	if (cards.length) entries.unshift(cardsEntry(cards, (base + 1n).toString()));
 	const timeline = { instructions: [{ type: "TimelineAddEntries", entries }] };
 	return { data: { explore_page: { id: globalId("ExplorePage", "explore"), body: { __typename: "Timeline", timeline } } } };
 }

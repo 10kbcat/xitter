@@ -682,3 +682,28 @@ create table if not exists contacts (
 	created_at timestamptz not null default now()
 );
 create index if not exists contacts_user_idx on contacts (user_id, id);
+
+-- news and sports cards at the top of Explore (explore-cards.ts)
+create table if not exists explore_cards (
+	id bigint primary key,
+	kind text not null check (kind in ('news', 'sports')),
+	title text not null,
+	summary text not null default '',
+	category text not null default '',
+	query text not null,
+	image bytea,
+	image_mime text,
+	image_width integer,
+	image_height integer,
+	home text not null default '',
+	away text not null default '',
+	home_score text not null default '',
+	away_score text not null default '',
+	state text check (state in ('Scheduled', 'InProgress', 'Completed', 'Postponed', 'Cancelled')),
+	clock text not null default '',
+	starts_at timestamptz,
+	ends_at timestamptz,
+	hidden boolean not null default false,
+	position integer not null default 0,
+	created_at timestamptz not null default now()
+);

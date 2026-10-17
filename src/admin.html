@@ -179,6 +179,7 @@ const PAGES = {
 	invites: { icon: "confirmation_number", title: "Invites" },
 	badges: { icon: "verified", title: "Badges" },
 	topics: { icon: "tag", title: "Topics" },
+	cards: { icon: "newspaper", title: "Explore cards" },
 	apps: { icon: "devices", title: "Client apps" },
 	settings: { icon: "tune", title: "Settings" },
 	audit: { icon: "history", title: "Audit log" },
@@ -306,6 +307,65 @@ const RENDER = {
 		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
 			if (!(await ask("Delete this badge? Accounts wearing it lose it."))) return;
 			act(() => api("deleteBadge", { id: b.dataset.del }), "Badge deleted").then(route);
+		});
+	},
+
+	async cards(main) {
+		const { cards } = await api("cards");
+		const val = (c, k) => esc(c[k] ?? "");
+		const local = (d) => d ? new Date(new Date(d).getTime() - new Date(d).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+		const form = (c = { kind: "news" }) =>
+			'<div class="row"><select data-f="kind"><option value="news"' + (c.kind === "news" ? " selected" : "") + '>News</option><option value="sports"' + (c.kind === "sports" ? " selected" : "") + ">Sports</option></select>" +
+			'<input data-f="title" placeholder="Title" maxlength="100" style="flex:2;min-width:200px" value="' + val(c, "title") + '">' +
+			'<input data-f="category" placeholder="Category, like Technology or Premier League" maxlength="40" style="flex:1;min-width:160px" value="' + val(c, "category") + '"></div>' +
+			'<div class="row" style="margin-top:8px"><input data-f="summary" placeholder="Summary (optional)" maxlength="280" style="flex:2;min-width:200px" value="' + val(c, "summary") + '">' +
+			'<input data-f="query" placeholder="Opens a search for, like #launch" maxlength="200" style="flex:1;min-width:160px" value="' + val(c, "query") + '"></div>' +
+			'<div class="row sports" style="margin-top:8px"><input data-f="home" placeholder="Home team" maxlength="40" value="' + val(c, "home") + '"><input data-f="home_score" placeholder="Score" maxlength="8" style="width:70px" value="' + val(c, "home_score") + '">' +
+			'<input data-f="away" placeholder="Away team" maxlength="40" value="' + val(c, "away") + '"><input data-f="away_score" placeholder="Score" maxlength="8" style="width:70px" value="' + val(c, "away_score") + '">' +
+			'<select data-f="state">' + ["Scheduled", "InProgress", "Completed", "Postponed", "Cancelled"].map((s) => '<option value="' + s + '"' + (c.state === s ? " selected" : "") + ">" + (s === "InProgress" ? "Live" : s === "Completed" ? "Final" : s) + "</option>").join("") + "</select>" +
+			'<input data-f="clock" placeholder="Clock, like 2nd half" maxlength="20" style="width:140px" value="' + val(c, "clock") + '">' +
+			'<label class="small dim">Starts <input type="datetime-local" data-f="starts_at" value="' + local(c.starts_at) + '"></label></div>' +
+			'<div class="row" style="margin-top:8px"><label class="btn">Picture<input type="file" data-image accept="image/png,image/jpeg,image/webp" hidden></label><span class="dim small" data-imagename>' + (c.has_image ? "has a picture" : "PNG, JPEG or WebP, up to 1 MB") + "</span>" +
+			(c.has_image ? '<label class="small"><input type="checkbox" data-f="removeImage"> remove picture</label>' : "") +
+			'<label class="small dim">Until <input type="datetime-local" data-f="ends_at" value="' + local(c.ends_at) + '"></label>' +
+			'<label class="small dim">Order <input data-f="position" type="number" style="width:60px" value="' + (c.position ?? 0) + '"></label>' +
+			'<label class="small"><input type="checkbox" data-f="hidden"' + (c.hidden ? " checked" : "") + "> hidden</label></div>";
+		const read = async (box) => {
+			const out = {};
+			box.querySelectorAll("[data-f]").forEach((i) => out[i.dataset.f] = i.type === "checkbox" ? i.checked : i.type === "datetime-local" ? (i.value ? new Date(i.value).toISOString() : "") : i.value);
+			const file = box.querySelector("[data-image]").files[0];
+			if (file) {
+				if (file.size > 1024 * 1024) throw new Error("Pictures are up to 1 MB.");
+				out.image = await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = () => fail(new Error("Couldn't read the picture.")); r.readAsDataURL(file); });
+			}
+			return out;
+		};
+		const wire = (box) => {
+			const kind = box.querySelector('[data-f="kind"]');
+			const sync = () => box.querySelector(".sports").style.display = kind.value === "sports" ? "" : "none";
+			kind.onchange = sync; sync();
+			const f = box.querySelector("[data-image]");
+			f.onchange = () => box.querySelector("[data-imagename]").textContent = f.files[0]?.name || "";
+		};
+		main.innerHTML = "<h1>Explore cards</h1>" +
+			'<p class="dim">News and sports cards at the top of Explore. Each opens a search. The first news card with a picture is shown large. Sports cards show a scoreboard; update the score here as the game goes.</p>' +
+			(can("admin") ? '<div class="box" style="margin-bottom:16px" id="cnew"><h2>New card</h2>' + form() + '<div class="row" style="margin-top:8px"><button class="btn primary" id="cc">Create</button></div></div>' : "") +
+			(cards.length ? cards.map((c) => '<div class="box" style="margin-bottom:12px" data-card="' + esc(c.id) + '"><div class="row" style="justify-content:space-between"><div><b>' + esc(c.title) + '</b> <span class="dim small">· ' + esc(c.kind) +
+				(c.kind === "sports" ? " · " + esc(c.home) + " " + esc(c.home_score || "–") + " : " + esc(c.away_score || "–") + " " + esc(c.away) : "") + (c.hidden ? " · hidden" : "") + "</span></div>" +
+				(can("admin") ? '<div><button class="btn" data-edit>Edit</button> <button class="btn danger" data-del>Delete</button></div>' : "") + "</div></div>").join("")
+				: '<div class="empty">No cards yet.</div>');
+		if ($("#cnew")) { wire($("#cnew")); $("#cc").onclick = () => act(async () => api("saveCard", await read($("#cnew"))), "Card created").then(route); }
+		main.querySelectorAll("[data-card]").forEach((box) => {
+			const c = cards.find((x) => x.id === box.dataset.card);
+			const del = box.querySelector("[data-del]");
+			if (del) del.onclick = async () => { if (!(await ask("Delete this card?"))) return; act(() => api("deleteCard", { id: c.id }), "Card deleted").then(route); };
+			const edit = box.querySelector("[data-edit]");
+			if (edit) edit.onclick = () => {
+				box.innerHTML = form(c) + '<div class="row" style="margin-top:8px"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel>Cancel</button></div>';
+				wire(box);
+				box.querySelector("[data-save]").onclick = () => act(async () => api("saveCard", { id: c.id, ...(await read(box)) }), "Card saved").then(route);
+				box.querySelector("[data-cancel]").onclick = route;
+			};
 		});
 	},
 

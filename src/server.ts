@@ -25,6 +25,7 @@ import { twoFactorRoute } from "./two-factor";
 import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
+import { cardImage } from "./explore-cards";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -50,6 +51,8 @@ async function servePublic(p: string): Promise<Response> {
 	const name = p.slice("/public/".length);
 	const badge = /^badge-(\d{1,19})\.png$/.exec(name);
 	if (badge) return badgeImage(badge[1]);
+	const card = /^card-(\d{1,19})\.img$/.exec(name);
+	if (card) return cardImage(card[1]);
 	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
 	if (flag) {
 		const svg = flagSvg(flag[1]);
