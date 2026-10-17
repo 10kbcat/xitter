@@ -1,11 +1,17 @@
 // Pins a client build and downloads it into the local archive.
 //
+//   bun scripts/fetch-client.ts                        pin the current build without an account (first run),
+//                                                      then only download files for the pinned build
+//   bun scripts/fetch-client.ts --latest               re-pin the current build without an account
 //   bun scripts/fetch-client.ts --token <auth_token>   signed-in x.com/home of any account
 //   bun scripts/fetch-client.ts --har <file.har>       a capture that contains x.com/home
-//   bun scripts/fetch-client.ts                        only download files for the pinned build
 //
 // The token may also come from TWITTER_AUTH_TOKEN. Only build data is kept: the
 // page's account details are thrown away.
+//
+// Without an account: signed-out x.com pages are now a different app (x-web),
+// but /i/tweetdeck still boots this client for guests. Its feature switches are
+// the guest set, and it has no chat build address, which chat.x.com publishes.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +33,20 @@ async function pageFromToken(token: string): Promise<string> {
 	const html = await res.text();
 	if (!STATE.test(html)) throw new Error(`x.com/home did not return the client page (status ${res.status}, ${res.url}); is the token valid?`);
 	return html;
+}
+
+async function pageAsGuest(): Promise<string> {
+	const res = await fetch("https://x.com/i/tweetdeck", { headers: { "user-agent": UA }, redirect: "follow" });
+	const html = await res.text();
+	if (!STATE.test(html)) throw new Error(`x.com/i/tweetdeck did not return the client page (status ${res.status}, ${res.url}); try --token`);
+	return html;
+}
+
+// the signed-in page names the chat build in its metadata; the guest page doesn't
+async function chatBuildAddress(): Promise<string | undefined> {
+	const res = await fetch("https://chat.x.com/embed-v1.json", { headers: { "user-agent": UA } }).catch(() => undefined);
+	const path = res?.ok ? ((await res.json().catch(() => undefined)) as any)?.metaData?.publicPath : undefined;
+	return typeof path === "string" && /^https:\/\/abs\.twimg\.com\/x-web\/xchat\/embed\/[0-9a-f]+\/$/.test(path) ? path : undefined;
 }
 
 function pageFromHar(file: string): string {
@@ -65,15 +85,18 @@ function snapshot(html: string): { build: Build; runtime: string } {
 
 const token = arg("--token") ?? process.env.TWITTER_AUTH_TOKEN;
 const harFile = arg("--har");
-if (token || harFile) {
-	const { build, runtime } = snapshot(harFile ? pageFromHar(harFile) : await pageFromToken(token!));
+const guest = !token && !harFile && (process.argv.includes("--latest") || !existsSync(BUILD_FILE));
+if (token || harFile || guest) {
+	const { build, runtime } = snapshot(harFile ? pageFromHar(harFile) : token ? await pageFromToken(token) : await pageAsGuest());
+	if (!build.meta.xchatEmbedBuild) {
+		const chat = await chatBuildAddress();
+		if (chat) build.meta.xchatEmbedBuild = chat;
+		else console.log("no chat build address found; chat won't load");
+	}
 	mkdirSync(CLIENT_DIR, { recursive: true });
 	writeFileSync(BUILD_FILE, JSON.stringify(build, null, "\t"));
 	writeFileSync(RUNTIME_FILE, runtime);
 	console.log(`pinned build ${build.sha.slice(0, 12)}: ${build.scripts.length} entry scripts, ${Object.keys(build.featureSwitch.config).length} feature switches`);
-} else if (!existsSync(BUILD_FILE)) {
-	console.error("no pinned build: run with --token <auth_token> or --har <file.har> first");
-	process.exit(1);
 }
 
 // entry scripts, plus every file a capture saw if samples/ exists

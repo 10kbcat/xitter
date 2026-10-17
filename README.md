@@ -49,8 +49,6 @@ push notifications, a verified-email code at sign-up. Email is sent through
 
 - [Bun](https://bun.sh) 1.4 or newer
 - PostgreSQL 14 or newer, with an empty database
-- An X account you can sign in to in a browser. Its `auth_token` cookie is used
-  once to download the client; nothing about the account is kept.
 - Optional: [ffmpeg](https://ffmpeg.org) on the PATH, for video uploads
 
 ### Steps
@@ -64,9 +62,8 @@ bun install
 createdb xitter
 export DATABASE_URL=postgres://<user>@localhost:5432/xitter
 
-# 2. download a client build. Take the value of the auth_token cookie from
-#    a signed-in x.com tab (DevTools > Application > Cookies > https://x.com).
-bun scripts/fetch-client.ts --token <auth_token>
+# 2. download a client build (no X account needed)
+bun scripts/fetch-client.ts
 
 # 3. the first account, made an admin
 bun scripts/create-user.ts <name> <password> "<display name>"
@@ -87,9 +84,15 @@ fills it in.
 On Windows, run the commands in Git Bash or set the variables with
 `$env:DATABASE_URL = "..."` in PowerShell.
 
+Without an account the script pins the build x.com gives signed-out visitors
+at `/i/tweetdeck`, with the guest set of feature switches. `--latest` re-pins
+the current build. `--token <auth_token>` (the cookie from a signed-in x.com
+tab) or `--har <file>` pins the signed-in page instead, with that account's
+switches; nothing about the account is kept.
+
 ### Keep these private
 
-- The `auth_token` cookie is a live login to your X account. Use it only for
+- An `auth_token` cookie is a live login to your X account. Use it only for
   `fetch-client.ts` and don't share it.
 - `client/` holds X's own client code. It is downloaded per instance and must
   not be committed or shared.

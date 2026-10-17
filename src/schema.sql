@@ -51,7 +51,6 @@ do $$ begin
 		alter table users drop column custom_badge_id;
 	end if;
 end $$;
-alter table lists add column if not exists banner_media_id bigint;
 -- the client's "seen this" popups: flag name -> timestamp
 alter table users add column if not exists education_flags jsonb not null default '{}';
 alter table users add column if not exists preferences jsonb not null default '{}';
@@ -78,9 +77,6 @@ create table if not exists post_views (
 	created_at timestamptz not null default now(),
 	primary key (post_id, user_id)
 );
-alter table media add column if not exists alt_text text;
--- the content warning the author put on it: adult_content, graphic_violence, other
-alter table media add column if not exists sensitive_warning text[];
 -- who may reply, set on the first post of a conversation: Community (accounts it follows), ByInvitation (mentioned) or Verified
 alter table posts add column if not exists reply_policy text;
 create table if not exists password_resets (
@@ -251,6 +247,9 @@ create or replace view feed_items as
 -- videos: converted after upload; 'processing' until ffmpeg is done
 alter table media add column if not exists duration_ms integer;
 alter table media add column if not exists state text not null default 'ready';
+alter table media add column if not exists alt_text text;
+-- the content warning the author put on it: adult_content, graphic_violence, other
+alter table media add column if not exists sensitive_warning text[];
 
 -- long-form articles; the body is the editor's Draft.js document, kept as sent.
 -- Publishing creates a post that carries the article (posts.article_id).
@@ -475,6 +474,7 @@ create table if not exists lists (
 	created_at timestamptz not null default now()
 );
 create index if not exists lists_owner_idx on lists (owner_id);
+alter table lists add column if not exists banner_media_id bigint;
 
 create table if not exists list_members (
 	list_id bigint not null references lists (id) on delete cascade,
