@@ -707,3 +707,16 @@ create table if not exists explore_cards (
 	position integer not null default 0,
 	created_at timestamptz not null default now()
 );
+
+-- sign-ins (login-history.ts); sessions keep the address they started from
+create table if not exists login_events (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	ip text,
+	country text,
+	app text not null,
+	user_agent text,
+	created_at timestamptz not null default now()
+);
+create index if not exists login_events_user_idx on login_events (user_id, created_at desc);
+alter table sessions add column if not exists ip text;

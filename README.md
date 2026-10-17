@@ -40,15 +40,16 @@ copy during setup, and it stays on that machine.
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
   (reactivates on sign-in within 30 days), data archive, email notification
-  settings, sessions list with revoke, two-factor sign-in with an
+  settings, sessions list with revoke, account access history (each sign-in
+  with its app and address), two-factor sign-in with an
   authenticator app and backup codes, password reset by email
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges, roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements, topics, Explore cards and an audit log
 
-Not built yet: Spaces and live video, Moments, connected apps and login history,
-push notifications, a verified-email code at sign-up. Email is sent through
+Not built yet: Spaces and live video, Moments, signing in other apps (Connected
+apps stays empty), push notifications, a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set.
 
 ## Running it locally

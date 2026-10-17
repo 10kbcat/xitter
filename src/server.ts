@@ -26,6 +26,7 @@ import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
+import { rememberIp } from "./login-history";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -161,6 +162,7 @@ await resumeVideos(MEDIA_DIR);
 const server = Bun.serve({
 	port: PORT,
 	async fetch(req) {
+		rememberIp(req, server.requestIP(req)?.address);
 		const url = new URL(req.url);
 		const p = url.pathname;
 		if (p.startsWith("/abs/")) return serveClient(req, p);

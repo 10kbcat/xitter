@@ -1,6 +1,7 @@
 // The rules page, and sign-in by form post for scripts. People sign in and up
 // in X's own dialog, served by onboarding.ts.
 
+import { recordSignIn } from "./login-history";
 import { login, sessionCookies } from "./auth";
 import { settings } from "./settings";
 
@@ -67,6 +68,7 @@ export async function handleLogin(req: Request): Promise<Response> {
 	const password = f.password ?? "";
 	const session = username && password ? await login(username, password) : undefined;
 	if (!session) return new Response("Wrong username or password.", { status: 401 });
+	await recordSignIn(req, session);
 	return signedIn(session);
 }
 

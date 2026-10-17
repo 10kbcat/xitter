@@ -17,6 +17,7 @@ import { accountSettingsRoute, changeUsername, revokeSessionsRoute } from "./acc
 import { dataExportRoute } from "./data-export";
 import { addressBook, deleteContacts, uploadContacts } from "./contacts";
 import { exploreSettings, searchLocations, setExploreSettings } from "./explore-settings";
+import { loginHistory } from "./login-history";
 import { answerRequest, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 
 // friendships/show's shape, from the viewer's side (source) and the other account's (target)
@@ -158,7 +159,11 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	}
 	if (method === "GET" && path === "/1.1/account/personalization/p13n_preferences.json")
 		return Response.json({ interest_preferences: { disabled_interests: [], partner_interests: [] }, personalization_enabled: false });
-	if (method === "GET" && path === "/1.1/account/personalization/p13n_data.json") return Response.json({ interests: { interests: [], partner_interests: [], audience_and_advertisers: {} }, demographics: {} });
+	if (method === "GET" && path === "/1.1/account/personalization/p13n_data.json")
+		return Response.json({ interests: { interests: [], partner_interests: [], audience_and_advertisers: {} }, demographics: {}, login_history: await loginHistory(viewer.id), location_history: [] });
+	// Settings > Connected apps: nothing here signs in other apps for people (no OAuth)
+	if (method === "GET" && /^\/1\.1\/oauth\/list(?:\.json)?$/.test(path)) return Response.json({ applications: [] });
+	if (method === "POST" && /^\/1\.1\/oauth\/revoke(?:\.json)?$/.test(path)) return Response.json({});
 	const accounts = await accountsRoute(method, path, viewer, req);
 	if (accounts) return accounts;
 	const profile = await profileRoute(path, viewer, req);

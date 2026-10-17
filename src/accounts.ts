@@ -10,6 +10,7 @@
 //   POST /1.1/account/logout.json            sign out the active one; the next
 //                                            one, if any, takes its place
 
+import { recordSignIn } from "./login-history";
 import { SECURE, type Viewer, clearedCookies, logout, parseCookies, sessionCookies } from "./auth";
 import { sql } from "./db";
 
@@ -43,6 +44,7 @@ async function live(tokens: string[], except?: string): Promise<Session[]> {
 // Cookies for a new sign-in from this browser: the session it was using, and
 // the others it had, stay signed in behind the new one.
 export async function signInCookies(req: Request, session: Session): Promise<string[]> {
+	await recordSignIn(req, session);
 	const before = parseCookies(req).auth_token;
 	const others = await live([...(before ? [before] : []), ...multiTokens(req)], session.userId);
 	return [...sessionCookies(session), multiCookie(others.slice(0, MAX - 1).map((s) => s.token))];
