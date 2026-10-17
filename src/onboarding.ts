@@ -19,6 +19,8 @@ import { type Message, encode, mapStrings, nameId } from "./jetfuel";
 import { fromJson } from "./jetfuel-json";
 import { CODE_DIGITS, SignupError, normalizeCode, signUp, usernameState } from "./invites";
 import { requestReset } from "./password-reset";
+import { platformSource } from "./platforms";
+import { countryFromHeader } from "./countries";
 import { settings } from "./settings";
 
 const load = async (name: string): Promise<Message[]> => fromJson(await Bun.file(new URL(`./jf/${name}.json`, import.meta.url)).json());
@@ -271,7 +273,15 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 		const s = await pending(token);
 		if (!s) return respond(fieldError("username", STALE));
 		try {
-			await signUp({ code: s.code, screenName: String(f.username ?? s.username), name: String(f.name ?? ""), password: String(f.password ?? ""), email: String(f.email ?? "") });
+			await signUp({
+				code: s.code,
+				screenName: String(f.username ?? s.username),
+				name: String(f.name ?? ""),
+				password: String(f.password ?? ""),
+				email: String(f.email ?? ""),
+				source: await platformSource(req),
+				country: countryFromHeader(req.headers.get("cf-ipcountry")) ?? null,
+			});
 		} catch (e) {
 			if (!(e instanceof SignupError)) throw e;
 			const field = /email/i.test(e.message) ? "email" : /password/i.test(e.message) ? "password" : /name/i.test(e.message) && !/user/i.test(e.message) ? "name" : "username";

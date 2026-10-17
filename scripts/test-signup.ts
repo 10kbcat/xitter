@@ -94,6 +94,8 @@ check("short passwords are refused", /8 characters/.test(s.errors.password ?? ""
 s = await setup({});
 const cookies = s.cookies.filter((c) => !c.startsWith("xitter_invite"));
 check("sign-up makes the account and signs it in", cookies.some((c) => c.startsWith("auth_token=")));
+const [made] = await sql`select signup_source from users where screen_name = ${name}`;
+check("and notes the app it signed up from", made?.signup_source === "Xitter for Web", made);
 
 const csrf = cookies.find((c) => c.startsWith("ct0="))?.slice(4) ?? "";
 const vars = encodeURIComponent(JSON.stringify({ screen_name: name }));

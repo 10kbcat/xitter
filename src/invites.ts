@@ -44,7 +44,8 @@ export async function usernameState(raw: string): Promise<"available" | "taken" 
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-export async function signUp(f: { code: string; screenName: string; name: string; password: string; email: string; flag?: string }): Promise<string> {
+// `source`, `country`: the app and country of the sign-up, for "About this account"
+export async function signUp(f: { code: string; screenName: string; name: string; password: string; email: string; flag?: string; source?: string | null; country?: string | null }): Promise<string> {
 	const email = f.email.trim().toLowerCase();
 	if (!EMAIL.test(email) || email.length > 254) throw new SignupError("Enter a valid email address.");
 	const screenName = f.screenName.trim().replace(/^@/, "");
@@ -71,8 +72,8 @@ export async function signUp(f: { code: string; screenName: string; name: string
 				: await tx`update invites set uses = uses + 1
 					where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now()) returning code, org_id`;
 		if (!invite && !(mode === "open" && !code)) throw new SignupError("That invite code is not valid or has been used up.");
-		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag, email)
-			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag}, ${email})`;
+		await tx`insert into users (id, screen_name, name, password_hash, invite_code, flag, email, signup_source, signup_country)
+			values (${id}::bigint, ${screenName}, ${name}, ${hash}, ${invite ? code : null}, ${flag}, ${email}, ${f.source ?? null}, ${f.country ?? null})`;
 		// an organisation's invite makes the new account its affiliate
 		if (invite?.org_id) await tx`insert into affiliations (org_id, user_id) values (${invite.org_id}::bigint, ${id}::bigint)`;
 		// the accounts the admin panel says everyone starts out following

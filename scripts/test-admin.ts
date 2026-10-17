@@ -90,6 +90,11 @@ const affiliate = (await o.get("UserByScreenName", { screen_name: targetName }))
 const label = affiliate.affiliates_highlighted_label?.label;
 check("an affiliate shows the organisation's badge", label?.description && label?.url?.url?.includes(orgName), label);
 check("and X's checkmark", affiliate.is_blue_verified === true);
+const about = (await o.get("AboutAccountQuery", { screenName: targetName })).data.user_result_by_screen_name.result;
+check("About this account names the organisation", about.about_profile?.affiliate_username === orgName && !!about.verification_info?.reason?.verified_since_msec, about.about_profile);
+// the profile page asks this first; Relay keeps its answer for the About card
+const spot = (await o.get("ProfileSpotlightsQuery", { screen_name: targetName })).data.user_result_by_screen_name;
+check("the profile's spotlights query returns the account, not null", spot?.result?.rest_id === target.id);
 const reason = affiliate.verification_info?.reason;
 check("its checkmark sheet names the organisation", reason?.description?.text?.includes(`affiliate of @${orgName}`) && reason.description.entities.some((e: any) => e.ref.url.endsWith(`/${orgName}`)) && !!reason.verified_since_msec, reason);
 const orgUser = (await t.get("UserByScreenName", { screen_name: orgName })).data.user.result;

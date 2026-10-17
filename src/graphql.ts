@@ -12,6 +12,7 @@ import { PollError, attachPoll } from "./polls";
 import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
 import { sessionsList, usernameAvailable } from "./account-settings";
+import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { blockedIds, blockedFor, outOfView, protectedFor } from "./blocks";
 import { settings } from "./settings";
@@ -553,7 +554,9 @@ const handlers: Record<string, Handler> = {
 		const user = typeof vars.screenName === "string" ? await userByName(v.id, vars.screenName) : undefined;
 		if (!user || (user.status === "suspended" && !v.role))
 			return { data: { user_result_by_screen_name: { result: { __typename: "UserUnavailable", unavailable_reason: user ? "Suspended" : "NotFound" } } } };
-		const [extra] = await sql`select u.verified_at, u.country, u.preferences->>'inferred_location_resolution_preference' as location_pref,
+		const [extra] = await sql`select u.verified_at, u.country, u.signup_country, u.preferences->>'inferred_location_resolution_preference' as location_pref,
+			-- accounts from before sign-ups were recorded: the app of their first post
+			coalesce(u.signup_source, (select p.source from posts p where p.user_id = u.id order by p.id limit 1)) as source,
 			(select count(*)::int from username_changes c where c.user_id = u.id) as changes,
 			(select max(c.changed_at) from username_changes c where c.user_id = u.id) as last_change
 			from users u where u.id = ${user.id}::bigint`;
@@ -568,6 +571,9 @@ const handlers: Record<string, Handler> = {
 						about_profile: {
 							affiliate_username: user.org?.screen_name ?? null,
 							account_based_in: basedIn(extra.country, extra.location_pref),
+							...(extra.signup_country && countryName(extra.signup_country) ? { created_country: countryName(extra.signup_country), created_country_accurate: true } : {}),
+							...(extra.source ? { source: extra.source } : {}),
+							learn_more_url: `${PUBLIC_ORIGIN}/rules`,
 							location_accurate: true,
 							username_changes: { count: String(extra.changes), ...(extra.last_change ? { last_changed_at_msec: String(extra.last_change.getTime()) } : {}) },
 						},
@@ -671,7 +677,14 @@ const handlers: Record<string, Handler> = {
 	DeleteHighlight: async (v, vars) => ({ data: { tweet_highlights_delete: { success: await setHighlight(v.id, postId(vars), false) } } }),
 
 	// features that do not exist here: valid empty answers so the client stays quiet
-	ProfileSpotlightsQuery: () => ({ data: {} }),
+	// Relay keeps what this answers under user_result_by_screen_name(screen_name),
+	// the same record "About this account" reads; answering nothing stored the
+	// account as null, and the About card then said it doesn't exist.
+	ProfileSpotlightsQuery: async (v, vars) => {
+		const user = typeof vars.screen_name === "string" ? await userByName(v.id, vars.screen_name) : undefined;
+		if (!user) return { data: { user_result_by_screen_name: null } };
+		return { data: { user_result_by_screen_name: { id: globalId("UserResults", user.id), result: { ...userResult(user), profilemodules: { v1: [] } } } } };
+	},
 	UserSportsProfile: () => ({ data: {} }),
 	// own-profile analytics widget; it reads data.result.result and throws on null
 	useFetchAnalyticsQuery: (v, vars) => ({

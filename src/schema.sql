@@ -668,3 +668,7 @@ create table if not exists repost_mutes (
 	created_at timestamptz not null default now(),
 	primary key (user_id, target_id)
 );
+
+-- for "About this account": the app and country an account signed up from
+alter table users add column if not exists signup_source text;
+alter table users add column if not exists signup_country text;
