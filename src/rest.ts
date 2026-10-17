@@ -15,7 +15,8 @@ import { settingsFor } from "./shell";
 import { hashtagsLike, searchUsers } from "./search";
 import { accountSettingsRoute, changeUsername, revokeSessionsRoute } from "./account-settings";
 import { dataExportRoute } from "./data-export";
-import { answerRequest, pendingRequests, setFollow, setProtected, updateFriendship, userById, userByName, usersByIds } from "./users";
+import { addressBook, deleteContacts, uploadContacts } from "./contacts";
+import { answerRequest, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 
 // friendships/show's shape, from the viewer's side (source) and the other account's (target)
 async function relationship(viewer: Viewer, targetId: string) {
@@ -188,6 +189,26 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 		const r = await relationship(viewer, target);
 		return Response.json(path.includes("show") ? r : [r]);
 	}
+	// accounts like another one ("similar_to" the profile being viewed), or plain suggestions
+	if (method === "GET" && /^\/1\.1\/users\/recommendations(?:\.json)?$/.test(path)) {
+		const q = new URL(req.url).searchParams;
+		const like = q.get("user_id");
+		const users = await suggestedUsers(viewer.id, Math.min(Math.max(Number(q.get("limit")) || 20, 1), 50), [], isId(like) && like !== viewer.id ? like : undefined);
+		return Response.json(users.map((u) => ({ user_id: u.id, token: `xitter-${u.id}`, user: legacyUser(u) })));
+	}
+	// Settings > Contacts: the uploaded address book, and removing it
+	if (method === "GET" && /^\/1\.1\/contacts\/addressbook(?:\.json)?$/.test(path)) {
+		const q = new URL(req.url).searchParams;
+		return Response.json(await addressBook(viewer.id, q.get("cursor"), Number(q.get("count")) || 100));
+	}
+	if (method === "POST" && /^\/1\.1\/contacts\/upload_v2(?:\.json)?$/.test(path)) {
+		const body: any = await req.json().catch(() => ({}));
+		return Response.json({ uploaded: await uploadContacts(viewer.id, body?.contacts) });
+	}
+	if (method === "POST" && /^\/1\.1\/contacts\/destroy\/all(?:\.json)?$/.test(path)) {
+		await deleteContacts(viewer.id);
+		return Response.json({});
+	}
 	// accounts by id or handle, up to 100 (the follower requests list asks for these)
 	if (path === "/1.1/users/lookup.json" && (method === "GET" || method === "POST")) {
 		const params = method === "GET" ? new URL(req.url).searchParams : new URLSearchParams(String(await req.text().catch(() => "")));
@@ -228,9 +249,13 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 			const problem = await changeUsername(viewer, name);
 			if (problem) return Response.json({ errors: [{ code: 120, message: problem }] }, { status: 400 });
 		}
+		// whether people who uploaded this account's email may find it
+		const findable = form?.get("discoverable_by_email");
+		if (findable === "true" || findable === "false")
+			await sql`update users set preferences = preferences || ${JSON.stringify({ discoverable_by_email: findable })}::text::jsonb where id = ${viewer.id}::bigint`;
 		const lang = form?.get("lang") ?? form?.get("language");
 		if (typeof lang === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(lang)) await sql`update users set language = ${lang} where id = ${viewer.id}::bigint`;
-		const [fresh] = await sql`select screen_name, language, protected from users where id = ${viewer.id}::bigint`;
+		const [fresh] = await sql`select screen_name, language, protected, preferences->>'discoverable_by_email' = 'true' as discoverable_by_email from users where id = ${viewer.id}::bigint`;
 		return Response.json(settingsFor({ ...viewer, ...fresh }) ?? {});
 	}
 	// Report post / Report account

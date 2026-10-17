@@ -28,6 +28,9 @@ copy during setup, and it stays on that machine.
 - Topics: staff define them with keywords; people follow them from "Topics to
   follow" or a post's menu, and "For you" brings in and labels matching posts
 - Blocks, mutes and muted words
+- Who to follow and "You might like" ranked by shared follows, with accounts
+  like the profile you're on; uploaded contacts (Settings > Contacts) for people
+  who let themselves be found by email
 - Direct messages, end-to-end encrypted, with key backup
 - Community Notes
 - Invite-only sign-up with a required email, pride flag badges, organisations
@@ -41,8 +44,7 @@ copy during setup, and it stays on that machine.
   badges, roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements, topics and an audit log
 
-Not built yet: Spaces and live video, Moments,
-saved searches, connected apps and login history,
+Not built yet: Spaces and live video, Moments, connected apps and login history,
 push notifications, a verified-email code at sign-up. Email is sent through
 [Resend](https://resend.com) when `RESEND_API_KEY` is set.
 

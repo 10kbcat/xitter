@@ -672,3 +672,13 @@ create table if not exists repost_mutes (
 -- for "About this account": the app and country an account signed up from
 alter table users add column if not exists signup_source text;
 alter table users add column if not exists signup_country text;
+
+-- address book uploads (Settings > Contacts); emails kept lowercase for matching
+create table if not exists contacts (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	vcard text not null,
+	emails text[] not null default '{}',
+	created_at timestamptz not null default now()
+);
+create index if not exists contacts_user_idx on contacts (user_id, id);

@@ -158,13 +158,21 @@ export async function affiliatesOf(viewerId: string, orgId: string, limit = 200)
 
 // Accounts to follow: not followed, not blocked either way, not muted, not out of
 // view. Ranked by how many of the accounts the viewer follows follow them, then size.
-export async function suggestedUsers(viewerId: string, limit = 20, exclude: string[] = []): Promise<User[]> {
+// `similarTo`: accounts like that one first, by how many of its followers also
+// follow them; contacts the viewer uploaded who let themselves be found by email
+// come before both.
+export async function suggestedUsers(viewerId: string, limit = 20, exclude: string[] = [], similarTo?: string): Promise<User[]> {
 	const rows = await sql`select ${userCols(viewerId)} from users u
 		where u.id <> ${viewerId}::bigint and u.status = 'active'
 			and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)
 			and u.id not in ${blockedFor(viewerId)} and u.id not in ${mutedFor(viewerId)} and u.id not in ${outOfView(viewerId)}
 			${exclude.length ? sql`and u.id <> all(${sql.array(exclude, "INT8")})` : sql``}
-		order by (select count(*) from follows m where m.followee_id = u.id
+			${similarTo ? sql`and u.id <> ${similarTo}::bigint` : sql``}
+		order by exists (select 1 from contacts c where c.user_id = ${viewerId}::bigint and lower(u.email) = any(c.emails)
+				and u.preferences->>'discoverable_by_email' = 'true') desc,
+			${similarTo ? sql`(select count(*) from follows m where m.followee_id = u.id and m.follower_id <> ${viewerId}::bigint
+				and m.follower_id in (select follower_id from follows where followee_id = ${similarTo}::bigint)) desc,` : sql``}
+			(select count(*) from follows m where m.followee_id = u.id
 				and m.follower_id in (select followee_id from follows where follower_id = ${viewerId}::bigint)) desc,
 			(select count(*) from follows x where x.followee_id = u.id) desc, u.created_at desc
 		limit ${limit}`;

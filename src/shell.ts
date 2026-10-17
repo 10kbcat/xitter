@@ -23,7 +23,7 @@ export function settingsFor(user: User): Record<string, unknown> {
 		sleep_time: { enabled: false, end_time: null, start_time: null },
 		geo_enabled: false,
 		language: user.language ?? "en",
-		discoverable_by_email: false,
+		discoverable_by_email: !!user.discoverable_by_email,
 		discoverable_by_mobile_phone: false,
 		personalized_trends: false,
 		allow_media_tagging: "all",

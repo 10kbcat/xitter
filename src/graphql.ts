@@ -721,7 +721,9 @@ const handlers: Record<string, Handler> = {
 	DataSaverMode: () => ({ data: { viewer: {} } }),
 	CreatorStudioTabBarItemQuery: () => ({ data: { xpayments_audience_rewards_tasks: [] } }),
 	SidebarUserRecommendations: async (v: Viewer, vars: Vars) => {
-		const users = await suggestedUsers(v.id, 3, isId(vars.profileUserId) ? [vars.profileUserId] : []);
+		// on someone's profile: accounts like theirs
+		const like = isId(vars.profileUserId) && vars.profileUserId !== v.id ? vars.profileUserId : undefined;
+		const users = await suggestedUsers(v.id, 3, [], like);
 		return { data: { sidebar_user_recommendations: users.map((u) => ({ token: `xitter-${u.id}`, user_results: { result: userResult(u) } })) } };
 	},
 	// the Follow page
