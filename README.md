@@ -20,7 +20,7 @@ copy during setup, and it stays on that machine.
   (protected) accounts with follow requests, "About this account" with the
   country or region it is based in
 - Lists (with banners) and communities (rules, members, moderation tools,
-  community label on posts)
+  custom banners, a topic from the instance's topics, community label on posts)
 - Home timeline: a ranked "For you" and a chronological "Following"
 - Notifications with unread counts; the profile bell (new posts from that
   account arrive as notifications) and turning an account's reposts off

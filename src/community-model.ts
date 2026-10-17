@@ -1,6 +1,7 @@
 // A community as the client reads it (the fields of CommunitiesFetchOneQuery).
 // Kept apart from the handlers because posts.ts attaches it to every post.
 
+import { absolute } from "./media";
 import { sql } from "./db";
 import { userResult } from "./model";
 import { usersByIds } from "./users";
@@ -33,6 +34,10 @@ type CommunityRow = {
 	invites_policy: string;
 	is_nsfw: boolean;
 	banner_url: string | null;
+	banner_width: number | null;
+	banner_height: number | null;
+	topic_id: string | null;
+	topic_name: string | null;
 	created_at: Date;
 	member_count: number;
 	moderator_count: number;
@@ -47,7 +52,8 @@ export const atLeast = (role: Role, min: Role) => rolesRank[role] >= rolesRank[m
 
 export async function communityRows(viewerId: string, ids: string[]): Promise<Map<string, CommunityRow>> {
 	if (!ids.length) return new Map();
-	const rows = await sql`select c.id::text, c.creator_id::text, c.name, c.description, c.question, c.join_policy, c.invites_policy, c.is_nsfw, c.banner_url, c.created_at,
+	const rows = await sql`select c.id::text, c.creator_id::text, c.name, c.description, c.question, c.join_policy, c.invites_policy, c.is_nsfw, c.banner_url, c.banner_width, c.banner_height, c.created_at,
+			c.topic_id::text as topic_id, (select t.name from topics t where t.id = c.topic_id) as topic_name,
 			(select count(*)::int from community_members m where m.community_id = c.id) as member_count,
 			(select count(*)::int from community_members m where m.community_id = c.id and m.role in ('Moderator', 'Admin')) as moderator_count,
 			coalesce((select m.role from community_members m where m.community_id = c.id and m.user_id = ${viewerId}::bigint), 'NonMember') as role,
@@ -97,26 +103,40 @@ export async function communityObjects(viewerId: string, ids: string[]): Promise
 		const creator = users.get(r.creator_id);
 		const creatorResults = creator ? { result: userResult(creator) } : undefined;
 		const faces = faceRows.filter((f: any) => f.community_id === id).flatMap((f: any) => (users.has(f.user_id) ? [{ result: userResult(users.get(f.user_id)!) }] : []));
-		const banner = r.banner_url ? { media_info: { __typename: "ApiImage", original_img_url: r.banner_url, original_img_width: 1500, original_img_height: 500 } } : null;
+		const banner = r.banner_url
+			? {
+					media_info: {
+						__typename: "ApiImage",
+						original_img_url: absolute(r.banner_url),
+						original_img_width: r.banner_width ?? 1500,
+						original_img_height: r.banner_height ?? 500,
+						// the header ignores a custom banner without a palette (it tints the page with it)
+						color_info: { palette: [{ percentage: 100, rgb: { red: 83, green: 100, blue: 113 } }] },
+					},
+				}
+			: null;
 		out.set(id, {
 			__typename: "Community",
 			id: communityGlobalId(id),
 			id_str: id,
 			rest_id: id,
+			// Relay reads a response by the query's aliases; the tools screen asks
+			// for rest_id as communityId, and without it every tools link says null
+			communityId: id,
 			name: r.name,
 			description: r.description,
 			created_at: new Date(r.created_at).getTime(),
 			question: r.question || null,
 			search_tags: [],
 			is_nsfw: r.is_nsfw,
-			primary_community_topic: null,
+			primary_community_topic: r.topic_id && r.topic_name ? { __typename: "CommunityTopicPair", topic_id: r.topic_id, topic_name: r.topic_name } : null,
 			actions: actions(r),
 			...(creatorResults ? { admin_results: creatorResults, creator_results: creatorResults } : {}),
 			invites_result: { __typename: "CommunityInvitesUnavailable", reason: "ViewerNotAllowed", message: "Invites aren't available here." },
 			join_policy: r.join_policy,
 			invites_policy: r.invites_policy,
 			is_pinned: false,
-			moderation: { __typename: "CommunityModeration", id: globalId("CommunityModeration", id), tweet_case_count: 0 },
+			moderation: { __typename: "CommunityModeration", id: globalId("CommunityModeration", id), tweet_case_count: 0, count: 0 },
 			trending_hashtags_slice: { __typename: "CommunityHashtagSlice", items: [] },
 			members_facepile_results: faces,
 			moderator_count: r.moderator_count,

@@ -126,11 +126,12 @@ async function communityList(viewerId: string, ids: string[], vars: Vars) {
 const memberIds = async (userId: string): Promise<string[]> =>
 	(await sql`select m.community_id::text as id from community_members m where m.user_id = ${userId}::bigint order by m.created_at desc`).map((r: any) => r.id);
 
-const discoverIds = async (viewerId: string): Promise<string[]> =>
+const discoverIds = async (viewerId: string, topicId?: string): Promise<string[]> =>
 	(
 		await sql`select c.id::text as id from communities c
 			where not exists (select 1 from community_members m where m.community_id = c.id and m.user_id = ${viewerId}::bigint)
 				and c.creator_id not in ${blockedFor(viewerId)}
+				${topicId ? sql`and c.topic_id = ${topicId}::bigint` : sql``}
 			order by (select count(*) from community_members m where m.community_id = c.id) desc, c.created_at desc limit 50`
 	).map((r: any) => r.id);
 
@@ -434,17 +435,30 @@ export const communityHandlers = {
 	CommunityEditRule: (v: Viewer, vars: Vars) => rules(v, vars, "update"),
 	CommunityRemoveRule: (v: Viewer, vars: Vars) => rules(v, vars, "remove"),
 	CommunityReorderRules: (v: Viewer, vars: Vars) => rules(v, vars, "reorder"),
-	// custom banners aren't stored; the default gradient stays
+	// the banner is a photo the admin uploaded first (media_id)
 	CommunityEditBannerMedia: async (v: Viewer, vars: Vars) => {
 		const id = communityId(vars);
 		await mustBe(v.id, id, "Admin");
-		const community: any = await one(v.id, id);
-		return { data: { community_custom_banner_media_put: { custom_banner_media: community.default_banner_media } } };
+		const mediaId = String(vars.mediaId ?? "");
+		const [media] = isId(mediaId) ? await sql`select id::text, width, height from media where id = ${mediaId}::bigint and user_id = ${v.id}::bigint and kind = 'photo'` : [];
+		if (!media) throw new PostError("Upload the picture first.", 324);
+		await sql`update communities set banner_url = ${`/media/${media.id}`}, banner_width = ${media.width}, banner_height = ${media.height} where id = ${id}::bigint`;
+		return { data: { community_custom_banner_media_put: await one(v.id, id) } };
 	},
 	CommunityRemoveBannerMedia: async (v: Viewer, vars: Vars) => {
 		const id = communityId(vars);
 		await mustBe(v.id, id, "Admin");
+		await sql`update communities set banner_url = null, banner_width = null, banner_height = null where id = ${id}::bigint`;
 		return { data: { community_custom_banner_media_delete: await one(v.id, id) } };
+	},
+	// a community's topic is one of the instance's (topics.ts); no topic clears it
+	EditTopicMutation: async (v: Viewer, vars: Vars) => {
+		const id = communityId(vars);
+		await mustBe(v.id, id, "Admin");
+		const topicId = vars.topicId == null || vars.topicId === "" ? null : String(vars.topicId);
+		if (topicId !== null && (!isId(topicId) || !(await sql`select 1 from topics where id = ${topicId}::bigint`).length)) throw new PostError("No such topic.", 144);
+		await sql`update communities set topic_id = ${topicId} where id = ${id}::bigint`;
+		return { data: { community_topic_put: await one(v.id, id) } };
 	},
 	CommunityUserInvite: async () => ({
 		data: { user_community_invite: { __typename: "UserCommunityInviteActionUnavailable", reason: "NotSupported", message: "Invites aren't available here." } },
@@ -454,7 +468,7 @@ export const communityHandlers = {
 	CommunitiesMainPageTimeline: async (v: Viewer, vars: Vars) => ({ data: { viewer: { communities_timeline: await followedPosts(v.id, vars) } } }),
 	CommunitiesRankedTimeline: async (v: Viewer, vars: Vars) => ({ data: { viewer: { ranked_communities_timeline: await followedPosts(v.id, vars) } } }),
 	CommunitiesExploreTimeline: async (v: Viewer, vars: Vars) => ({
-		data: { viewer: { explore_communities_timeline: await communityList(v.id, await discoverIds(v.id), vars) } },
+		data: { viewer: { explore_communities_timeline: await communityList(v.id, await discoverIds(v.id, isId(vars.topicId) ? vars.topicId : undefined), vars) } },
 	}),
 	CommunityDiscoveryTimeline: async (v: Viewer, vars: Vars) => ({
 		data: { viewer: { community_discovery_timeline: await communityList(v.id, await discoverIds(v.id), vars) } },
@@ -477,10 +491,15 @@ export const communityHandlers = {
 	}),
 };
 
-// topics aren't kept; the pickers just come up empty
+// The topic pickers and Explore's topic carousel: the instance's topics
+// (Admin > Topics), with no subtopics. The carousel shows only topics some
+// community has.
 async function topics() {
-	const result = { community_topics: [] };
-	return { data: { communityTopicResults: result, fetch_user_community_topics: result, fetch_community_topics: result } };
+	const rows = await sql`select t.id::text as topic_id, t.name as topic_name,
+		exists (select 1 from communities c where c.topic_id = t.id) as used from topics t order by t.name`;
+	const all = { community_topics: rows.map((r: any) => ({ __typename: "CommunityTopic", topic_id: r.topic_id, topic_name: r.topic_name, subtopics: [] })) };
+	const used = { community_topics: all.community_topics.filter((_, i) => rows[i].used) };
+	return { data: { communityTopicResults: all, fetch_user_community_topics: used, fetch_community_topics: all } };
 }
 
 async function memberships(v: Viewer) {

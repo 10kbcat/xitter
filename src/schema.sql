@@ -720,3 +720,8 @@ create table if not exists login_events (
 );
 create index if not exists login_events_user_idx on login_events (user_id, created_at desc);
 alter table sessions add column if not exists ip text;
+
+-- a community's own banner (an upload of its admin) and its topic (one of topics.ts)
+alter table communities add column if not exists banner_width integer;
+alter table communities add column if not exists banner_height integer;
+alter table communities add column if not exists topic_id bigint references topics (id) on delete set null;
