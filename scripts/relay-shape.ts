@@ -108,10 +108,15 @@ function find(): any {
 		const key = `name:"${name}",operationKind`;
 		let i = -1;
 		while ((i = s.indexOf(key, i + 1)) >= 0) {
-			const start = s.lastIndexOf("{fragment:{", i);
-			if (start < 0) continue;
-			const end = matchBrace(s, start);
-			if (end < 0 || end < i) continue;
+			// aliased inline fragments nest their own `{fragment:{`, so walk back to
+			// the one that encloses the name
+			let start = s.lastIndexOf("{fragment:{", i);
+			let end = start < 0 ? -1 : matchBrace(s, start);
+			while (start > 0 && (end < 0 || end < i)) {
+				start = s.lastIndexOf("{fragment:{", start - 1);
+				end = start < 0 ? -1 : matchBrace(s, start);
+			}
+			if (start < 0 || end < i) continue;
 			const text = s.slice(start, end + 1);
 			try {
 				inline.clear();

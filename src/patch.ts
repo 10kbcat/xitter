@@ -50,6 +50,9 @@ const RULES: [RegExp, string][] = [
 		/(\{cropData:\w+,maxDimension:(\w+)=\w+,maxFileSize:(\w+)=\w+,targetQuality:\w+=\w+\}=\w+\|\|\{\},(\w+)=\w+\((\w+),\w+\);[^{}]*?)if\(\5\.isGif\)(return Promise\.reject\(new [\w.]+\("Gifs cannot be processed\.",\w+\.GIF_IS_TOO_LARGE\)\);)/g,
 		'$1if($5.isGif){if($5.size>$3||$5.width>$2||$5.height>$2)$6return Promise.resolve(new File([$5.fileHandle,"xitter-crop:"+[$4.left,$4.top,$4.width,$4.height].map(Math.round)],"image.gif",{type:"image/gif"}))}',
 	],
+	// Analytics hides its charts below 50 followers, which on a small instance
+	// is nearly everyone
+	[/(\w+)=(\w+)\.followerCount>=50,/g, "$1=$2.followerCount>=0,"],
 	// The same resizer re-encodes every cropped, rotated or oversized image as
 	// JPEG on a canvas it fills white first, so a transparent avatar loses its
 	// background. The canvas stays empty, and one with any transparent pixel

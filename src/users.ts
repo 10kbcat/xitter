@@ -95,7 +95,9 @@ export async function setFollow(followerId: string, followeeId: string, on: bool
 		}
 		await sql`insert into follows (follower_id, followee_id) values (${followerId}::bigint, ${followeeId}::bigint) on conflict do nothing`;
 	} else {
-		await sql`delete from follows where follower_id = ${followerId}::bigint and followee_id = ${followeeId}::bigint`;
+		const gone = await sql`delete from follows where follower_id = ${followerId}::bigint and followee_id = ${followeeId}::bigint returning 1`;
+		// for the account's analytics
+		if (gone.length) await sql`insert into unfollows (follower_id, followee_id) values (${followerId}::bigint, ${followeeId}::bigint)`;
 		await sql`delete from follow_requests where requester_id = ${followerId}::bigint and target_id = ${followeeId}::bigint`;
 	}
 }

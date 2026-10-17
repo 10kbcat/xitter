@@ -2,6 +2,7 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { analyticsHandlers } from "./analytics";
 import { bookmarkFolderHandlers } from "./bookmark-folders";
 import { communityHandlers } from "./communities";
 import { countryName, regionName } from "./countries";
@@ -561,6 +562,8 @@ const handlers: Record<string, Handler> = {
 		if (!user) return { data: {} };
 		// staff too: they look a suspended account up in the admin panel
 		if (user.status === "suspended") return { data: { user: { result: SUSPENDED_USER } } };
+		// a visit for the profile's analytics, once a day per visitor
+		if (user.id !== v.id) sql`insert into profile_visits (profile_id, visitor_id) values (${user.id}::bigint, ${v.id}::bigint) on conflict do nothing`.catch(() => {});
 		return { data: { user: { result: userResult(user) } } };
 	},
 	// "About this account" (/<name>/about)
@@ -701,21 +704,6 @@ const handlers: Record<string, Handler> = {
 		return { data: { user_result_by_screen_name: { id: globalId("UserResults", user.id), result: { ...userResult(user), profilemodules: { v1: [] } } } } };
 	},
 	UserSportsProfile: () => ({ data: {} }),
-	// own-profile analytics widget; it reads data.result.result and throws on null
-	useFetchAnalyticsQuery: (v, vars) => ({
-		data: {
-			result: {
-				result: {
-					__typename: "User",
-					id: globalId("User", v.id),
-					free_metrics_rollup: (Array.isArray(vars.requested_metrics) ? vars.requested_metrics : []).map((metric_type: string) => ({
-						metric_type,
-						metric_value: 0,
-					})),
-				},
-			},
-		},
-	}),
 	isEligibleForVoButtonUpsellQuery: () => ({ data: {} }),
 	usePremiumPaywallOnLoadMutation: () => ({ data: {} }),
 	ViewerBadgeCounts: async (v) => ({
@@ -980,6 +968,7 @@ Object.assign(handlers, communityHandlers);
 Object.assign(handlers, bookmarkFolderHandlers);
 Object.assign(handlers, scheduledHandlers);
 Object.assign(handlers, gifHandlers);
+Object.assign(handlers, analyticsHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

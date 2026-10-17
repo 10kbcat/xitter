@@ -807,3 +807,20 @@ create table if not exists affiliation_requests (
 	primary key (org_id, user_id)
 );
 create index if not exists affiliation_requests_user_idx on affiliation_requests (user_id);
+
+-- Account analytics: what isn't kept elsewhere. Unfollows as they happen, and
+-- profile visits once per visitor and day.
+create table if not exists unfollows (
+	follower_id bigint not null references users (id) on delete cascade,
+	followee_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now()
+);
+create index if not exists unfollows_followee_idx on unfollows (followee_id, created_at);
+create table if not exists profile_visits (
+	profile_id bigint not null references users (id) on delete cascade,
+	visitor_id bigint not null references users (id) on delete cascade,
+	day date not null default current_date,
+	created_at timestamptz not null default now(),
+	primary key (profile_id, visitor_id, day)
+);
+create index if not exists post_views_created_idx on post_views (created_at);
