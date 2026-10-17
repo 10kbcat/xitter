@@ -77,8 +77,12 @@ check("limited: still on their own profile", postIds((await o.get("UserTweets", 
 await a.admin("setStatus", { id: target.id, status: "suspended" });
 check("suspended: can't sign in", (await session(targetName)) === undefined);
 check("suspended: the old session is gone", (await t.admin("me")).status === 403);
-check("suspended: the profile says so", (await o.get("UserByScreenName", { screen_name: targetName })).data.user?.result?.__typename === "UserUnavailable");
-check("suspended: staff still see it", (await a.get("UserByScreenName", { screen_name: targetName })).data.user?.result?.__typename === "User");
+const unavailable = (await o.get("UserByScreenName", { screen_name: targetName })).data.user?.result;
+check("suspended: the profile says so", unavailable?.__typename === "UserUnavailable");
+// without both texts the profile page throws and spins forever
+check("suspended: with the header and message the page needs", !!unavailable?.unavailable_header?.text && !!unavailable?.unavailable_message?.text);
+check("suspended: staff see the same page", (await a.get("UserByScreenName", { screen_name: targetName })).data.user?.result?.__typename === "UserUnavailable");
+check("suspended: also by id", (await o.get("UserByRestId", { userId: target.id })).data.user?.result?.__typename === "UserUnavailable");
 await a.admin("setStatus", { id: target.id, status: "active" });
 t = (await session(targetName))!;
 check("reinstated: can sign in again", !!t);

@@ -57,6 +57,17 @@ type Handler = (viewer: Viewer, vars: Vars) => Promise<unknown> | unknown;
 const dec = (id: string) => (BigInt(id) - 1n).toString();
 const inc = (id: string) => (BigInt(id) + 1n).toString();
 const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toString("base64");
+// the profile page throws on a suspended account without both rich texts and
+// spins forever
+const richText = (text: string) => ({ rtl: false, text, entities: [] });
+const SUSPENDED_USER = {
+	__typename: "UserUnavailable",
+	reason: "Suspended",
+	unavailable_reason: "Suspended",
+	message: "This account is suspended.",
+	unavailable_header: richText("Account suspended"),
+	unavailable_message: richText("This account broke the rules of this instance and was suspended."),
+};
 
 function postId(vars: Vars, key = "tweet_id"): string {
 	const id = vars[key];
@@ -548,15 +559,16 @@ const handlers: Record<string, Handler> = {
 		const user = typeof vars.screen_name === "string" ? await userByName(v.id, vars.screen_name) : undefined;
 		// an empty answer makes the client show "this account doesn't exist"
 		if (!user) return { data: {} };
-		if (user.status === "suspended" && !v.role) return { data: { user: { result: { __typename: "UserUnavailable", reason: "Suspended", message: "This account is suspended." } } } };
+		// staff too: they look a suspended account up in the admin panel
+		if (user.status === "suspended") return { data: { user: { result: SUSPENDED_USER } } };
 		return { data: { user: { result: userResult(user) } } };
 	},
 	// "About this account" (/<name>/about)
 	AboutAccountQuery: async (v, vars) => {
 		const user = typeof vars.screenName === "string" ? await userByName(v.id, vars.screenName) : undefined;
-		if (!user || (user.status === "suspended" && !v.role))
+		if (!user || user.status === "suspended")
 			return { data: { user_result_by_screen_name: { result: { __typename: "UserUnavailable", unavailable_reason: user ? "Suspended" : "NotFound" } } } };
-		const [extra] = await sql`select u.verified_at, u.country, u.signup_country, u.preferences->>'inferred_location_resolution_preference' as location_pref,
+		const [extra] = await sql`select u.verified_at, u.country, u.based_in_override, u.signup_country, u.preferences->>'inferred_location_resolution_preference' as location_pref,
 			-- accounts from before sign-ups were recorded: the app of their first post
 			coalesce(u.signup_source, (select p.source from posts p where p.user_id = u.id order by p.id limit 1)) as source,
 			(select count(*)::int from username_changes c where c.user_id = u.id) as changes,
@@ -572,7 +584,7 @@ const handlers: Record<string, Handler> = {
 						identity_profile_labels_highlighted_label: base.affiliates_highlighted_label,
 						about_profile: {
 							affiliate_username: user.org?.screen_name ?? null,
-							account_based_in: basedIn(extra.country, extra.location_pref),
+							account_based_in: extra.based_in_override ?? basedIn(extra.country, extra.location_pref),
 							...(extra.signup_country && countryName(extra.signup_country) ? { created_country: countryName(extra.signup_country), created_country_accurate: true } : {}),
 							...(extra.source ? { source: extra.source } : {}),
 							learn_more_url: `${PUBLIC_ORIGIN}/rules`,
@@ -586,6 +598,7 @@ const handlers: Record<string, Handler> = {
 	},
 	UserByRestId: async (v, vars) => {
 		const user = await userById(v.id, userId(vars));
+		if (user?.status === "suspended") return { data: { user: { result: SUSPENDED_USER } } };
 		return { data: user ? { user: { result: userResult(user) } } : {} };
 	},
 	UsersByRestIds: async (v, vars) => {

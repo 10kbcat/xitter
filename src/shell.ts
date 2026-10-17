@@ -111,6 +111,13 @@ const clientSwitches = (config: Record<string, unknown>) => ({
 	// the side bar has one slot for both: History (its Bookmarks tab inside) when
 	// the feature is on, the client's own Bookmarks link when it is off
 	responsive_web_history_screen_enabled: { value: feature("history") },
+	// "Generate with Grok" beside Upload in the media pickers (composer, article
+	// cover); with only the picker switch off, the composer grows its own Grok button
+	...(feature("image_gen") ? {} : {
+		responsive_web_grok_img_composer: { value: false },
+		responsive_web_grok_img_composer_in_media_picker: { value: false },
+		responsive_web_grok_article_cover_image_gen_enabled: { value: false },
+	}),
 	// the checkmark sheet's "Upgrade to Premium" leads to X's checkout; there is nothing to buy here
 	responsive_web_user_badge_education_get_verified_button_enabled: { value: false },
 	// the guest set has 0, which offers "reload for the new version" on every service worker update

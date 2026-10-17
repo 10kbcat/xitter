@@ -6,8 +6,9 @@
 // worth 2, a reply 27, and a reply the author answered 150. A post from someone
 // the viewer follows, or that people they follow liked or reposted, gets a
 // boost, as does an author the viewer often likes or replies to, or a post on a
-// topic they follow. The total falls with age, so new posts can still rise past
-// old popular ones.
+// topic they follow. Engagement counts on a log scale and the total halves
+// every HALF_LIFE hours, so new posts rise past old popular ones within a day
+// or two.
 
 import { sql } from "./db";
 import { idTime } from "./ids";
@@ -18,6 +19,8 @@ import { followedTopicMatch, unwantedTopicMatch } from "./topics";
 const CANDIDATES = 600;
 // at most this many entries in a row by one author
 const MAX_RUN = 2;
+// hours for a post's score to halve
+const HALF_LIFE = 12;
 
 export type RankedPage = { items: FeedItem[]; next?: number };
 
@@ -37,7 +40,8 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 		),
 		scored as (
 			select c.*,
-				(1
+				-- on a log scale: raw counts let one answered reply outweigh days of age
+				ln(2
 				 + (select count(*) from likes l where l.post_id = c.post_id)
 				 + 2 * (select count(*) from reposts r where r.post_id = c.post_id)
 				 + 27 * (select count(*) from posts rp where rp.reply_to_id = c.post_id)
@@ -59,8 +63,9 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 						where rp.user_id = ${viewerId}::bigint and parent.user_id = c.original_author and rp.created_at > ${at}::timestamptz - interval '30 days'))))
 				-- the viewer's own posts are known to them already
 				* (case when c.original_author = ${viewerId}::bigint then 0.5 else 1.0 end)
-				-- age in hours, gently: a day-old post needs about 10 times the engagement of a new one
-				/ power(greatest(extract(epoch from (${at}::timestamptz - c.created_at)) / 3600, 0) + 2, 1.5)
+				-- halves every HALF_LIFE hours: a day-old post needs about 50 times the
+				-- engagement of a new one, so a quiet instance's feed still moves
+				* power(0.5, greatest(extract(epoch from (${at}::timestamptz - c.created_at)) / 3600, 0) / ${HALF_LIFE})
 				as score
 			from candidates c
 		),

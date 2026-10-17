@@ -32,7 +32,8 @@ import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
 import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
-import { rememberIp } from "./login-history";
+import { rememberIp, requestIp } from "./login-history";
+import { hit, limitApi, limitedResponse } from "./ratelimit";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
 import { emailRoute } from "./email-address";
@@ -152,6 +153,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
 	const parts = path.split("/").filter(Boolean);
 	const gql = parts.indexOf("graphql");
+	const limited = limitApi(viewer, req.method, path, gql >= 0 ? parts[parts.length - 1] : undefined, url);
+	if (limited) return limited;
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
 	// the client reports its own render errors through telemetry
 	if (process.env.LOG_REQUESTS === "errors" && req.method === "POST") {
@@ -227,11 +230,19 @@ async function route(req: Request): Promise<Response | undefined> {
 		return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
 	}
 	if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-	if (p === "/login" && req.method === "POST") return handleLogin(req);
+	if (p === "/login" && req.method === "POST") {
+		const h = hit("auth", requestIp(req) ?? "unknown");
+		if (!h.ok) return limitedResponse(h);
+		return handleLogin(req);
+	}
 	if (p === "/rules" || p === "/tos" || p === "/privacy") return rulesPage();
 	// X's sign-in screens (jf.x.com), answered here
 	// inside the signed-in client the same screens come through /i/jfapi
 	if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
+		if (req.method === "POST") {
+			const h = hit("auth", requestIp(req) ?? "unknown");
+			if (!h.ok) return limitedResponse(h);
+		}
 		const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));
 		if (screen) return screen;
 	}
@@ -259,7 +270,13 @@ async function route(req: Request): Promise<Response | undefined> {
 		return maintenancePage();
 	}
 	if (p === "/account/reset") return resetRoute(req, url);
-	if (p === "/account/forgot") return forgotRoute(req, url);
+	if (p === "/account/forgot") {
+		if (req.method === "POST") {
+			const h = hit("mail", requestIp(req) ?? "unknown");
+			if (!h.ok) return limitedResponse(h);
+		}
+		return forgotRoute(req, url);
+	}
 	if (p === "/account/email" || p === "/account/email/confirm") return emailRoute(req, url, viewer);
 	if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
 	if (p === "/account/notices" && viewer) return noticesPage(viewer);

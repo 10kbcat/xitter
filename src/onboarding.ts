@@ -24,6 +24,8 @@ import { mailEnabled } from "./mail";
 import { checkSignupCode, sendSignupCode } from "./email-address";
 import { countryFromHeader } from "./countries";
 import { settings } from "./settings";
+import { hit } from "./ratelimit";
+import { requestIp } from "./login-history";
 
 const load = async (name: string): Promise<Message[]> => fromJson(await Bun.file(new URL(`./jf/${name}.json`, import.meta.url)).json());
 // Takes out of a screen the parts that hold any of these texts. With `part` (a
@@ -314,6 +316,7 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 			}
 			const held = { ...checked, passwordHash: await Bun.password.hash(given.password), source: await platformSource(req), country: countryFromHeader(req.headers.get("cf-ipcountry")) ?? null };
 			await sql`update signup_sessions set pending = ${JSON.stringify(held)}::text::jsonb where token = ${token}::uuid`;
+			if (!hit("mail", requestIp(req) ?? "unknown").ok) return respond(fieldError("email", "Too many codes sent from here. Wait an hour."));
 			try {
 				await sendSignupCode(token, checked.email);
 			} catch (e: any) {
@@ -345,12 +348,15 @@ export async function onboarding(req: Request, path: string): Promise<Response |
 	}
 	if (path === "/onboarding/web/actions/begin_password_recovery") {
 		const f = await form(req);
+		if (!hit("mail", requestIp(req) ?? "unknown").ok) return respond(fieldError("username_or_email", "Too many emails from here. Wait an hour."));
 		await requestReset(String(f.username_or_email ?? f.username ?? ""));
 		return respond(fieldError("username_or_email", "If that account has an email, we've sent a reset link to it."));
 	}
 	if (path === "/onboarding/web/actions/login_enter_password") {
 		const f = await form(req);
 		const username = String(f.username ?? "").trim().replace(/^@/, "");
+		// guessing one account's password from many addresses still runs out
+		if (username && !hit("password", username.toLowerCase()).ok) return respond(fieldError("password", "Too many tries for this account. Wait 15 minutes."));
 		const challenge = username && f.password ? await startChallenge(username, f.password) : undefined;
 		if (challenge) return respond(fill(templates.twoFactor, { session_token: challenge }, TWO_FACTOR_TEXTS));
 		const session = username && f.password ? await login(username, f.password) : undefined;

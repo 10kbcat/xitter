@@ -50,6 +50,18 @@ const RULES: [RegExp, string][] = [
 		/(\{cropData:\w+,maxDimension:(\w+)=\w+,maxFileSize:(\w+)=\w+,targetQuality:\w+=\w+\}=\w+\|\|\{\},(\w+)=\w+\((\w+),\w+\);[^{}]*?)if\(\5\.isGif\)(return Promise\.reject\(new [\w.]+\("Gifs cannot be processed\.",\w+\.GIF_IS_TOO_LARGE\)\);)/g,
 		'$1if($5.isGif){if($5.size>$3||$5.width>$2||$5.height>$2)$6return Promise.resolve(new File([$5.fileHandle,"xitter-crop:"+[$4.left,$4.top,$4.width,$4.height].map(Math.round)],"image.gif",{type:"image/gif"}))}',
 	],
+	// The same resizer re-encodes every cropped, rotated or oversized image as
+	// JPEG on a canvas it fills white first, so a transparent avatar loses its
+	// background. The canvas stays empty, and one with any transparent pixel
+	// goes out as PNG; the size loop still shrinks it.
+	[
+		/(\w+)\.fillStyle="#FFFFFF",\1\.fillRect\(0,0,(\w+),(\w+)\),(\w+)\}/g,
+		"$4}",
+	],
+	[
+		/(\w+)=(\w+)\.toDataURL\("image\/jpeg",(\w+)\),(\w+)=\1\.split\(";base64,"\)/g,
+		'$1=$2.toDataURL(function(c){try{var p=c.getContext("2d").getImageData(0,0,c.width,c.height).data;for(var i=3;i<p.length;i+=4)if(p[i]<255)return"image/png"}catch(e){}return"image/jpeg"}($2),$3),$4=$1.split(";base64,")',
+	],
 ];
 
 // Only for the chat app's files: its own list of API hosts, which it sends the

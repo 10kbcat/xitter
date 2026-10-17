@@ -184,17 +184,19 @@ export const TIDY_SCRIPT = `(function(){
 	// copy has none of the client's handlers, so it is a plain link
 	function menuLinks(){
 		if(!T.links||!T.links.length)return;
+		// each entry sits alone in a row wrapper, so the copy takes the wrapper along
 		var s=document.querySelector('[role="menu"] a[href="/settings"]');
-		if(!s||s.parentNode.querySelector("[data-xitter-link]"))return;
+		var row=s&&s.parentNode;
+		if(!row||row.parentNode.querySelector("[data-xitter-link]"))return;
 		T.links.forEach(function(l){
-			var a=s.cloneNode(true);
+			var box=row.cloneNode(true),a=box.querySelector('a[href="/settings"]');
 			a.setAttribute("href",l.href);a.setAttribute("data-xitter-link","");a.removeAttribute("data-testid");
 			var label=[].find.call(a.querySelectorAll("span"),function(n){return !n.childElementCount&&n.textContent.trim()});
 			if(label)label.textContent=l.text;
 			var path=a.querySelector("svg path");
 			if(path){[].slice.call(a.querySelectorAll("svg path")).slice(1).forEach(function(p){p.remove()});path.setAttribute("d",l.icon)}
 			a.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();location.assign(l.href)},true);
-			s.parentNode.insertBefore(a,s);
+			row.parentNode.insertBefore(box,row);
 		});
 	}
 	// the client opens links outside x.com in a new tab; our own pages outside

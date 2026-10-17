@@ -215,7 +215,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (_a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.notes_writer, u.org_badge_id::text, u.status_until,
+			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.based_in_override, u.country, u.notes_writer, u.org_badge_id::text, u.status_until,
 				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
@@ -234,8 +234,8 @@ const ACTIONS: Record<string, Action> = {
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			await guard(a, id);
-			const limits: Record<string, [string, number]> = { name: ["name", 50], screen_name: ["screen_name", 15], bio: ["bio", 160], location: ["location", 30], website: ["website", 100] };
-			const changes: Record<string, string> = {};
+			const limits: Record<string, [string, number]> = { name: ["name", 50], screen_name: ["screen_name", 15], bio: ["bio", 160], location: ["location", 30], website: ["website", 100], based_in: ["based_in_override", 50] };
+			const changes: Record<string, string | null> = {};
 			for (const [field, [column, max]] of Object.entries(limits)) {
 				if (typeof b[field] !== "string") continue;
 				const value = b[field].trim();
@@ -243,7 +243,8 @@ const ACTIONS: Record<string, Action> = {
 				if (field === "screen_name" && !/^[A-Za-z0-9_]{1,15}$/.test(value)) throw new AdminError("Handles are letters, digits and underscores.");
 				if (field === "name" && !value) throw new AdminError("Name can't be blank.");
 				if (field === "website" && value && !/^https?:\/\/\S+$/.test(value)) throw new AdminError("Website must be an http or https address.");
-				changes[column] = value;
+				// a blank "based in" goes back to the detected region
+				changes[column] = field === "based_in" && !value ? null : value;
 			}
 			if (!Object.keys(changes).length) return {};
 			if (changes.screen_name) {
