@@ -34,6 +34,9 @@ const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toSt
 // badge, as on X, even without a badge of their own.
 export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
 
+// organisations, businesses and governments alike, have square pictures; people round ones
+export const pictureShape = (u: User) => (u.verified_type === "business" || u.verified_type === "government" ? "Square" : "Circle");
+
 // The sheet a checkmark opens: why the account wears it, and since when. The
 // client draws the organisation's row itself from the badge label. Entity
 // offsets count code points; x.com links stay inside the app.
@@ -45,7 +48,9 @@ function verificationInfo(u: User) {
 		: u.verified_type === "business"
 			? [`This account is verified because it’s an organisation on ${instance}. `]
 			: u.verified_type === "government"
-				? [`This account is verified because it’s a government or official account on ${instance}. `]
+				? [`This account is verified because it is a government or multilateral organization account on ${instance}. `]
+				: u.verified_type === "government_individual"
+					? [`This account is verified because it belongs to a government or multilateral organization official on ${instance}. `]
 				: [`This account is Premium because the ${instance} team verified it. `];
 	parts.push({ text: "Learn more", url: `${PUBLIC_ORIGIN}/rules` });
 	let text = "";
@@ -68,7 +73,7 @@ function verificationInfo(u: User) {
 
 function verification(u: User) {
 	if (u.verified_type === "business") return { verified: false, verified_type: "Business" };
-	if (u.verified_type === "government") return { verified: false, verified_type: "Government" };
+	if (u.verified_type === "government" || u.verified_type === "government_individual") return { verified: false, verified_type: "Government" };
 	return { verified: false };
 }
 
@@ -129,7 +134,7 @@ export function userResult(u: User) {
 		possibly_sensitive: false,
 		privacy: { protected: !!u.protected },
 		profile_bio: { description: u.bio, entities: { description: {}, ...urlEntities(u) } },
-		profile_image_shape: u.verified_type === "business" ? "Square" : "Circle",
+		profile_image_shape: pictureShape(u),
 		profile_metadata: { profile_interstitial_type: "" },
 		profile_translation: { translator_type: "none" },
 		relationship_counts: { followers: u.stats?.followers ?? 0, following: u.stats?.following ?? 0 },
@@ -169,7 +174,7 @@ export function legacyUser(u: User) {
 		want_retweets: !u.stats?.repostsMuted,
 		possibly_sensitive: false,
 		entities: { description: {}, ...urlEntities(u) },
-		profile_image_shape: u.verified_type === "business" ? "Square" : "Circle",
+		profile_image_shape: pictureShape(u),
 		profile_interstitial_type: "",
 		is_translator: false,
 		translator_type: "none",
@@ -182,7 +187,7 @@ export function legacyUser(u: User) {
 		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
 		is_blue_verified: isVerified(u),
 		...(u.verified_type === "business" ? { verified_type: "Business" } : {}),
-		...(u.verified_type === "government" ? { verified_type: "Government" } : {}),
+		...(u.verified_type === "government" || u.verified_type === "government_individual" ? { verified_type: "Government" } : {}),
 		super_follow_eligible: false,
 		super_followed_by: false,
 		super_following: false,

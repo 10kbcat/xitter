@@ -45,7 +45,8 @@ copy during setup, and it stays on that machine.
   authenticator app and backup codes, password reset by email
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
-  badges, roles, organisations, posts, reports, invites, instance settings,
+  badges (blue, gold organisation, grey government organisation or official),
+  roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements, topics, Explore cards and an audit log
 
 Not built yet: Spaces and live video, Moments, signing in other apps (Connected

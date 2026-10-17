@@ -725,3 +725,7 @@ alter table sessions add column if not exists ip text;
 alter table communities add column if not exists banner_width integer;
 alter table communities add column if not exists banner_height integer;
 alter table communities add column if not exists topic_id bigint references topics (id) on delete set null;
+
+-- grey badges: 'government' is an organisation (square picture), 'government_individual' an official
+alter table users drop constraint if exists users_verified_type_check;
+alter table users add constraint users_verified_type_check check (verified_type in ('blue', 'business', 'government', 'government_individual'));

@@ -13,7 +13,7 @@ export type User = {
 	avatar_url: string | null;
 	banner_url: string | null;
 	pinned_post_id?: string | null;
-	verified_type: "blue" | "business" | "government" | null;
+	verified_type: "blue" | "business" | "government" | "government_individual" | null;
 	flag?: string | null;
 	// custom badges in order (admin panel); see badgeList in model.ts
 	badges?: { id: string; name: string }[];

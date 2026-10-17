@@ -222,7 +222,7 @@ const ACTIONS: Record<string, Action> = {
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			const badge = b.badge || null;
-			if (badge !== null && !["blue", "business", "government"].includes(badge)) throw new AdminError("Unknown badge.");
+			if (badge !== null && !["blue", "business", "government", "government_individual"].includes(badge)) throw new AdminError("Unknown badge.");
 			await guard(a, id);
 			// an account stops being an organisation when it loses the gold badge
 			if (badge !== "business") await sql`delete from affiliations where org_id = ${id}::bigint`;

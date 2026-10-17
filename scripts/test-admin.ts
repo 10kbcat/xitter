@@ -83,6 +83,14 @@ await a.admin("setStatus", { id: target.id, status: "active" });
 t = (await session(targetName))!;
 check("reinstated: can sign in again", !!t);
 
+// grey badges: a government organisation has a square picture, an official a round one
+for (const [badge, shape, words] of [["government", "Square", "organization account"], ["government_individual", "Circle", "organization official"]]) {
+	const set = await a.admin("setBadge", { id: target.id, badge });
+	const u = (await o.get("UserByScreenName", { screen_name: targetName })).data.user.result;
+	check(`the ${badge} badge`, set.status === 200 && u.verification?.verified_type === "Government" && u.profile_image_shape === shape && u.verification_info?.reason?.description?.text.includes(words), { status: set.status, shape: u.profile_image_shape });
+}
+await a.admin("setBadge", { id: target.id, badge: "" });
+
 // organisations
 check("the organisation is listed", (await a.admin("orgs")).orgs?.some((x: any) => x.id === org.id));
 await a.admin("addAffiliate", { orgId: org.id, screen_name: targetName });

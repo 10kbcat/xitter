@@ -13,6 +13,7 @@
 // realm (a separate service, see README) reached at /juicebox, with tokens this
 // instance signs. Voice and video calls are not offered.
 
+import { pictureShape } from "./model";
 import { createHmac, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ServerWebSocket } from "bun";
@@ -133,7 +134,7 @@ function chatUser(u: User, viewerId: string, keyed: boolean, extra: object = {})
 		has_welcome_message: false,
 		identity_profile_labels_highlighted_label: { __typename: "HighlightedUserLabelResponse" },
 		privacy: { __typename: "UserPrivacy", protected: false, suspended: u.status === "suspended" },
-		profile_image_shape: u.verified_type === "business" ? "Square" : "Circle",
+		profile_image_shape: pictureShape(u),
 		relationship_counts: { __typename: "UserRelationshipCounts", followers: u.stats?.followers ?? 0, following: u.stats?.following ?? 0 },
 		super_followed_by: false,
 		verification: verificationOf(u),

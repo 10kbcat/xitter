@@ -1,11 +1,11 @@
-// usage: bun scripts/create-user.ts <screen_name> <password> [display name] [blue|business|government]
+// usage: bun scripts/create-user.ts <screen_name> <password> [display name] [blue|business|government|government_individual]
 
 import { createUser } from "../src/auth";
 import { migrate, sql } from "../src/db";
 
 const [screenName, password, name, badge] = process.argv.slice(2);
 if (!screenName || !password) {
-	console.error("usage: bun scripts/create-user.ts <screen_name> <password> [display name] [blue|business|government]");
+	console.error("usage: bun scripts/create-user.ts <screen_name> <password> [display name] [blue|business|government|government_individual]");
 	process.exit(1);
 }
 
