@@ -202,6 +202,26 @@ check("a password reset gives a working password", !!(await session(targetName, 
 const log = (await a.admin("audit")).entries ?? [];
 check("the audit log records it all", ["set_status", "add_affiliate", "delete_post", "reset_password", "set_signup_mode"].every((x) => log.some((e: any) => e.action === x)));
 
+// labels under a post and the counts it shows
+{
+	const made = (await o.gql("CreateTweet", { tweet_text: `label test zzlabel${Date.now()}` })).data.create_tweet.tweet_results.result;
+	check("labels: an unknown label is refused", (await a.admin("setPostNotice", { id: made.rest_id, type: "Nope" })).status === 400);
+	await a.admin("setPostNotice", { id: made.rest_id, type: "Fosnr" });
+	const seen = (await a.get("TweetResultByRestId", { tweetId: made.rest_id })).data.tweetResult.result;
+	check("labels: the post comes wrapped with the label", seen?.__typename === "TweetWithVisibilityResults" && seen.softInterventionPivot?.softInterventionDisplayType === "Fosnr" && !!seen.softInterventionPivot.text?.text, seen?.softInterventionPivot);
+	const found = await a.get("SearchTimeline", { rawQuery: "zzlabel", product: "Latest", count: 20 });
+	check("labels: visibility limited keeps it out of search", !JSON.stringify(found).includes(made.rest_id));
+	await a.admin("setPostCounts", { id: made.rest_id, counts: { likes: 999, views: 12345 } });
+	const counted = (await a.get("TweetResultByRestId", { tweetId: made.rest_id })).data.tweetResult.result.tweet;
+	check("counts: the post shows the set counts", counted?.legacy?.favorite_count === 999 && counted?.views?.count === "12345", { likes: counted?.legacy?.favorite_count, views: counted?.views });
+	check("counts: a negative count is refused", (await a.admin("setPostCounts", { id: made.rest_id, counts: { likes: -1 } })).status === 400);
+	await a.admin("setUserCounts", { id: org.id, counts: { followers: 4242 } });
+	const prof = (await a.get("UserByScreenName", { screen_name: orgName })).data.user.result;
+	check("counts: the profile shows the set followers", prof?.legacy?.followers_count === 4242 || prof?.relationship_counts?.followers === 4242, prof?.legacy?.followers_count);
+	await a.admin("setUserCounts", { id: org.id, counts: {} });
+	await o.gql("DeleteTweet", { tweet_id: made.rest_id });
+}
+
 // a second admin: the owner (the first admin) outranks them, not the other way round
 const ownerFirst = (await sql`select id::text from users where role = 'admin' order by created_at, id limit 1`)[0]?.id === adminRow.id;
 if (ownerFirst) {

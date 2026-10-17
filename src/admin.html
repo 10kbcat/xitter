@@ -152,6 +152,8 @@ async function act(fn, done) {
 	try { const r = await fn(); if (done) notice(done); return r; } catch (e) { notice(e.message, true); }
 }
 
+// X's labels under a post (model.ts NOTICE_TYPES)
+const NOTICE_LABELS = { Fosnr: "Visibility limited", Misleading: "Misleading", StayInformed: "Stay informed", GetTheLatest: "Get the latest", GovernmentRequested: "Legally required notice" };
 const when = (d) => d ? new Date(d).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "never";
 const duration = (s) => s < 3600 ? Math.floor(s / 60) + " min" : s < 172800 ? Math.floor(s / 3600) + " h" : Math.floor(s / 86400) + " days";
 // "Edge on Windows" from a user agent
@@ -762,6 +764,18 @@ const RENDER = {
 	},
 
 	async posts(main) {
+		// the label and shown counts of one post, opened by its Edit button
+		const postEditor = (p) => {
+			const n = p.notice || {}, c = p.count_overrides || {};
+			return '<div class="grid2"><div><b>Label under the post</b><div class="field"><select data-k="type">' +
+				[["", "none"]].concat(Object.entries(NOTICE_LABELS)).map(([k, l]) => '<option value="' + k + '"' + ((n.type || "") === k ? " selected" : "") + ">" + esc(l) + "</option>").join("") +
+				'</select></div><div class="field"><input data-k="text" maxlength="280" placeholder="Text (blank: the usual one for the label)" value="' + esc(n.text || "") + '"></div>' +
+				'<div class="field"><input data-k="url" placeholder="Learn more link (blank: the rules page)" value="' + esc(n.url || "") + '"></div>' +
+				'<p class="dim small">Visibility limited also keeps the post out of For you and search.</p><button class="btn primary" data-save-notice>Save label</button></div>' +
+				(can("admin") ? '<div><b>Shown counts</b><p class="dim small">Blank shows the real number. Only the number changes, not who liked or reposted.</p><div class="row" style="flex-wrap:wrap">' +
+					["likes", "replies", "reposts", "quotes", "bookmarks", "views"].map((k) => '<label class="small" style="width:30%">' + k + '<input data-k="' + k + '" type="number" min="0" value="' + (c[k] ?? "") + '"></label>').join("") +
+					'</div><button class="btn primary" data-save-counts style="margin-top:8px">Save counts</button></div>' : "") + "</div>";
+		};
 		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div><div id="list" class="scroll"></div>';
 		const load = async () => {
 			const { posts } = await api("posts", { q: $("#q").value, author: $("#author").value });
@@ -769,12 +783,26 @@ const RENDER = {
 				? '<table class="table"><tr><th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
 					posts.map((p) => "<tr><td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
 						(p.hidden ? ' <span class="pill suspended">hidden</span>' : "") + (p.sensitive ? ' <span class="pill restricted">sensitive</span>' : "") +
+						(p.notice ? ' <span class="pill restricted">' + esc(NOTICE_LABELS[p.notice.type] || p.notice.type) + "</span>" : "") + (p.count_overrides ? ' <span class="pill">counts set</span>' : "") +
 						'<div class="dim small">' + p.likes + ' likes · <a href="/' + esc(p.screen_name) + "/status/" + esc(p.id) + '" target="_blank">open</a></div></td><td><a href="#user/' + "" + '" data-handle="' + esc(p.screen_name) + '">@' + esc(p.screen_name) + '</a></td><td class="small dim">' + esc(when(p.created_at)) + "</td><td>" +
 						(can("moderator") ? '<div class="row" style="flex-wrap:nowrap">' +
 							'<button class="btn" data-vis="' + esc(p.id) + '" data-hidden="' + !p.hidden + '" data-sensitive="' + !!p.sensitive + '" title="Hidden posts are seen by staff only">' + (p.hidden ? "Show" : "Hide") + "</button>" +
 							'<button class="btn" data-vis="' + esc(p.id) + '" data-hidden="' + !!p.hidden + '" data-sensitive="' + !p.sensitive + '" title="Media behind a content warning">' + (p.sensitive ? "Not sensitive" : "Sensitive") + "</button>" +
-							'<button class="btn danger" data-del="' + esc(p.id) + '">Delete</button></div>' : "") + "</td></tr>").join("") + "</table>"
+							'<button class="btn" data-edit="' + esc(p.id) + '">Edit</button>' +
+							'<button class="btn danger" data-del="' + esc(p.id) + '">Delete</button></div>' : "") + "</td></tr>" +
+						'<tr data-editor="' + esc(p.id) + '" hidden><td colspan="4">' + postEditor(p) + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No posts match.</div>';
+			$("#list").querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
+				const row = $("#list").querySelector('[data-editor="' + b.dataset.edit + '"]');
+				row.hidden = !row.hidden;
+			});
+			$("#list").querySelectorAll("[data-editor]").forEach((row) => {
+				const id = row.dataset.editor;
+				const val = (k) => row.querySelector('[data-k="' + k + '"]').value;
+				row.querySelector("[data-save-notice]").onclick = () => act(() => api("setPostNotice", { id, type: val("type"), text: val("text"), url: val("url") }), "Label saved").then(load);
+				const cs = row.querySelector("[data-save-counts]");
+				if (cs) cs.onclick = () => act(() => api("setPostCounts", { id, counts: Object.fromEntries(["likes", "replies", "reposts", "quotes", "bookmarks", "views"].map((k) => [k, val(k)])) }), "Counts saved").then(load);
+			});
 			$("#list").querySelectorAll("[data-vis]").forEach((b) => b.onclick = () =>
 				act(() => api("setPostVisibility", { id: b.dataset.vis, hidden: b.dataset.hidden === "true", sensitive: b.dataset.sensitive === "true" }), "Post updated").then(load));
 			$("#list").querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
@@ -982,7 +1010,10 @@ async function renderUser(main, id) {
 			.map(([k, l, v]) => '<div class="field"><label>' + l + '</label><input data-f="' + k + '" value="' + esc(v) + '"' + (can("admin") ? "" : " disabled") + "></div>").join("") +
 		'<div class="field"><label>Bio</label><textarea data-f="bio"' + (can("admin") ? "" : " disabled") + ">" + esc(u.bio) + "</textarea></div>" +
 		'<div class="field"><label>Account based in (About this account; blank shows the detected region' + (u.country ? ", " + esc(u.country) : "") + ')</label><input data-f="based_in" maxlength="50" value="' + esc(u.based_in_override ?? "") + '"' + (can("admin") ? "" : " disabled") + "></div>" +
-		(can("admin") ? '<button class="btn primary" id="save">Save profile</button>' : "") + "</div>" +
+		(can("admin") ? '<button class="btn primary" id="save">Save profile</button>' : "") +
+		(can("admin") ? '<h2 style="margin-top:20px">Shown counts</h2><p class="dim small">Blank shows the real number. Only the number on the profile changes, not the lists.</p><div class="row">' +
+			["followers", "following"].map((k) => '<label class="small" style="flex:1">' + k + '<input data-count="' + k + '" type="number" min="0" value="' + ((u.count_overrides || {})[k] ?? "") + '"></label>').join("") +
+			'</div><button class="btn" id="saveCounts" style="margin-top:8px">Save counts</button>' : "") + "</div>" +
 		// badges
 		'<div class="box"><h2>Badge and flag</h2><div class="field"><label>Verification badge</label><select id="badge"' + (can("admin") ? "" : " disabled") + ">" +
 		[["", "none"], ["blue", "blue"], ["business", "gold (organisation)"], ["government", "grey (government organisation)"], ["government_individual", "grey (government official)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.verified_type ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
@@ -1039,6 +1070,7 @@ async function renderUser(main, id) {
 		"<h2>History</h2>" + (log.length ? '<table class="table">' + log.map((e) => '<tr><td class="small dim">' + esc(when(e.created_at)) + "</td><td>@" + esc(e.actor ?? "?") + " " + esc(e.action.replace(/_/g, " ")) + '</td><td class="small dim code">' + esc(e.detail ? JSON.stringify(e.detail) : "") + "</td></tr>").join("") + "</table>" : '<div class="empty">No staff actions yet.</div>');
 
 	const again = () => renderUser(main, id);
+	if ($("#saveCounts")) $("#saveCounts").onclick = () => act(() => api("setUserCounts", { id, counts: Object.fromEntries([...main.querySelectorAll("[data-count]")].map((el) => [el.dataset.count, el.value])) }), "Counts saved").then(again);
 	if ($("#save")) $("#save").onclick = () => {
 		const body = { id };
 		main.querySelectorAll("[data-f]").forEach((el) => body[el.dataset.f] = el.value);

@@ -10,12 +10,33 @@ import { loadBuild } from "./build";
 import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
+import { NOTICE_TYPES } from "./model";
 import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
 import { BACKUP_DIR, createBackup, deleteBackup, listBackups } from "./backups";
 import { clientStatus, latestSha, rollbackClient, updateClient } from "./client-update";
 
 const STANDINGS = ["active", "restricted", "limited", "suspended"];
+
+// whole numbers from 0 up for the given keys; blanks dropped, nothing left is null
+function countsOf(value: unknown, keys: string[]) {
+	const out: Record<string, number> = {};
+	const given = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+	for (const k of keys) {
+		const v = given[k];
+		if (v === undefined || v === null || v === "") continue;
+		const n = Number(v);
+		if (!Number.isInteger(n) || n < 0 || n > 2_000_000_000) throw new AdminError(`${k} must be a whole number from 0.`);
+		out[k] = n;
+	}
+	return Object.keys(out).length ? out : null;
+}
+
+function optionalText(value: unknown, max: number) {
+	const text = typeof value === "string" ? value.trim() : "";
+	if ([...text].length > max) throw new AdminError(`Up to ${max} characters.`);
+	return text;
+}
 
 function textOf(value: unknown, max = 2000) {
 	const text = typeof value === "string" ? value.trim() : "";
@@ -238,6 +259,49 @@ export const toolActions: Record<string, Action> = {
 			if (typeof b.hidden !== "boolean" || typeof b.sensitive !== "boolean") throw new AdminError("Provide visibility and sensitivity settings.");
 			await sql`update posts set hidden = ${b.hidden}, sensitive = ${b.sensitive} where id = ${id}::bigint`;
 			await audit(a, "set_post_visibility", p.user_id, { post: id, hidden: b.hidden, sensitive: b.sensitive });
+			return {};
+		},
+	},
+	// a label under the post (X's soft interventions); type null takes it off
+	setPostNotice: {
+		role: "moderator",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			const [p] = await sql`select user_id::text from posts where id = ${id}::bigint`;
+			if (!p) throw new AdminError("No such post.", 404);
+			await guard(a, p.user_id);
+			const type = b.type || null;
+			if (type !== null && !(type in NOTICE_TYPES)) throw new AdminError("Unknown label.");
+			const text = optionalText(b.text, 280);
+			const url = optionalText(b.url, 500);
+			if (url && !/^https?:\/\/\S+$/.test(url)) throw new AdminError("The link must be an http or https address.");
+			const notice = type ? { type, text: text || NOTICE_TYPES[type as keyof typeof NOTICE_TYPES], ...(url ? { url } : {}) } : null;
+			await sql`update posts set notice = ${notice ? sql`${JSON.stringify(notice)}::text::jsonb` : null} where id = ${id}::bigint`;
+			await audit(a, "set_post_notice", p.user_id, { post: id, notice });
+			return {};
+		},
+	},
+	// the counts a post shows; a blank one goes back to the real count
+	setPostCounts: {
+		role: "admin",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			const [p] = await sql`select user_id::text from posts where id = ${id}::bigint`;
+			if (!p) throw new AdminError("No such post.", 404);
+			const counts = countsOf(b.counts, ["likes", "replies", "reposts", "quotes", "bookmarks", "views"]);
+			await sql`update posts set count_overrides = ${counts ? sql`${JSON.stringify(counts)}::text::jsonb` : null} where id = ${id}::bigint`;
+			await audit(a, "set_post_counts", p.user_id, { post: id, counts });
+			return {};
+		},
+	},
+	setUserCounts: {
+		role: "admin",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			await guard(a, id);
+			const counts = countsOf(b.counts, ["followers", "following"]);
+			await sql`update users set count_overrides = ${counts ? sql`${JSON.stringify(counts)}::text::jsonb` : null} where id = ${id}::bigint`;
+			await audit(a, "set_user_counts", id, { counts });
 			return {};
 		},
 	},

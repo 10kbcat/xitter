@@ -874,3 +874,10 @@ create table if not exists hashflags (
 	check (ends_at > starts_at),
 	check (like_animation is not null or emoji is not null)
 );
+
+-- Staff tools on posts and accounts. notice: a label under a post, X's
+-- softInterventionPivot ({type, text, url}; "Fosnr" also keeps it out of For
+-- you and search). count_overrides: the counts shown, set by hand.
+alter table posts add column if not exists notice jsonb;
+alter table posts add column if not exists count_overrides jsonb;
+alter table users add column if not exists count_overrides jsonb;

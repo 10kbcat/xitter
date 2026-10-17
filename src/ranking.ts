@@ -35,6 +35,8 @@ export async function rankedFeed(viewerId: string, opts: { asOf: string; offset:
 			select f.*, (select x.user_id from posts x where x.id = f.post_id) as original_author
 			from feed_items f
 			where not f.is_reply and f.item_id <= ${opts.asOf}::bigint and ${homeHidden(viewerId)} and ${communityVisible(viewerId)}
+				-- "Visibility limited" (staff's Fosnr label): never recommended
+				and (select x.notice->>'type' from posts x where x.id = f.post_id) is distinct from 'Fosnr'
 				and not ${unwantedTopicMatch(viewerId, sql`f.post_id`, sql`(select x.user_id from posts x where x.id = f.post_id)`)}
 			order by f.item_id desc limit ${CANDIDATES * 3}
 		),

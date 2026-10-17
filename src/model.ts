@@ -251,6 +251,8 @@ export type PostRow = {
 	edit_count?: number;
 	view_count?: number;
 	reply_policy?: string | null;
+	// a label staff put under the post (softInterventionPivot): X's type, its text and link
+	notice?: { type: string; text: string; url?: string } | null;
 	// the viewer may not reply to this conversation
 	reply_limited?: boolean;
 	conversation_policy?: string | null;
@@ -318,12 +320,13 @@ function hashtags(text: string) {
 // where the client reads limitedActionResults from
 export function tweetResult(p: PostRow, withTypename = true): Record<string, unknown> {
 	const tweet = plainTweet(p, withTypename);
-	if (!p.reply_limited || !withTypename) return tweet;
+	if ((!p.reply_limited && !p.notice) || !withTypename) return tweet;
 	const who = p.conversation_policy === "Community" ? "follows" : p.conversation_policy === "Verified" ? "allows (verified accounts only)" : "mentioned";
 	return {
 		__typename: "TweetWithVisibilityResults",
 		tweet,
-		limitedActionResults: {
+		...(p.notice ? { softInterventionPivot: noticePivot(p.notice) } : {}),
+		...(p.reply_limited ? { limitedActionResults: {
 			limited_actions: [
 				{
 					action: "Reply",
@@ -335,7 +338,30 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 					},
 				},
 			],
-		},
+		} } : {}),
+	};
+}
+
+// A label under a post, as X sends it (softInterventionPivot): its kind, the
+// text, and the link the text and its "Learn more" lead to (the instance's
+// rules unless staff gave one).
+export const NOTICE_TYPES = {
+	Fosnr: "Visibility limited: this post may violate the rules of this instance.",
+	Misleading: "This post may be misleading.",
+	StayInformed: "Stay informed: get the facts from reliable sources.",
+	GetTheLatest: "Get the latest from reliable sources.",
+	GovernmentRequested: "This post is withheld or limited in response to a legal demand.",
+} as const;
+function noticePivot(n: { type: string; text: string; url?: string }) {
+	const url = n.url || `${PUBLIC_ORIGIN}/rules`;
+	const text = n.text || NOTICE_TYPES[n.type as keyof typeof NOTICE_TYPES] || "";
+	const link = { url, urlType: "ExternalUrl" };
+	return {
+		softInterventionDisplayType: n.type,
+		displayType: "TweetFooter",
+		text: { rtl: false, text, entities: [] },
+		url: link,
+		landingUrl: link,
 	};
 }
 
