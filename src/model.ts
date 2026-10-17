@@ -34,6 +34,10 @@ const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toSt
 // badge, as on X, even without a badge of their own.
 export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
 
+// X has two globes: "badged" (blue) and "moderator" (yellow). Approvers get the
+// yellow one; translator moderators the same, which badges.ts colours gold.
+export const translatorType = (u: User) => (u.translator === "translator" ? "badged" : u.translator ? "moderator" : "none");
+
 // organisations, businesses and governments alike, have square pictures; people round ones
 export const pictureShape = (u: User) => (u.verified_type === "business" || u.verified_type === "government" ? "Square" : "Circle");
 
@@ -136,7 +140,7 @@ export function userResult(u: User) {
 		profile_bio: { description: u.bio, entities: { description: {}, ...urlEntities(u) } },
 		profile_image_shape: pictureShape(u),
 		profile_metadata: { profile_interstitial_type: "" },
-		profile_translation: { translator_type: "none" },
+		profile_translation: { translator_type: translatorType(u), translator_type_enum: { badged: "Badged", moderator: "Moderator", none: "None" }[translatorType(u)] },
 		relationship_counts: { followers: u.stats?.followers ?? 0, following: u.stats?.following ?? 0 },
 		relationship_perspectives: {
 			blocked_by: u.stats?.blockedBy ?? false,
@@ -176,8 +180,8 @@ export function legacyUser(u: User) {
 		entities: { description: {}, ...urlEntities(u) },
 		profile_image_shape: pictureShape(u),
 		profile_interstitial_type: "",
-		is_translator: false,
-		translator_type: "none",
+		is_translator: translatorType(u) !== "none",
+		translator_type: translatorType(u),
 		followers_count: u.stats?.followers ?? 0,
 		friends_count: u.stats?.following ?? 0,
 		media_count: u.stats?.mediaPosts ?? 0,

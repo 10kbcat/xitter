@@ -48,6 +48,7 @@ copy during setup, and it stays on that machine.
 - Reporting posts and accounts
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges (blue, gold organisation, grey government organisation or official),
+  translator globes (blue translator, gold translator moderator, yellow approver),
   roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements, topics, Explore cards and an audit log
 

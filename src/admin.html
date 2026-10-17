@@ -733,6 +733,8 @@ async function renderUser(main, id) {
 		// badges
 		'<div class="box"><h2>Badge and flag</h2><div class="field"><label>Verification badge</label><select id="badge"' + (can("admin") ? "" : " disabled") + ">" +
 		[["", "none"], ["blue", "blue"], ["business", "gold (organisation)"], ["government", "grey (government organisation)"], ["government_individual", "grey (government official)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.verified_type ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
+		'</select></div><div class="field"><label>Translator badge (a globe after the verification badge)</label><select id="translator"' + (can("admin") ? "" : " disabled") + ">" +
+		[["", "none"], ["translator", "blue (translator)"], ["moderator", "gold (translator moderator)"], ["approver", "yellow (approver)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.translator ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
 		'</select></div><div class="field"><label>Pride flag</label><div class="flags" id="flags">' +
 		[{ id: "", name: "none" }].concat(flags).map((f) => '<button type="button" title="' + esc(f.name) + '" data-flag="' + esc(f.id) + '" class="' + ((u.flag ?? "") === f.id ? "on" : "") + '"' + (can("admin") ? "" : " disabled") + ">" +
 			(f.id ? '<img alt="" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div></div>" +
@@ -789,6 +791,7 @@ async function renderUser(main, id) {
 		act(() => api("updateUser", body), "Profile saved").then(again);
 	};
 	if ($("#badge")) $("#badge").onchange = () => act(() => api("setBadge", { id, badge: $("#badge").value }), "Badge set").then(again);
+	if ($("#translator")) $("#translator").onchange = () => act(() => api("setTranslator", { id, translator: $("#translator").value }), "Translator badge set").then(again);
 	main.querySelectorAll("[data-flag]").forEach((b) => b.onclick = () => act(() => api("setFlag", { id, flag: b.dataset.flag }), "Flag set").then(again));
 	main.querySelectorAll("[data-status]").forEach((b) => b.onclick = async () => {
 		if (b.dataset.status === "suspended" && !(await ask("Suspend @" + u.screen_name + "?"))) return;

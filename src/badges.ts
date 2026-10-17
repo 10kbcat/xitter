@@ -7,17 +7,19 @@ import { sql } from "./db";
 import { badgeList } from "./model";
 import { toUser, userCols } from "./users";
 
-// GET /i/api/xitter/badges?names=a,b: { a: [{ url, description }], ... },
-// only accounts that wear more than one
+// GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold }, ... },
+// only accounts that wear more than one badge, or a gold translator globe
+// (X's yellow "moderator" globe, recoloured for translator moderators)
 export async function extraBadges(viewerId: string, url: URL): Promise<Response> {
 	const names = [...new Set((url.searchParams.get("names") ?? "").split(",").map((n) => n.trim().toLowerCase()).filter((n) => /^\w{1,15}$/.test(n)))].slice(0, 50);
-	const out: Record<string, { url: string; description: string }[]> = {};
+	const out: Record<string, { badges: { url: string; description: string }[]; gold: boolean }> = {};
 	if (names.length) {
 		const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")})`;
 		for (const r of rows) {
 			const u = toUser(r);
-			const extra = badgeList(u).slice(1).map(({ url, description }) => ({ url, description }));
-			if (extra.length) out[u.screen_name.toLowerCase()] = extra;
+			const badges = badgeList(u).slice(1).map(({ url, description }) => ({ url, description }));
+			const gold = u.translator === "moderator";
+			if (badges.length || gold) out[u.screen_name.toLowerCase()] = { badges, gold };
 		}
 	}
 	return Response.json(out, { headers: { "cache-control": "private, max-age=60" } });
@@ -34,6 +36,10 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		if(box.tagName==="H2"&&box.querySelector('div[style*="height: calc(1.0625em)"]')){var p=/^\/(\w{1,15})(?:\/|$)/.exec(location.pathname);if(p)return p[1].toLowerCase()}
 	}
 	function draw(box,name){
+		var k=known[name];
+		// the translator globe X draws (its label is the client's "Translator account")
+		if(k.gold)box.querySelectorAll('svg[aria-label="Translator account"]').forEach(function(g){g.style.setProperty("color","#d4a72c","important")});
+		if(!k.badges.length)return;
 		// X's own badge: a square box sized to the text, after the name
 		var slot=box.querySelector('div[style*="height: calc(1.0625em)"]');
 		if(!slot)return;
@@ -43,7 +49,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		var row=document.createElement("span");
 		row.setAttribute("data-xitter-badges","");
 		row.style.cssText="display:inline-flex;align-items:center;vertical-align:text-bottom";
-		known[name].forEach(function(b){
+		k.badges.forEach(function(b){
 			var img=document.createElement("img");
 			img.src=b.url;img.alt=b.description;img.title=b.description;img.draggable=false;
 			img.style.cssText="height:1.0625em;width:1.0625em;object-fit:contain;margin-left:2px;border-radius:2px";

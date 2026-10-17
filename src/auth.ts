@@ -24,6 +24,8 @@ export type User = {
 	// the organisation this account is an affiliate of
 	// Settings > Discoverability: people with this email in their contacts may find the account
 	discoverable_by_email?: boolean;
+	// the translator globe: blue, gold (moderator) or yellow (approver)
+	translator?: "translator" | "moderator" | "approver" | null;
 	// when the badge was given ("Verified since")
 	verified_at?: Date | null;
 	// `since`: when the account joined the organisation

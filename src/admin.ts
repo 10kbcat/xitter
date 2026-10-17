@@ -68,7 +68,7 @@ const randomPassword = () => {
 
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
-const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, u.verified_type, u.flag, u.status, u.role,
+const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, u.verified_type, u.translator, u.flag, u.status, u.role,
 	u.created_at, u.last_seen_at, u.invite_code,
 	(select count(*)::int from posts p where p.user_id = u.id) as posts,
 	(select count(*)::int from follows f where f.followee_id = u.id) as followers,
@@ -239,6 +239,18 @@ const ACTIONS: Record<string, Action> = {
 		},
 	},
 
+	setTranslator: {
+		role: "admin",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			const kind = b.translator || null;
+			if (kind !== null && !["translator", "moderator", "approver"].includes(kind)) throw new AdminError("Unknown translator badge.");
+			await guard(a, id);
+			await sql`update users set translator = ${kind} where id = ${id}::bigint`;
+			await audit(a, "set_translator", id, { translator: kind });
+			return {};
+		},
+	},
 	setBadge: {
 		role: "admin",
 		run: async (a, b) => {

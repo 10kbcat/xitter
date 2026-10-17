@@ -27,7 +27,7 @@ try{
 	const second=(await admin.admin('createBadge',{name:'Second test badge',image:Buffer.from(await Bun.file('public/favicon.png').arrayBuffer()).toString('base64')})).data.id;
 	check((await admin.admin('setBadges',{id:created[0],badgeIds:[badge,second]})).status===200,'badges assigned');
 	const extra=await(await fetch(origin+'/i/api/xitter/badges?names='+names[0],{headers:user.headers})).json() as any;
-	check(extra[names[0]]?.length===1&&extra[names[0]][0].description==='Second test badge','second badge drawn after the first');
+	check(extra[names[0]]?.badges?.length===1&&extra[names[0]].badges[0].description==='Second test badge','second badge drawn after the first');
 	await admin.admin('deleteBadge',{id:second});
 	const profile=(await user.gql('UserByScreenName',{screen_name:names[0]})).data.user.result;
 	check(profile.affiliates_highlighted_label.label.description==='Test custom badge','native badge description');

@@ -90,6 +90,15 @@ for (const [badge, shape, words] of [["government", "Square", "organization acco
 	check(`the ${badge} badge`, set.status === 200 && u.verification?.verified_type === "Government" && u.profile_image_shape === shape && u.verification_info?.reason?.description?.text.includes(words), { status: set.status, shape: u.profile_image_shape });
 }
 await a.admin("setBadge", { id: target.id, badge: "" });
+// translator globes: X's "badged" (blue) and "moderator" (yellow; badges.ts makes translator moderators' gold)
+for (const [kind, type, gold] of [["translator", "badged", false], ["moderator", "moderator", true], ["approver", "moderator", false]] as const) {
+	await a.admin("setTranslator", { id: target.id, translator: kind });
+	const u = (await o.get("UserByScreenName", { screen_name: targetName })).data.user.result;
+	const extra = await (await fetch(`${origin}/i/api/xitter/badges?names=${targetName}`, { headers: o.headers })).json();
+	check(`the ${kind} globe`, u.profile_translation?.translator_type === type && !!extra[targetName.toLowerCase()]?.gold === gold, { type: u.profile_translation, extra });
+}
+check("an unknown translator badge is refused", (await a.admin("setTranslator", { id: target.id, translator: "wizard" })).status === 400);
+await a.admin("setTranslator", { id: target.id, translator: "" });
 
 // organisations
 check("the organisation is listed", (await a.admin("orgs")).orgs?.some((x: any) => x.id === org.id));

@@ -758,3 +758,6 @@ create table if not exists push_subscriptions (
 	created_at timestamptz not null default now()
 );
 create index if not exists push_subscriptions_user_idx on push_subscriptions (user_id);
+
+-- X's translator globe after the name: translator (blue), moderator (gold), approver (yellow)
+alter table users add column if not exists translator text check (translator in ('translator', 'moderator', 'approver'));
