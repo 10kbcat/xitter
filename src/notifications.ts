@@ -20,7 +20,8 @@ const SHOWN_USERS = 3;
 type Group = { kind: "like" | "repost" | "follow" | "bell"; key: string; at: number; users: string[]; total: number; postId?: string };
 type Mention = { kind: "post"; postId: string; at: number; reason: "reply" | "quote" | "mention" };
 // a message, warning or strike from staff, or the decision on an appeal
-type Staff = { kind: "staff"; key: string; at: number; text: string };
+// a notice from the instance; `url` is where it leads, /account/notices if none
+type Staff = { kind: "staff"; key: string; at: number; text: string; url?: string };
 type Item = Group | Mention | Staff;
 
 const ms = (d: Date) => d.getTime();
@@ -77,6 +78,10 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			where user_id = ${viewerId}::bigint and resolved_at >= ${lo} and resolved_at < ${hi} order by resolved_at desc limit ${opts.limit}`;
 		for (const r of appeals)
 			out.push({ kind: "staff", key: `appeal-${r.id}`, at: ms(r.at), text: `${team[0].toUpperCase()}${team.slice(1)} ${r.status === "accepted" ? "accepted" : "turned down"} your appeal.` });
+		const asked = await sql`select o.id, o.screen_name, r.created_at as at from affiliation_requests r join users o on o.id = r.org_id
+			where r.user_id = ${viewerId}::bigint and r.created_at >= ${lo} and r.created_at < ${hi} order by r.created_at desc limit ${opts.limit}`;
+		for (const r of asked)
+			out.push({ kind: "staff", key: `affiliation-${r.id}`, at: ms(r.at), text: `@${r.screen_name} asked to add you as an affiliate.`, url: "/account/organisation" });
 	}
 
 	const posts = await sql`
@@ -190,7 +195,7 @@ function staffEntry(s: Staff) {
 				id: s.key,
 				notification_icon: "shield_icon",
 				rich_message: { rtl: false, text: s.text, entities: [] },
-				notification_url: { url: `${PUBLIC_ORIGIN}/account/notices`, urlType: "ExternalUrl" },
+				notification_url: { url: `${PUBLIC_ORIGIN}${s.url ?? "/account/notices"}`, urlType: "ExternalUrl" },
 				template: { __typename: "TimelineNotificationAggregateUserActions", target_objects: [], from_users: [] },
 				timestamp_ms: s.at,
 			},
@@ -288,7 +293,7 @@ export async function pushItems(viewerId: string, sinceMs: number): Promise<Push
 	const out: PushItem[] = [];
 	for (const i of list) {
 		if (i.kind === "staff") {
-			out.push({ kind: "staff", key: i.key, at: i.at, text: i.text, url: "/account/notices" });
+			out.push({ kind: "staff", key: i.key, at: i.at, text: i.text, url: i.url ?? "/account/notices" });
 			continue;
 		}
 		const post = i.postId ? posts.get(i.postId) : undefined;

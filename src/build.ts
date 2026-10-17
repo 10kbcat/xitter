@@ -21,6 +21,11 @@ export const RUNTIME_FILE = join(CLIENT_DIR, "runtime.js");
 
 let cached: { build: Build; runtime: string } | undefined;
 
+// after build.json changed under the running server (client-update.ts)
+export function reloadBuild() {
+	cached = undefined;
+}
+
 export function loadBuild(): { build: Build; runtime: string } | undefined {
 	if (cached) return cached;
 	if (!existsSync(BUILD_FILE) || !existsSync(RUNTIME_FILE)) return undefined;

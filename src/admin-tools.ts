@@ -11,6 +11,9 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
 import { setSetting, settings } from "./settings";
+import { clientIp, ipAllowed, parseRange } from "./staff-access";
+import { BACKUP_DIR, createBackup, deleteBackup, listBackups } from "./backups";
+import { clientStatus, latestSha, rollbackClient, updateClient } from "./client-update";
 
 const STANDINGS = ["active", "restricted", "limited", "suspended"];
 
@@ -320,6 +323,140 @@ export const toolActions: Record<string, Action> = {
 				database: { bytes: db.bytes, latency_ms: Math.round(performance.now() - started) },
 				client_build: loadBuild()?.build.sha ?? null,
 			};
+		},
+	},
+
+	// Admin > Security: who reaches the panel (staff-access.ts), and staff sessions
+	security: {
+		role: "admin",
+		run: async (a, b, req) => ({
+			security: settings().security,
+			your_ip: req ? clientIp(req) : null,
+			without_2fa: await sql`select id::text, screen_name, role from users where role is not null and not totp_enabled order by screen_name`,
+			sessions: await sql`select s.id::text, s.created_at, s.last_seen_at, s.user_agent, s.ip, s.token = ${a.token} as current,
+				u.id::text as user_id, u.screen_name, u.role
+				from sessions s join users u on u.id = s.user_id where u.role is not null order by s.last_seen_at desc limit 200`,
+		}),
+	},
+	saveSecurity: {
+		role: "admin",
+		run: async (a, b, req) => {
+			if (typeof b.staff_2fa !== "boolean" || !Array.isArray(b.admin_ips) || b.admin_ips.length > 100) throw new AdminError("Invalid security settings.");
+			const ips = [...new Set(b.admin_ips.map((x: unknown) => String(x).trim()).filter(Boolean))] as string[];
+			const bad = ips.find((x) => !parseRange(x));
+			if (bad) throw new AdminError(`"${bad}" isn't an address or a range like 10.0.0.0/8.`);
+			// saving a list that leaves you out would close the panel behind you
+			const ip = req ? clientIp(req) : null;
+			if (ips.length && !ipAllowed(ip, ips)) throw new AdminError(`The list must include your own address (${ip ?? "unknown"}).`);
+			if (b.staff_2fa && !(await sql`select 1 from users where id = ${a.id}::bigint and totp_enabled`).length)
+				throw new AdminError("Turn on two-factor for your own account first (/account/2fa).");
+			await setSetting("security", { staff_2fa: b.staff_2fa, admin_ips: ips });
+			await audit(a, "save_security", null, { staff_2fa: b.staff_2fa, admin_ips: ips });
+			return {};
+		},
+	},
+
+	// backups.ts; restoring is pg_restore on the server, not something done from a browser
+	backups: { role: "admin", run: async () => ({ backups: listBackups(), schedule: settings().backups, dir: BACKUP_DIR }) },
+	createBackup: {
+		role: "admin",
+		run: async (a) => {
+			const made = await createBackup().catch((e: Error) => {
+				throw new AdminError(e.message);
+			});
+			await audit(a, "create_backup", null, made);
+			return made;
+		},
+	},
+	deleteBackup: {
+		role: "admin",
+		run: async (a, b) => {
+			if (!deleteBackup(String(b.name ?? ""))) throw new AdminError("No such backup.", 404);
+			await audit(a, "delete_backup", null, { name: b.name });
+			return {};
+		},
+	},
+	saveBackupSchedule: {
+		role: "admin",
+		run: async (a, b) => {
+			const keep = Number(b.keep);
+			if (typeof b.daily !== "boolean" || !Number.isInteger(keep) || keep < 1 || keep > 90) throw new AdminError("Keep 1 to 90 backups.");
+			await setSetting("backups", { daily: b.daily, keep });
+			await audit(a, "backup_schedule", null, { daily: b.daily, keep });
+			return {};
+		},
+	},
+
+	// member-invites.ts
+	saveInviteQuota: {
+		role: "admin",
+		run: async (a, b) => {
+			const n = (v: unknown, lo: number, hi: number, what: string) => {
+				const x = Number(v);
+				if (!Number.isInteger(x) || x < lo || x > hi) throw new AdminError(`${what} is ${lo} to ${hi}.`);
+				return x;
+			};
+			if (typeof b.enabled !== "boolean") throw new AdminError("Choose whether members make invites.");
+			const quota = { enabled: b.enabled, per_month: n(b.per_month, 1, 100, "Invites a month"), uses: n(b.uses, 1, 100, "Uses each"), min_age_days: n(b.min_age_days, 0, 3650, "Account age") };
+			await setSetting("invite_quota", quota);
+			await audit(a, "invite_quota", null, quota);
+			return {};
+		},
+	},
+
+	// client-update.ts
+	client: { role: "admin", run: async () => clientStatus() },
+	checkClient: {
+		role: "admin",
+		run: async () => ({ latest: await latestSha().catch((e: Error) => { throw new AdminError(e.message); }), ...clientStatus() }),
+	},
+	updateClient: {
+		role: "admin",
+		run: async (a) => {
+			const before = clientStatus().sha;
+			const done = await updateClient().catch((e: Error) => { throw new AdminError(e.message); });
+			if (done.changed) await audit(a, "update_client", null, { from: before, to: done.sha });
+			return done;
+		},
+	},
+	rollbackClient: {
+		role: "admin",
+		run: async (a) => {
+			const before = clientStatus().sha;
+			let sha: string;
+			try {
+				sha = rollbackClient();
+			} catch (e: any) {
+				throw new AdminError(e.message);
+			}
+			await audit(a, "rollback_client", null, { from: before, to: sha });
+			return { sha };
+		},
+	},
+
+	// errors.ts: distinct errors, the latest first
+	errors: {
+		role: "support",
+		run: async (_a, b) => ({
+			errors: await sql`select e.fingerprint, e.source, e.message, e.stack, e.path, e.count, e.first_at, e.last_at, e.resolved, e.user_id::text as user_id, u.screen_name
+				from error_log e left join users u on u.id = e.user_id
+				where ${b.resolved ? sql`e.resolved` : sql`not e.resolved`} and (${b.source ?? null}::text is null or e.source = ${b.source ?? null})
+				order by e.last_at desc limit 100`,
+		}),
+	},
+	resolveErrors: {
+		role: "admin",
+		run: async (a, b) => {
+			if (b.all) {
+				const rows = await sql`update error_log set resolved = true where not resolved returning fingerprint`;
+				await audit(a, "resolve_errors", null, { count: rows.length });
+				return { count: rows.length };
+			}
+			if (typeof b.fingerprint !== "string" || !/^[0-9a-f]{32}$/.test(b.fingerprint)) throw new AdminError("No such error.");
+			const rows = await sql`update error_log set resolved = true where fingerprint = ${b.fingerprint} returning fingerprint`;
+			if (!rows.length) throw new AdminError("No such error.", 404);
+			await audit(a, "resolve_errors", null, { count: 1 });
+			return { count: 1 };
 		},
 	},
 

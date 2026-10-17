@@ -5,12 +5,18 @@ import { migrate, sql } from "./db";
 import { knownOperation, runOperation } from "./graphql";
 import { brandingFile } from "./branding";
 import { handleLogin, maintenancePage, rulesPage } from "./login";
-import { adminApi } from "./admin";
+import { adminApi, audit } from "./admin";
 import { loadSettings, settings } from "./settings";
 import { flagPickerData } from "./flag-picker";
 import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
 import { patchFile, patchText } from "./patch";
+import { clientError, recordError } from "./errors";
+import { staffGate } from "./staff-access";
+import { backupPath, startBackups } from "./backups";
+import { memberInvitesRoute } from "./member-invites";
+import { orgRoute } from "./org-manage";
+import { menuLinks } from "./tidy";
 import { chatMediaRoute, chatSocket, juiceboxProxy, socketUser } from "./chat";
 import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
@@ -87,6 +93,16 @@ const adminPage = async () => {
 	return (await Bun.file(new URL("./admin.html", import.meta.url)).text()).replaceAll("{{instance}}", () => name);
 };
 
+function staffBlockedPage(reason: string) {
+	const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+	const text = esc(reason).replace("/account/2fa", '<a href="/account/2fa">/account/2fa</a>');
+	return new Response(
+		`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin · ${esc(settings().instance_name)}</title>
+<body style="margin:0;background:#000;color:#e7e9ea;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh"><main style="width:min(460px,92vw)"><h1 style="font-size:24px">Admin panel</h1><p>${text}</p><p><a style="color:#1d9bf0" href="/home">Back</a></p></main></body>`,
+		{ status: 403, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+	);
+}
+
 async function serveClient(req: Request, pathname: string): Promise<Response> {
 	const cdnPath = pathname.slice("/abs".length);
 	const raw = await getClientFile(cdnPath);
@@ -133,6 +149,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
 	if (path === "/xitter/gif") return gifProxy(url);
+	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
 	const parts = path.split("/").filter(Boolean);
 	const gql = parts.indexOf("graphql");
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
@@ -166,96 +183,130 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 await migrate();
 await expireSanctions();
 // temporary sanctions end on their own
-setInterval(() => expireSanctions().catch((e) => console.error("sanction expiry failed", e.message)), 30_000).unref();
+setInterval(
+	() =>
+		expireSanctions().catch((e) => {
+			console.error("sanction expiry failed", e.message);
+			recordError("job", e, { path: "sanction expiry" });
+		}),
+	30_000,
+).unref();
 await loadSettings();
 await resumeVideos(MEDIA_DIR);
 
+// a request that throws is answered by Bun's error() below, which doesn't know
+// the request; caught here it is logged with its path and account
+async function handle(req: Request): Promise<Response | undefined> {
+	try {
+		return await route(req);
+	} catch (e) {
+		const viewer = await getViewer(req).catch(() => undefined);
+		await recordError("server", e, { path: `${req.method} ${new URL(req.url).pathname}`, userId: viewer?.id });
+		throw e;
+	}
+}
+
+async function route(req: Request): Promise<Response | undefined> {
+	rememberIp(req, server.requestIP(req)?.address);
+	const url = new URL(req.url);
+	const p = url.pathname;
+	if (p.startsWith("/abs/")) return serveClient(req, p);
+	// chat: the live socket (its token from GenerateXChatTokenMutation) and
+	// the way to the key backup realm
+	if (p === "/xchat/ws") {
+		const userId = socketUser(url.searchParams.get("token") ?? "");
+		if (!userId) return new Response("bad token", { status: 401 });
+		return server.upgrade(req, { data: { userId } }) ? undefined : new Response("expected a websocket", { status: 400 });
+	}
+	if (p.startsWith("/juicebox/")) return juiceboxProxy(req, p.slice("/juicebox/".length));
+	// Chat's manifest: the pinned chat build's own, its addresses ours
+	if (p === "/xchat/embed-v1.json") {
+		const base = loadBuild()?.build.meta.xchatEmbedBuild as string | undefined;
+		const raw = base && (await getClientFile(`${new URL(base).pathname}mf-manifest.json`));
+		if (!raw) return new Response("no pinned chat build", { status: 404 });
+		return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
+	}
+	if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+	if (p === "/login" && req.method === "POST") return handleLogin(req);
+	if (p === "/rules" || p === "/tos" || p === "/privacy") return rulesPage();
+	// X's sign-in screens (jf.x.com), answered here
+	// inside the signed-in client the same screens come through /i/jfapi
+	if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
+		const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));
+		if (screen) return screen;
+	}
+	// people sign in and up on the signed-out home page; an invite link's code
+	// is kept for the dialog, which then skips asking for it
+	// X's own add-email flow: ours is a page
+	if (p === "/i/flow/add_email") return Response.redirect("/account/email", 302);
+	if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
+		const headers = new Headers({ location: "/" });
+		const code = url.searchParams.get("code");
+		if (code) headers.append("set-cookie", `xitter_invite=${encodeURIComponent(code)}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly`);
+		return new Response(null, { status: 302, headers });
+	}
+	if (p.startsWith("/public/")) return servePublic(p);
+	if (p === "/favicon.ico") return servePublic("/public/favicon.png");
+	if (p === "/sw.js") return new Response(SERVICE_WORKER, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
+	if (p === "/manifest.json") return new Response(null, { status: 404 });
+
+	const viewer = await getViewer(req);
+	// a suspended account can't sign in, so it appeals here with its password
+	if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
+	// maintenance: staff carry on, everyone else signed in waits
+	if (viewer && !viewer.role && settings().operations.maintenance) {
+		if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
+		return maintenancePage();
+	}
+	if (p === "/account/reset") return resetRoute(req, url);
+	if (p === "/account/forgot") return forgotRoute(req, url);
+	if (p === "/account/email" || p === "/account/email/confirm") return emailRoute(req, url, viewer);
+	if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
+	if (p === "/account/notices" && viewer) return noticesPage(viewer);
+	if (p === "/account/invites" && viewer) return memberInvitesRoute(req, viewer);
+	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
+	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
+	// uploads stay inside the instance: only signed-in users get them
+	if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });
+	// the admin panel: staff only; everyone else gets the client's not-found page
+	if (p.startsWith("/admin/api/")) return adminApi(req, p.slice("/admin/api/".length), viewer);
+	if (p === "/admin/flags.json" && viewer?.role) return Response.json(flagPickerData(null).flags);
+	// a backup, for an admin's browser to save
+	if (p.startsWith("/admin/backups/") && viewer?.role === "admin" && !(await staffGate(req, viewer))) {
+		const name = p.slice("/admin/backups/".length);
+		const file = backupPath(name);
+		if (!file || !(await Bun.file(file).exists())) return new Response("not found", { status: 404 });
+		await audit(viewer, "download_backup", null, { name });
+		return new Response(Bun.file(file), { headers: { "content-type": "application/octet-stream", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store" } });
+	}
+	if ((p === "/admin" || p === "/admin/") && viewer?.role) {
+		const blocked = await staffGate(req, viewer);
+		if (blocked) return staffBlockedPage(blocked);
+		return new Response(await adminPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+	}
+	if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
+	if (API_PREFIX.test(p) || req.method !== "GET") {
+		// the event stream must outlive the default idle timeout
+		if (p.endsWith("/live_pipeline/events")) server.timeout(req, 0);
+		return serveApi(req, url, viewer);
+	}
+
+	// signed out: X's own home page with its sign-in form, and the dialog
+	if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
+	const inCommunity = viewer ? (await sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`).length > 0 : false;
+	const [flagRow] = viewer ? await sql`select education_flags from users where id = ${viewer.id}::bigint` : [];
+	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, inCommunity, flagRow?.education_flags ?? {}, viewer ? await menuLinks(viewer.id) : []);
+	if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
+	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
+	// a guest token left from the signed-out page makes the signed-in client act
+	// as a guest (no csrf header, every write refused)
+	if (viewer && /(?:^|;\s*)gt=/.test(req.headers.get("cookie") ?? "")) headers.append("set-cookie", "gt=; Path=/; Max-Age=0");
+	return new Response(page, { headers });
+}
+
 const server = Bun.serve({
 	port: PORT,
-	async fetch(req) {
-		rememberIp(req, server.requestIP(req)?.address);
-		const url = new URL(req.url);
-		const p = url.pathname;
-		if (p.startsWith("/abs/")) return serveClient(req, p);
-		// chat: the live socket (its token from GenerateXChatTokenMutation) and
-		// the way to the key backup realm
-		if (p === "/xchat/ws") {
-			const userId = socketUser(url.searchParams.get("token") ?? "");
-			if (!userId) return new Response("bad token", { status: 401 });
-			return server.upgrade(req, { data: { userId } }) ? undefined : new Response("expected a websocket", { status: 400 });
-		}
-		if (p.startsWith("/juicebox/")) return juiceboxProxy(req, p.slice("/juicebox/".length));
-		// Chat's manifest: the pinned chat build's own, its addresses ours
-		if (p === "/xchat/embed-v1.json") {
-			const base = loadBuild()?.build.meta.xchatEmbedBuild as string | undefined;
-			const raw = base && (await getClientFile(`${new URL(base).pathname}mf-manifest.json`));
-			if (!raw) return new Response("no pinned chat build", { status: 404 });
-			return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
-		}
-		if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-		if (p === "/login" && req.method === "POST") return handleLogin(req);
-		if (p === "/rules" || p === "/tos" || p === "/privacy") return rulesPage();
-		// X's sign-in screens (jf.x.com), answered here
-		// inside the signed-in client the same screens come through /i/jfapi
-		if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
-			const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));
-			if (screen) return screen;
-		}
-		// people sign in and up on the signed-out home page; an invite link's code
-		// is kept for the dialog, which then skips asking for it
-		// X's own add-email flow: ours is a page
-		if (p === "/i/flow/add_email") return Response.redirect("/account/email", 302);
-		if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
-			const headers = new Headers({ location: "/" });
-			const code = url.searchParams.get("code");
-			if (code) headers.append("set-cookie", `xitter_invite=${encodeURIComponent(code)}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly`);
-			return new Response(null, { status: 302, headers });
-		}
-		if (p.startsWith("/public/")) return servePublic(p);
-		if (p === "/favicon.ico") return servePublic("/public/favicon.png");
-		if (p === "/sw.js") return new Response(SERVICE_WORKER, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
-		if (p === "/manifest.json") return new Response(null, { status: 404 });
-
-		const viewer = await getViewer(req);
-		// a suspended account can't sign in, so it appeals here with its password
-		if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
-		// maintenance: staff carry on, everyone else signed in waits
-		if (viewer && !viewer.role && settings().operations.maintenance) {
-			if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
-			return maintenancePage();
-		}
-		if (p === "/account/reset") return resetRoute(req, url);
-		if (p === "/account/forgot") return forgotRoute(req, url);
-		if (p === "/account/email" || p === "/account/email/confirm") return emailRoute(req, url, viewer);
-		if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
-		if (p === "/account/notices" && viewer) return noticesPage(viewer);
-		if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
-		// uploads stay inside the instance: only signed-in users get them
-		if (p.startsWith("/media/")) return viewer ? serveMedia(req, p) : new Response("not found", { status: 404 });
-		// the admin panel: staff only; everyone else gets the client's not-found page
-		if (p.startsWith("/admin/api/")) return adminApi(req, p.slice("/admin/api/".length), viewer);
-		if (p === "/admin/flags.json" && viewer?.role) return Response.json(flagPickerData(null).flags);
-		if ((p === "/admin" || p === "/admin/") && viewer?.role)
-			return new Response(await adminPage(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
-		if (p === "/_debug/unknown") return Response.json(Object.fromEntries([...unknown].sort((a, b) => b[1] - a[1])));
-		if (API_PREFIX.test(p) || req.method !== "GET") {
-			// the event stream must outlive the default idle timeout
-			if (p.endsWith("/live_pipeline/events")) server.timeout(req, 0);
-			return serveApi(req, url, viewer);
-		}
-
-		// signed out: X's own home page with its sign-in form, and the dialog
-		if (!viewer && p !== "/" && !p.startsWith("/i/jf/onboarding")) return Response.redirect("/", 302);
-		const inCommunity = viewer ? (await sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`).length > 0 : false;
-		const [flagRow] = viewer ? await sql`select education_flags from users where id = ${viewer.id}::bigint` : [];
-		const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, inCommunity, flagRow?.education_flags ?? {});
-		if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
-		const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
-		// a guest token left from the signed-out page makes the signed-in client act
-		// as a guest (no csrf header, every write refused)
-		if (viewer && /(?:^|;\s*)gt=/.test(req.headers.get("cookie") ?? "")) headers.append("set-cookie", "gt=; Path=/; Max-Age=0");
-		return new Response(page, { headers });
-	},
+	fetch: handle,
 	websocket: chatSocket,
 	error(e) {
 		console.error(e);
@@ -265,5 +316,6 @@ const server = Bun.serve({
 
 startScheduler();
 startMailDigests();
+startBackups();
 startPush();
 console.log(`xitter listening on ${PUBLIC_ORIGIN}`);

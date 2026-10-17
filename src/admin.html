@@ -183,6 +183,10 @@ const PAGES = {
 	email: { icon: "mail", title: "Email" },
 	apps: { icon: "devices", title: "Client apps" },
 	settings: { icon: "tune", title: "Settings" },
+	errors: { icon: "bug_report", title: "Errors" },
+	security: { icon: "shield_lock", title: "Security", role: "admin" },
+	backups: { icon: "backup", title: "Backups", role: "admin" },
+	client: { icon: "system_update", title: "Client", role: "admin" },
 	audit: { icon: "history", title: "Audit log" },
 };
 
@@ -206,20 +210,112 @@ async function route() {
 const RENDER = {
 	async overview(main) {
 		const [s, h] = await Promise.all([api("stats"), api("health")]);
-		const mb = (Number(s.media_bytes) / 1048576).toFixed(1);
-		const max = Math.max(1, ...s.days.map((d) => d.posts));
+		const mb = (bytes) => (Number(bytes) / 1048576).toFixed(1) + " MB";
+		const cards = (list) => '<div class="cards">' + list.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") + "</div>";
+		const chart = (key, what) => {
+			const max = Math.max(1, ...s.days.map((d) => d[key]));
+			return '<div class="box"><h2>' + esc(what[0].toUpperCase() + what.slice(1)) + ' per day, last two weeks</h2><div class="chart">' +
+				s.days.map((d) => '<div title="' + esc(d.day) + ": " + d[key] + " " + esc(what) + '" style="height:' + (d[key] / max) * 100 + '%"></div>').join("") +
+				'</div><div class="row dim small" style="justify-content:space-between;margin-top:6px"><span>' + esc(s.days[0]?.day) + "</span><span>" + esc(s.days[s.days.length - 1]?.day) + "</span></div></div>";
+		};
+		const list = (title, rows, empty) => '<div class="box"><h2>' + title + "</h2>" + (rows.length ? '<div class="list">' + rows.join("") + "</div>" : '<p class="dim small">' + empty + "</p>") + "</div>";
 		main.innerHTML = "<h1>Overview</h1>" +
-			'<div class="cards">' +
-			[["Open reports", s.open_reports], ["Accounts", s.users], ["Active this week", s.active_week], ["Sanctioned", s.sanctioned], ["Posts", s.posts], ["Posts today", s.posts_today], ["Likes", s.likes], ["Media files", s.media], ["Media stored", mb + " MB"], ["Videos converting", s.videos_processing], ["Open invites", s.open_invites]]
-				.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") +
+			cards([["Open reports", s.open_reports], ["Open errors", s.open_errors], ["Accounts", s.users], ["Sanctioned", s.sanctioned], ["Open invites", s.open_invites], ["Videos converting", s.videos_processing]]) +
+			"<h2>People</h2>" + cards([["Active today", s.active_day], ["Active this week", s.active_week], ["Active this month", s.active_month], ["Follows", s.follows]]) +
+			"<h2>Content</h2>" + cards([["Posts", s.posts], ["Posts today", s.posts_today], ["Likes", s.likes], ["Reposts", s.reposts], ["Bookmarks", s.bookmarks], ["Media files", s.media], ["Media stored", mb(s.media_bytes)]]) +
+			'<div class="grid2">' + chart("posts", "posts") + chart("signups", "sign-ups") + chart("likes", "likes") + chart("follows", "follows") + chart("reports", "reports") + "</div>" +
+			'<div class="grid2" style="margin-top:16px">' +
+			list("Most new followers this week", s.risers.map((u) => '<p class="row" style="justify-content:space-between"><a href="#user/' + esc(u.id) + '">' + person(u) + '</a><b>+' + u.gained + "</b></p>"), "No new follows this week.") +
+			list("Most liked this week", s.liked.map((p) => '<p><a target="_blank" href="/' + esc(p.screen_name) + "/status/" + esc(p.id) + '">@' + esc(p.screen_name) + "</a> " + esc(p.text.slice(0, 120)) + ' <span class="dim small">· ' + p.likes + " likes</span></p>"), "No likes this week.") +
+			list("Storage by kind", s.storage.map((m) => "<p>" + esc(m.kind) + ' <span class="dim small">· ' + m.files + " files · " + mb(m.bytes) + "</span></p>"), "Nothing uploaded.") +
+			list("Accounts by sign-up app", s.sources.map((r) => "<p>" + esc(r.source) + ' <span class="dim small">· ' + r.users + "</span></p>"), "No accounts.") +
 			"</div>" +
-			'<h2>Posts per day, last two weeks</h2><div class="box"><div class="chart">' +
-			s.days.map((d) => '<div title="' + esc(d.day) + ": " + d.posts + " posts, " + d.signups + ' sign-ups" style="height:' + (d.posts / max) * 100 + '%"></div>').join("") +
-			'</div><div class="row dim small" style="justify-content:space-between;margin-top:6px"><span>' + esc(s.days[0]?.day) + "</span><span>" + esc(s.days[s.days.length - 1]?.day) + "</span></div></div>" +
 			"<h2>Server</h2>" + '<div class="cards">' +
 			[["Up for", duration(h.uptime)], ["Memory", (h.memory / 1048576).toFixed(0) + " MB"], ["Database", (Number(h.database.bytes) / 1048576).toFixed(1) + " MB"],
 				["Database answers in", h.database.latency_ms + " ms"], ["Bun", h.runtime], ["Client build", h.client_build ? h.client_build.slice(0, 7) : "none"]]
 				.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") + "</div>";
+	},
+
+	async client(main) {
+		const c = await api("client");
+		const short = (sha) => sha ? sha.slice(0, 10) : "none";
+		main.innerHTML = "<h1>Client</h1>" +
+			'<p class="dim">The X web client this instance serves is a pinned build. Updating pins the build x.com serves now (what <span class="code">bun scripts/fetch-client.ts --latest</span> does) and keeps the current one to go back to. A new build can bring requests this server doesn\'t answer yet; check the app after updating. A pin taken with --token loses its signed-in feature switches here: run it by hand to keep them.</p>' +
+			'<div class="cards"><div class="card"><span>Serving</span><b class="code">' + esc(short(c.sha)) + '</b><span class="small dim">pinned ' + esc(when(c.fetchedAt)) + "</span></div>" +
+			'<div class="card"><span>Previous</span><b class="code">' + esc(short(c.previous?.sha)) + "</b>" + (c.previous ? '<span class="small dim">pinned ' + esc(when(c.previous.fetchedAt)) + "</span>" : "") + "</div>" +
+			'<div class="card"><span>On x.com</span><b class="code" id="latest">?</b></div></div>' +
+			'<div class="row" style="margin-top:16px"><button class="btn" id="ccheck">Check x.com</button><button class="btn primary" id="cupdate">Update</button>' + (c.previous ? '<button class="btn" id="cback">Go back to the previous build</button>' : "") + "</div>";
+		$("#ccheck").onclick = () => act(async () => { const r = await api("checkClient"); $("#latest").textContent = short(r.latest) + (r.latest === r.sha ? " (same)" : ""); });
+		$("#cupdate").onclick = async () => {
+			if (!(await ask("Pin the build x.com serves now? Everyone gets it on their next page load."))) return;
+			$("#cupdate").disabled = true; $("#cupdate").textContent = "Updating…";
+			act(async () => { const r = await api("updateClient"); notice(r.changed ? "Now serving " + short(r.sha) : "Already the latest build"); }).then(route);
+		};
+		if ($("#cback")) $("#cback").onclick = async () => {
+			if (!(await ask("Serve the previous build again?"))) return;
+			act(() => api("rollbackClient"), "Back on the previous build").then(route);
+		};
+	},
+
+	async backups(main) {
+		const { backups, schedule, dir } = await api("backups");
+		const size = (n) => n < 1048576 ? Math.ceil(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB";
+		main.innerHTML = "<h1>Backups</h1>" +
+			'<p class="dim">Dumps of the database (pg_dump\'s custom format) in <span class="code">' + esc(dir) + '</span> on the server. Uploaded media and branding are files in media/ and data/: copy those directories too. To restore, stop the server and run <span class="code">pg_restore --clean --if-exists -d "$DATABASE_URL" &lt;file&gt;</span>.</p>' +
+			'<div class="box" style="margin-bottom:16px"><h2>Schedule</h2><div class="row"><label class="row"><input type="checkbox" id="bdaily"' + (schedule.daily ? " checked" : "") + "> A backup every day</label>" +
+			'<label class="row small">keep the newest <input id="bkeep" type="number" min="1" max="90" style="width:70px" value="' + schedule.keep + '"></label><button class="btn" id="bsave">Save</button></div></div>' +
+			'<div class="row" style="margin-bottom:16px"><button class="btn primary" id="bnow">Back up now</button></div>' +
+			'<div class="scroll">' + (backups.length ? '<table class="table"><tr><th>File</th><th>Size</th><th>Made</th><th></th></tr>' +
+				backups.map((b) => '<tr><td class="code">' + esc(b.name) + "</td><td>" + size(b.bytes) + '</td><td class="small dim">' + esc(when(b.created_at)) + '</td><td class="row"><a class="btn" href="/admin/backups/' + esc(b.name) + '" download>Download</a><button class="btn danger" data-del="' + esc(b.name) + '">Delete</button></td></tr>').join("") + "</table>"
+				: '<div class="empty">No backups yet.</div>') + "</div>";
+		$("#bsave").onclick = () => act(() => api("saveBackupSchedule", { daily: $("#bdaily").checked, keep: Number($("#bkeep").value) }), "Saved").then(route);
+		$("#bnow").onclick = () => { $("#bnow").disabled = true; $("#bnow").textContent = "Backing up…"; act(() => api("createBackup"), "Backup made").then(route); };
+		main.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+			if (!(await ask("Delete " + b.dataset.del + "?"))) return;
+			act(() => api("deleteBackup", { name: b.dataset.del }), "Deleted").then(route);
+		});
+	},
+
+	async security(main) {
+		const s = await api("security");
+		const mine = (x) => x.user_id === me.id;
+		const canEnd = (x) => !x.current && (mine(x) || RANK[x.role] < RANK[me.role]);
+		main.innerHTML = "<h1>Security</h1>" + '<div class="grid2">' +
+			'<div class="box"><h2>Two-factor for staff</h2><label class="row"><input type="checkbox" id="s2fa"' + (s.security.staff_2fa ? " checked" : "") + "> Staff need two-factor authentication to open this panel</label>" +
+			'<p class="dim small">Set up at <a href="/account/2fa" target="_blank">/account/2fa</a>. ' + (s.without_2fa.length ? "Without it now, and shut out once this is on: " + s.without_2fa.map((u) => '<a href="#user/' + esc(u.id) + '">@' + esc(u.screen_name) + "</a> (" + esc(u.role) + ")").join(", ") + "." : "Every staff account has it.") + "</p></div>" +
+			'<div class="box"><h2>Addresses</h2><p class="dim small">Only these addresses reach the panel, one per line: an IP or a range like 10.0.0.0/8. Empty lets any address in. Yours is <span class="code">' + esc(s.your_ip ?? "unknown") + "</span>; the list must include it. Locked out anyway? Start the server with ADMIN_ANY_IP=1.</p>" +
+			'<div class="field"><textarea id="sips" rows="4" placeholder="203.0.113.7&#10;10.0.0.0/8">' + esc(s.security.admin_ips.join("\n")) + "</textarea></div></div></div>" +
+			'<div class="row" style="margin:12px 0 24px"><button class="btn primary" id="ssave">Save</button></div>' +
+			'<div class="box"><h2>Staff sessions</h2><p class="dim small">Every browser a staff account is signed in on. You can end your own other sessions and those of staff below your role.</p><div class="scroll">' +
+			(s.sessions.length ? '<table class="table"><tr><th>Account</th><th>Browser</th><th>Address</th><th>Signed in</th><th>Last active</th><th></th></tr>' +
+				s.sessions.map((x) => '<tr><td><a href="#user/' + esc(x.user_id) + '">@' + esc(x.screen_name) + '</a> <span class="pill staff">' + esc(x.role) + "</span></td><td>" + esc(browser(x.user_agent)) + (x.current ? ' <span class="pill staff">you, now</span>' : "") +
+					'</td><td class="small">' + esc(x.ip ?? "") + '</td><td class="small dim">' + esc(when(x.created_at)) + '</td><td class="small dim">' + esc(when(x.last_seen_at)) + "</td><td>" +
+					(canEnd(x) ? '<button class="btn" data-session="' + esc(x.id) + '">Sign out</button>' : "") + "</td></tr>").join("") + "</table>"
+				: '<div class="empty">No staff sessions.</div>') + "</div></div>";
+		$("#ssave").onclick = () => act(() => api("saveSecurity", { staff_2fa: $("#s2fa").checked, admin_ips: $("#sips").value.split("\n") }), "Saved").then(route);
+		main.querySelectorAll("[data-session]").forEach((b) => b.onclick = () => act(() => api("revokeSession", { sessionId: b.dataset.session }), "Signed out").then(route));
+	},
+
+	async errors(main) {
+		const resolved = sessionStorage.getItem("errorTab") === "resolved";
+		const source = sessionStorage.getItem("errorSource") || "";
+		const { errors } = await api("errors", { resolved, source: source || undefined });
+		const what = { server: "Server", client: "Browser", job: "Background job" };
+		main.innerHTML = '<h1>Errors</h1><p class="dim">Requests that failed on the server, background jobs, and uncaught errors in signed-in people\'s browsers. The same error is counted on one row; a resolved one that happens again comes back.</p>' +
+			'<div class="bar">' + [["", "Open"], ["resolved", "Resolved"]].map(([t, l]) => '<button class="btn' + ((t === "resolved") === resolved ? " primary" : "") + '" data-tab="' + t + '">' + l + "</button>").join("") +
+			'<select id="esrc"><option value="">Everywhere</option>' + Object.entries(what).map(([k, l]) => '<option value="' + k + '"' + (k === source ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
+			(!resolved && errors.length && can("admin") ? '<button class="btn" id="eall">Resolve all</button>' : "") + "</div>" +
+			(errors.length ? errors.map((e) => '<div class="box" style="margin-bottom:12px" data-error="' + esc(e.fingerprint) + '"><div class="row" style="justify-content:space-between"><div><b>' + esc(e.message) + "</b>" +
+				'<div class="dim small">' + esc(what[e.source] || e.source) + (e.path ? " · " + esc(e.path) : "") + " · " + e.count + (e.count === 1 ? " time" : " times") + " · last " + esc(when(e.last_at)) + (e.count > 1 ? ", first " + esc(when(e.first_at)) : "") +
+				(e.screen_name ? ' · last for <a href="#user/' + esc(e.user_id) + '">@' + esc(e.screen_name) + "</a>" : "") + "</div></div>" +
+				(!e.resolved && can("admin") ? '<button class="btn" data-resolve>Resolve</button>' : "") + "</div>" +
+				(e.stack ? '<details style="margin-top:8px"><summary class="small dim">Stack</summary><pre class="small" style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(e.stack) + "</pre></details>" : "") + "</div>").join("")
+				: '<div class="empty">' + (resolved ? "Nothing resolved yet." : "No open errors.") + "</div>");
+		main.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { sessionStorage.setItem("errorTab", b.dataset.tab); route(); });
+		$("#esrc").onchange = () => { sessionStorage.setItem("errorSource", $("#esrc").value); route(); };
+		if ($("#eall")) $("#eall").onclick = () => act(() => api("resolveErrors", { all: true }), "Resolved").then(route);
+		main.querySelectorAll("[data-error] [data-resolve]").forEach((b) => b.onclick = () =>
+			act(() => api("resolveErrors", { fingerprint: b.closest("[data-error]").dataset.error }), "Resolved").then(route));
 	},
 
 	async appeals(main) {
@@ -565,9 +661,16 @@ const RENDER = {
 			bindTabs();
 			return;
 		}
-		const [{ invites }, { orgs }] = await Promise.all([api("invites"), api("orgs")]);
+		const [{ invites }, { orgs }, { settings: s }] = await Promise.all([api("invites"), api("orgs"), api("settings")]);
+		const q = s.invite_quota;
 		const state = (i) => i.revoked ? "revoked" : i.uses >= i.max_uses ? "used up" : i.expires_at && new Date(i.expires_at) < new Date() ? "expired" : "open";
 		main.innerHTML = "<h1>Invites</h1>" + tabs +
+			'<div class="box" style="margin-bottom:16px"><h2>Members\' invites</h2><p class="dim small">Members make their own at <a href="/account/invites" target="_blank">/account/invites</a> (in the side bar\'s More menu) while sign-up is by invite. Each is open for 30 days.</p><div class="row">' +
+				'<label class="row"><input type="checkbox" id="qon"' + (q.enabled ? " checked" : "") + (can("admin") ? "" : " disabled") + "> Members can make invites</label>" +
+				'<label class="small dim">A month <input id="qn" type="number" min="1" max="100" style="width:70px" value="' + q.per_month + '"></label>' +
+				'<label class="small dim">Uses each <input id="qu" type="number" min="1" max="100" style="width:70px" value="' + q.uses + '"></label>' +
+				'<label class="small dim">From account age (days) <input id="qa" type="number" min="0" max="3650" style="width:80px" value="' + q.min_age_days + '"></label>' +
+				(can("admin") ? '<button class="btn" id="qsave">Save</button>' : "") + "</div></div>" +
 			(can("admin") ? '<div class="box" style="margin-bottom:16px"><h2>Make invites</h2><div class="row">' +
 				'<label class="small dim">How many <input id="n" type="number" min="1" max="50" value="1" style="width:70px"></label>' +
 				'<label class="small dim">Uses each <input id="u" type="number" min="1" value="1" style="width:80px"></label>' +
@@ -581,6 +684,7 @@ const RENDER = {
 				(can("admin") && state(i) === "open" ? '<button class="btn" data-copy="' + esc(i.code) + '">Copy link</button> <button class="btn danger" data-revoke="' + esc(i.code) + '">Revoke</button>' : "") + "</td></tr>").join("") +
 			"</table></div>";
 		bindTabs();
+		if ($("#qsave")) $("#qsave").onclick = () => act(() => api("saveInviteQuota", { enabled: $("#qon").checked, per_month: Number($("#qn").value), uses: Number($("#qu").value), min_age_days: Number($("#qa").value) }), "Saved").then(route);
 		const link = (code) => location.origin + "/signup?code=" + code;
 		main.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => navigator.clipboard.writeText(link(b.dataset.copy)).then(() => notice("Link copied")));
 		main.querySelectorAll("[data-revoke]").forEach((b) => b.onclick = () => act(() => api("revokeInvite", { code: b.dataset.revoke }), "Revoked").then(route));
@@ -691,10 +795,13 @@ const RENDER = {
 // the number of open reports beside Reports in the menu
 async function refreshCounts() {
 	const s = await api("stats").catch(() => null);
-	const b = $('nav [data-page="reports"]');
-	if (!s || !b) return;
-	b.querySelector(".count")?.remove();
-	if (s.open_reports) b.insertAdjacentHTML("beforeend", '<span class="count">' + s.open_reports + "</span>");
+	if (!s) return;
+	for (const [page, n] of [["reports", s.open_reports], ["errors", s.open_errors]]) {
+		const b = $('nav [data-page="' + page + '"]');
+		if (!b) continue;
+		b.querySelector(".count")?.remove();
+		if (n) b.insertAdjacentHTML("beforeend", '<span class="count">' + n + "</span>");
+	}
 }
 
 function userTable(users, orgs = false, pick = false) {
@@ -841,7 +948,7 @@ async function renderUser(main, id) {
 		$("#main").innerHTML = '<div class="empty">' + esc(e.message) + ' <a href="/home">Back to {{instance}}</a></div>';
 		return;
 	}
-	$("#nav").insertAdjacentHTML("beforeend", Object.entries(PAGES).map(([k, p]) => '<button data-page="' + k + '"><span class="icon">' + p.icon + "</span>" + esc(p.title) + "</button>").join("") +
+	$("#nav").insertAdjacentHTML("beforeend", Object.entries(PAGES).filter(([, p]) => !p.role || can(p.role)).map(([k, p]) => '<button data-page="' + k + '"><span class="icon">' + p.icon + "</span>" + esc(p.title) + "</button>").join("") +
 		'<button onclick="location.href=\'/home\'"><span class="icon">arrow_back</span>Back to {{instance}}</button>' +
 		'<div class="who">@' + esc(me.screen_name) + " · " + esc(me.role) + "</div>");
 	document.querySelectorAll("nav [data-page]").forEach((b) => b.onclick = () => go(b.dataset.page));

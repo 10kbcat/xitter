@@ -82,6 +82,7 @@ export function patchText(text: string, chat = false): string {
 }
 
 const cache = new Map<string, Buffer>();
+export const clearPatchCache = () => cache.clear();
 
 // the name can change while the server runs, so script files are cached per name
 export function patchFile(key: string, raw: Buffer): Buffer {

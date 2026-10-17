@@ -20,6 +20,7 @@ import { CardError, deleteCard, listCards, saveCard } from "./explore-cards";
 import { mailEnabled, mailFrom, sendMail } from "./mail";
 import { mailDigests } from "./mail-digest";
 import { toolActions } from "./admin-tools";
+import { staffGate } from "./staff-access";
 
 type Role = "admin" | "moderator" | "support";
 const RANK: Record<Role, number> = { support: 1, moderator: 2, admin: 3 };
@@ -34,7 +35,7 @@ export class AdminError extends Error {
 }
 
 type Body = Record<string, any>;
-export type Action = { role: Role; run: (actor: Viewer, b: Body) => Promise<unknown> };
+export type Action = { role: Role; run: (actor: Viewer, b: Body, req?: Request) => Promise<unknown> };
 
 export async function audit(actor: Viewer, action: string, target: string | null, detail: unknown = null) {
 	await sql`insert into audit_log (id, actor_id, action, target, detail)
@@ -159,7 +160,12 @@ const ACTIONS: Record<string, Action> = {
 			const [s] = await sql`select
 				(select count(*)::int from users) as users,
 				(select count(*)::int from users where status <> 'active') as sanctioned,
+				(select count(*)::int from users where last_seen_at > now() - interval '1 day') as active_day,
 				(select count(*)::int from users where last_seen_at > now() - interval '7 days') as active_week,
+				(select count(*)::int from users where last_seen_at > now() - interval '30 days') as active_month,
+				(select count(*)::int from follows) as follows,
+				(select count(*)::int from reposts) as reposts,
+				(select count(*)::int from bookmarks) as bookmarks,
 				(select count(*)::int from posts) as posts,
 				(select count(*)::int from posts where created_at > now() - interval '1 day') as posts_today,
 				(select count(*)::int from likes) as likes,
@@ -167,12 +173,26 @@ const ACTIONS: Record<string, Action> = {
 				(select coalesce(sum(size), 0)::bigint::text from media) as media_bytes,
 				(select count(*)::int from media where state = 'processing') as videos_processing,
 				(select count(*)::int from invites where not revoked and uses < max_uses and (expires_at is null or expires_at > now())) as open_invites,
-				(select count(*)::int from reports where status = 'open') as open_reports`;
+				(select count(*)::int from reports where status = 'open') as open_reports,
+				(select count(*)::int from error_log where not resolved) as open_errors`;
 			const days = await sql`select to_char(d, 'YYYY-MM-DD') as day,
 				(select count(*)::int from posts p where p.created_at >= d and p.created_at < d + interval '1 day') as posts,
-				(select count(*)::int from users u where u.created_at >= d and u.created_at < d + interval '1 day') as signups
+				(select count(*)::int from users u where u.created_at >= d and u.created_at < d + interval '1 day') as signups,
+				(select count(*)::int from likes l where l.created_at >= d and l.created_at < d + interval '1 day') as likes,
+				(select count(*)::int from follows f where f.created_at >= d and f.created_at < d + interval '1 day') as follows,
+				(select count(*)::int from reports r where r.created_at >= d and r.created_at < d + interval '1 day') as reports
 				from generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day') d order by d`;
-			return { ...s, days };
+			// this week's movers: new followers, liked posts
+			const risers = await sql`select u.id::text as id, u.screen_name, u.name, u.avatar_url, u.verified_type, count(*)::int as gained
+				from follows f join users u on u.id = f.followee_id where f.created_at > now() - interval '7 days'
+				group by u.id order by gained desc, u.id limit 5`;
+			const liked = await sql`select p.id::text as id, p.text, u.screen_name, count(*)::int as likes
+				from likes l join posts p on p.id = l.post_id join users u on u.id = p.user_id
+				where l.created_at > now() - interval '7 days' and not p.hidden
+				group by p.id, u.screen_name order by likes desc, p.id desc limit 5`;
+			const storage = await sql`select kind, count(*)::int as files, coalesce(sum(size), 0)::bigint::text as bytes from media group by kind order by kind`;
+			const sources = await sql`select coalesce(signup_source, 'unknown') as source, count(*)::int as users from users group by 1 order by users desc limit 8`;
+			return { ...s, days, risers, liked, storage, sources };
 		},
 	},
 
@@ -259,7 +279,10 @@ const ACTIONS: Record<string, Action> = {
 			if (badge !== null && !["blue", "business", "government", "government_individual"].includes(badge)) throw new AdminError("Unknown badge.");
 			await guard(a, id);
 			// an account stops being an organisation when it loses the gold badge
-			if (badge !== "business") await sql`delete from affiliations where org_id = ${id}::bigint`;
+			if (badge !== "business") {
+				await sql`delete from affiliations where org_id = ${id}::bigint`;
+				await sql`delete from affiliation_requests where org_id = ${id}::bigint`;
+			}
 			// verified_at: "Verified since" on the About page; a new badge type starts it again
 			await sql`update users set verified_at = case when ${badge}::text is null then null when verified_type is distinct from ${badge}::text then now() else verified_at end,
 				verified_type = ${badge} where id = ${id}::bigint`;
@@ -617,6 +640,8 @@ export async function adminApi(req: Request, action: string, viewer: Viewer | un
 	if (!viewer?.role) return fail("Staff only.", 403);
 	if (req.method !== "POST") return fail("Use POST.", 405);
 	if (req.headers.get("x-csrf-token") !== viewer.csrf) return fail("Missing csrf token.", 403);
+	const blocked = await staffGate(req, viewer);
+	if (blocked) return fail(blocked, 403);
 	// a logo or icon upload: the image itself is the body
 	if (action === "uploadBranding") {
 		if (viewer.role !== "admin") return fail("Needs the admin role.", 403);
@@ -631,7 +656,7 @@ export async function adminApi(req: Request, action: string, viewer: Viewer | un
 	if (RANK[viewer.role as Role] < RANK[a.role]) return fail(`Needs the ${a.role} role.`, 403);
 	const body = await req.json().catch(() => ({}));
 	try {
-		return Response.json((await a.run(viewer, body ?? {})) ?? {});
+		return Response.json((await a.run(viewer, body ?? {}, req)) ?? {});
 	} catch (e) {
 		if (e instanceof AdminError) return fail(e.message, e.status);
 		throw e;

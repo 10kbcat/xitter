@@ -777,3 +777,31 @@ alter table signup_sessions add column if not exists pending jsonb;
 alter table signup_sessions add column if not exists email_code_hash text;
 alter table signup_sessions add column if not exists email_code_at timestamptz;
 alter table signup_sessions add column if not exists email_attempts integer not null default 0;
+
+-- errors.ts: server and browser errors for Admin > Errors, one row per distinct error;
+-- a resolved error that happens again opens again
+create table if not exists error_log (
+	fingerprint text primary key,
+	source text not null check (source in ('server', 'client', 'job')),
+	message text not null,
+	stack text,
+	path text,
+	user_id bigint,
+	count integer not null default 1,
+	first_at timestamptz not null default now(),
+	last_at timestamptz not null default now(),
+	resolved boolean not null default false
+);
+create index if not exists error_log_last_idx on error_log (last_at desc);
+
+-- org-manage.ts: an organisation's own people manage its affiliates. A manager
+-- is an affiliate who may; a request waits for the account to accept.
+alter table affiliations add column if not exists manager boolean not null default false;
+create table if not exists affiliation_requests (
+	org_id bigint not null references users (id) on delete cascade,
+	user_id bigint not null references users (id) on delete cascade,
+	requested_by bigint references users (id) on delete set null,
+	created_at timestamptz not null default now(),
+	primary key (org_id, user_id)
+);
+create index if not exists affiliation_requests_user_idx on affiliation_requests (user_id);

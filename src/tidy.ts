@@ -3,6 +3,7 @@
 // screens, and the announcement banner. CSS where an element has a stable link
 // or test id, a small script where only its text tells it apart.
 
+import { sql } from "./db";
 import { type Feature, feature, settings } from "./settings";
 
 const links = (...hrefs: string[]) => hrefs.map((h) => `a[href="${h}"],a[href^="${h}?"]`);
@@ -54,8 +55,23 @@ export function hideCss(): string {
 #xitter-announcement button{border:0;background:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 4px}`;
 }
 
+// Our own account pages in the side bar's More menu, for the accounts they concern:
+// invites while members can make them (member-invites.ts), the organisation
+// page for organisations, their affiliates and people they asked (org-manage.ts)
+const TICKET = "M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5V10a2 2 0 0 0 0 4v3.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5V14a2 2 0 0 0 0-4V6.5zM5 7v1.8a4 4 0 0 1 0 6.4V17h14v-1.8a4 4 0 0 1 0-6.4V7H5z";
+const BUILDING = "M4 21V3h11v4h5v14H4zm2-2h3v-3h2v3h2V5H6v14zm9 0h3V9h-3v10zM8 7h3v2H8V7zm0 4h3v2H8v-2z";
+export type MenuLink = { href: string; text: string; icon: string };
+export async function menuLinks(userId: string): Promise<MenuLink[]> {
+	const links: MenuLink[] = [];
+	if (settings().invite_quota.enabled && settings().signup_mode === "invite") links.push({ href: "/account/invites", text: "Invites", icon: TICKET });
+	const [org] = await sql`select 1 from users u where u.id = ${userId}::bigint and (u.verified_type = 'business'
+		or exists (select 1 from affiliations where user_id = u.id) or exists (select 1 from affiliation_requests where user_id = u.id))`;
+	if (org) links.push({ href: "/account/organisation", text: "Organisation", icon: BUILDING });
+	return links;
+}
+
 // what the script needs to know, as window.__XITTER__.tidy
-export function tidyData() {
+export function tidyData(links: MenuLink[] = []) {
 	const s = settings();
 	const menuItems = ["Embed post"];
 	if (!feature("lists")) menuItems.push("Add/remove from Lists");
@@ -66,6 +82,7 @@ export function tidyData() {
 		announcement: s.announcement.text ? s.announcement : null,
 		instance: s.instance_name,
 		source: s.source_url,
+		links,
 	};
 }
 
@@ -163,6 +180,23 @@ export const TIDY_SCRIPT = `(function(){
 		a.setAttribute("data-xitter-source","");
 		c.appendChild(a);
 	}
+	// the More menu's "Settings and privacy" copied for each of our pages; the
+	// copy has none of the client's handlers, so it is a plain link
+	function menuLinks(){
+		if(!T.links||!T.links.length)return;
+		var s=document.querySelector('[role="menu"] a[href="/settings"]');
+		if(!s||s.parentNode.querySelector("[data-xitter-link]"))return;
+		T.links.forEach(function(l){
+			var a=s.cloneNode(true);
+			a.setAttribute("href",l.href);a.setAttribute("data-xitter-link","");a.removeAttribute("data-testid");
+			var label=[].find.call(a.querySelectorAll("span"),function(n){return !n.childElementCount&&n.textContent.trim()});
+			if(label)label.textContent=l.text;
+			var path=a.querySelector("svg path");
+			if(path){[].slice.call(a.querySelectorAll("svg path")).slice(1).forEach(function(p){p.remove()});path.setAttribute("d",l.icon)}
+			a.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();location.assign(l.href)},true);
+			s.parentNode.insertBefore(a,s);
+		});
+	}
 	// the client opens links outside x.com in a new tab; our own pages outside
 	// the app (messages from staff) open in this one
 	var open=window.open;
@@ -212,6 +246,7 @@ export const TIDY_SCRIPT = `(function(){
 		});
 		ownScreens();
 		footer();
+		menuLinks();
 		navWidth();
 		announce();
 		if(!T.imageGen)document.querySelectorAll('[role="dialog"] button').forEach(function(b){

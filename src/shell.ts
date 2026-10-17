@@ -4,8 +4,9 @@
 import type { User } from "./auth";
 import { loadBuild } from "./build";
 import { settings } from "./settings";
-import { FORGOT_SCRIPT, FRESH_SCRIPT, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
+import { FORGOT_SCRIPT, FRESH_SCRIPT, type MenuLink, TIDY_SCRIPT, hideCss, tidyData } from "./tidy";
 import { POST_CONTEXT_SCRIPT } from "./post-context";
+import { ERROR_SCRIPT } from "./errors";
 import { BADGES_SCRIPT } from "./badges";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
@@ -195,16 +196,16 @@ const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 // JSON placed inside a <script> must not be able to close it
 const inline = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
 
-let runtimePatched: string | undefined;
+let runtimePatched: { sha: string; text: string } | undefined;
 
 // With no user the client boots signed out, for the sign-in dialog.
 // `multi`: other accounts are signed in too (auth_multi), so the account menu
 // asks for them.
-export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}): string | undefined {
+export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = []): string | undefined {
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
-	runtimePatched ??= patchText(runtime);
+	if (runtimePatched?.sha !== build.sha) runtimePatched = { sha: build.sha, text: patchText(runtime) };
 	// the chat build's address is ours (the rest of the metadata stays as captured:
 	// the client decides from it where its csrf header goes)
 	const chatBuild = build.meta.xchatEmbedBuild;
@@ -221,7 +222,8 @@ ${hideCss()}
 ${FLAG_PICKER_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData() })};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links) })};
+${user ? ERROR_SCRIPT : ""}
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}
 ${FORGOT_SCRIPT}
@@ -229,7 +231,7 @@ ${FLAG_PICKER_SCRIPT}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}</script>
 <script id="nonce-csp"></script>
-<script>${runtimePatched}</script>
+<script>${runtimePatched.text}</script>
 ${scripts}
 </body></html>`;
 }

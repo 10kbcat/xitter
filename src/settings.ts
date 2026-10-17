@@ -62,6 +62,13 @@ const DEFAULTS = {
 		promoted_trends: [] as string[],
 		global_pin: null as string | null,
 	},
+	// the admin panel itself (admin.ts staffGate): staff must have two-factor on;
+	// only these addresses (IPs or CIDR ranges) reach it, none meaning any
+	security: { staff_2fa: false, admin_ips: [] as string[] },
+	// backups.ts: a database dump every day, the newest `keep` kept
+	backups: { daily: false, keep: 7 },
+	// member-invites.ts: invites members make themselves, while sign-up is by invite
+	invite_quota: { enabled: false, per_month: 3, uses: 1, min_age_days: 7 },
 };
 export type Settings = typeof DEFAULTS;
 type Key = keyof Settings;
