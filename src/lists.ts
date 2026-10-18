@@ -9,6 +9,7 @@ import { sql } from "./db";
 import { blockedFor, outOfView } from "./blocks";
 import { isId, newId } from "./ids";
 import { cursorEntry, feedEntry, userEntry, userResult } from "./model";
+import { forbiddenText } from "./names";
 import { PostError, feed } from "./posts";
 import { userByName, usersByIds } from "./users";
 
@@ -230,6 +231,7 @@ async function create(v: Viewer, vars: Vars) {
 	if (name.length > MAX_NAME) throw new PostError(`List names can be up to ${MAX_NAME} characters.`, 214);
 	const description = String(vars.description ?? "").trim();
 	if (description.length > MAX_DESCRIPTION) throw new PostError(`Descriptions can be up to ${MAX_DESCRIPTION} characters.`, 214);
+	if (forbiddenText(name, description)) throw new PostError("The list contains a word this instance doesn't allow.", 186);
 	const [count] = await sql`select count(*)::int as n from lists where owner_id = ${v.id}::bigint`;
 	if (count.n >= MAX_LISTS) throw new PostError("You can't have more lists.", 214);
 	const id = newId();
@@ -244,6 +246,7 @@ async function update(v: Viewer, vars: Vars) {
 	if (!name || name.length > MAX_NAME) throw new PostError(`List names are 1 to ${MAX_NAME} characters.`, 214);
 	const description = vars.description === undefined ? row.description : String(vars.description).trim();
 	if (description.length > MAX_DESCRIPTION) throw new PostError(`Descriptions can be up to ${MAX_DESCRIPTION} characters.`, 214);
+	if (forbiddenText(name, description)) throw new PostError("The list contains a word this instance doesn't allow.", 186);
 	const isPrivate = vars.isPrivate === undefined ? row.is_private : !!vars.isPrivate;
 	await sql`update lists set name = ${name}, description = ${description}, is_private = ${isPrivate} where id = ${id}::bigint`;
 	// a list turning private loses the subscribers who aren't its owner

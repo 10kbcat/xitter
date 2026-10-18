@@ -17,6 +17,7 @@ import {
 	communityRows,
 } from "./community-model";
 import { cursorEntry, feedEntry, tweetEntry, userEntry, userResult } from "./model";
+import { forbiddenText } from "./names";
 import { PostError, feed, postsByIds } from "./posts";
 import { usersByIds } from "./users";
 
@@ -194,6 +195,7 @@ function clean(value: unknown, max: number, label: string, required = false): st
 	const text = typeof value === "string" ? value.trim() : "";
 	if (required && !text) throw new PostError(`${label} can't be empty.`, 214);
 	if ([...text].length > max) throw new PostError(`${label} can be up to ${max} characters.`, 214);
+	if (text && forbiddenText(text)) throw new PostError(`${label} contains a word this instance doesn't allow.`, 186);
 	return text;
 }
 

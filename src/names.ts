@@ -7,7 +7,7 @@
 
 import { sql } from "./db";
 import { newId } from "./ids";
-import { settings } from "./settings";
+import { hasBlockedPhrase, settings } from "./settings";
 
 // what else can stand for a letter; "1" is both i and l
 const LOOKALIKE: Record<string, string> = { a: "4@", b: "8", e: "3", g: "96", i: "1!|", l: "1|", o: "0", s: "5$", t: "7+", z: "2" };
@@ -69,6 +69,46 @@ export function blockedNameIn(...texts: string[]): string | undefined {
 		return all.some((t) => re.test(t));
 	});
 }
+
+// Longer text (bio, location, links, list and community names) is read word
+// by word: ignoring spaces as for a name would find "coon" in "taco only".
+// Letters spelled out one at a time ("n i g g e r", "n.i.g.g.e.r") are joined
+// back into one word first.
+function wordsOf(text: string): string[] {
+	const parts = foldGlyphs(text)
+		.split(/[\s.,/\\?#&=:;()"'<>[\]{}*~^`-]+/u)
+		.map((p) => p.replace(/[^\p{L}0-9!|@$+]/gu, ""))
+		.filter(Boolean);
+	const out: string[] = [];
+	let run = "";
+	for (const p of parts) {
+		// one letter, maybe with a look-alike symbol stuck to it ("x!")
+		if ([...p].length <= 2 && [...p.replace(/[^\p{L}0-9]/gu, "")].length <= 1) {
+			run += p;
+			continue;
+		}
+		if (run) out.push(run);
+		run = "";
+		out.push(p);
+	}
+	if (run) out.push(run);
+	return out;
+}
+
+// the first blocked name word in longer text, if any
+export function blockedWordIn(...texts: string[]): string | undefined {
+	const words = settings().operations.blocked_names.filter((w) => /\p{L}/u.test(normalizeName(w)));
+	if (!words.length) return undefined;
+	const all = texts.flatMap(wordsOf);
+	return words.find((w) => {
+		const re = wordPattern(normalizeName(w));
+		return all.some((t) => re.test(t));
+	});
+}
+
+// text anyone may write that staff don't want on the instance: a blocked
+// phrase, or a blocked name word read word by word
+export const forbiddenText = (...texts: string[]) => texts.some((t) => hasBlockedPhrase(t)) || !!blockedWordIn(...texts);
 
 // An account that took a blocked name: suspended and signed out everywhere,
 // with a line in the audit log. Staff are left alone (the caller refuses).

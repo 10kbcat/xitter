@@ -4,6 +4,7 @@
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { mediaUrl } from "./media";
+import { forbiddenText } from "./names";
 
 const MAX_LABEL = 25;
 const MIN_DURATION = 5;
@@ -100,6 +101,7 @@ export async function createCard(userId: string, raw: unknown): Promise<{ status
 		const label = String(data[`twitter:string:choice${i}_label`] ?? "").trim();
 		if (!label) throw new PollError("Every choice needs a label.");
 		if ([...label].length > MAX_LABEL) throw new PollError(`Choices can be up to ${MAX_LABEL} characters.`);
+		if (forbiddenText(label)) throw new PollError("A choice contains a word this instance doesn't allow.");
 		choices.push(label);
 	}
 	const duration = Number(data["twitter:long:duration_minutes"] ?? 1440);

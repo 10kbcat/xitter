@@ -3,7 +3,7 @@
 import { createUser } from "../src/auth";
 import { sql } from "../src/db";
 import { SignupError, checkSignup } from "../src/invites";
-import { blockedNameIn, normalizeName } from "../src/names";
+import { blockedNameIn, blockedWordIn, normalizeName } from "../src/names";
 import { loadSettings } from "../src/settings";
 
 const origin="http://localhost:3000",password="testpass123",WORD="zorbleflax";
@@ -66,6 +66,36 @@ try{
 	await admin.admin('blockedNameAccounts',{suspend:true});
 	check(await status(created[0])==='suspended'&&await status(created[2])!=='suspended','suspend button: members only');
 	check((await (await fetch(origin+'/admin',{headers:admin.headers})).text()).includes('blockedNames'),'admin page carries the box');
+
+	// longer fields are read word by word
+	check(!blockedWordIn('a taco only a day'),'words aren\'t joined across spaces in a bio');
+	check(blockedWordIn('fan of z o r b l e f l a x')===WORD&&blockedWordIn('z.0.r.b.l.e.f.l.a.x!')===WORD,'spelled-out letters are joined');
+	check(blockedWordIn('https://zorbleflax.example/x')===WORD,'a link is read too');
+	// profiles: bio, location, website suspend; a blocked phrase is only refused; nothing half-saved
+	const more:string[]=[];
+	for(let i=0;i<3;i++){const n='nq'+Date.now().toString().slice(-9)+i;more.push(n);created.push(await createUser(n,n,password));}
+	const [bioId,siteId,phraseId]=created.slice(-3);
+	const bio=await session(more[0]),site=await session(more[1]),phrase=await session(more[2]);
+	const r4=await bio.post('/1.1/account/update_profile.json',{name:'Fresh name',description:'I am a big Zоrblеflax fan'});
+	check(r4.status>=400&&await status(bioId)==='suspended','a blocked word in the bio suspends');
+	check((await sql`select name from users where id=${bioId}::bigint`)[0].name!=='Fresh name','and nothing of that request was saved');
+	await site.post('/1.1/account/update_profile.json',{url:'https://zorbleflax.example'});
+	check(await status(siteId)==='suspended','a blocked word in the website suspends');
+	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD],blocked_phrases:[...operations.blocked_phrases,'zorble flax']});
+	const r5=await phrase.post('/1.1/account/update_profile.json',{location:'Zorble Flax town'});
+	check(r5.status>=400&&await status(phraseId)!=='suspended','a blocked phrase in the location is refused, not suspended');
+	check((await phrase.post('/1.1/account/update_profile.json',{location:'Taco town',description:'taco only'})).status===200,'ordinary bio and location save');
+	// everything else people can name or write
+	const gql=async(s:any,op:string,variables:any)=>(await(await fetch(origin+'/i/api/graphql/q/'+op,{method:'POST',headers:{...s.headers,'content-type':'application/json'},body:JSON.stringify({variables})})).json()) as any;
+	check(!!(await gql(phrase,'CreateList',{name:'zorbleflax club',description:'',isPrivate:false})).errors?.length,'a list name with a blocked word is refused');
+	check(!!(await gql(phrase,'CreateCommunity',{name:'Z0rbleflax crew '+Date.now(),description:'',joinPolicy:'Open',invitesPolicy:'MemberInvitesAllowed',question:''})).errors?.length,'a community name with a blocked word is refused');
+	const poll=await phrase.post('/v2/cards/create.json',{card_data:JSON.stringify({'twitter:card':'poll2choice_text_only','twitter:api:api:endpoint':'1','twitter:long:duration_minutes':60,'twitter:string:choice1_label':'yes','twitter:string:choice2_label':'zorbleflax'})});
+	check(poll.status>=400||JSON.parse(poll.text).errors,'a poll choice with a blocked word is refused');
+	const alt=await fetch(origin+'/i/api/1.1/media/metadata/create.json',{method:'POST',headers:{...phrase.headers,'content-type':'application/json'},body:JSON.stringify({media_id:'1',alt_text:{text:'a zorble flax picture'}})});
+	check(alt.status===400,'an image description with a blocked phrase is refused');
+	await sql`update users set status='active', bio='zorbleflax forever' where id=${created[0]}::bigint`;
+	check((await admin.admin('blockedNameAccounts',{})).data.accounts.some((u:any)=>u.id===created[0]),'the admin check finds a blocked word in a bio');
+	await sql`update users set status='suspended' where id=${created[0]}::bigint`;
 	// blocked phrases in posts go through the same look-alike folding
 	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD],blocked_phrases:[...operations.blocked_phrases,'zorble flax']});
 	const tweet=async(text:string)=>(await(await fetch(origin+'/i/api/graphql/q/CreateTweet',{method:'POST',headers:{...admin.headers,'content-type':'application/json'},body:JSON.stringify({variables:{tweet_text:text}})})).json()) as any;

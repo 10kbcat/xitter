@@ -1,6 +1,7 @@
 // The few REST endpoints the client still uses next to GraphQL.
 
-import { blockedNameIn, suspendForName } from "./names";
+import { blockedNameIn, blockedWordIn, forbiddenText, suspendForName } from "./names";
+import { hasBlockedPhrase } from "./settings";
 import { hashflagsJson } from "./hashflags";
 import { accountsRoute } from "./accounts";
 import type { Viewer } from "./auth";
@@ -70,19 +71,24 @@ async function profileRoute(path: string, viewer: Viewer, req: Request): Promise
 
 	if (m[1] === "update_profile") {
 		const limits: Record<string, [string, number]> = { name: ["name", 50], description: ["bio", 160], location: ["location", 30], url: ["website", 100] };
+		// every field is checked before any is saved
+		const changes: Record<string, string> = {};
 		for (const [field, [column, max]] of Object.entries(limits)) {
 			if (!(field in f)) continue;
 			const value = f[field].trim();
 			if ([...value].length > max) return profileError(`${field} is limited to ${max} characters.`);
 			if (field === "name" && !value) return profileError("Name can't be blank.");
-			// a blocked word in the display name (names.ts): suspended, staff only refused
-			if (field === "name" && blockedNameIn(value)) {
-				if (!viewer.role) await suspendForName(viewer.id, value);
-				return profileError("That name isn't allowed here.");
-			}
 			if (field === "url" && value && !/^https?:\/\/\S+$/.test(value)) return profileError("Website must be an http or https address.");
-			await sql`update users set ${sql({ [column]: value })} where id = ${viewer.id}::bigint`;
+			// a blocked word (names.ts): suspended, staff only refused; the
+			// name ignores spacing, the longer fields are read word by word
+			if (field === "name" ? blockedNameIn(value) : blockedWordIn(value)) {
+				if (!viewer.role) await suspendForName(viewer.id, value);
+				return profileError(field === "name" ? "That name isn't allowed here." : "Your profile contains a word this instance doesn't allow.");
+			}
+			if (hasBlockedPhrase(value)) return profileError("Your profile contains a phrase this instance doesn't allow.");
+			changes[column] = value;
 		}
+		if (Object.keys(changes).length) await sql`update users set ${sql(changes)} where id = ${viewer.id}::bigint`;
 		return changedUser(viewer);
 	}
 	if (m[1] === "update_flag") {
@@ -150,6 +156,7 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	if (method === "POST" && path === "/1.1/media/metadata/create.json") {
 		const body: any = await req.json().catch(() => ({}));
 		const alt = typeof body?.alt_text?.text === "string" ? body.alt_text.text.slice(0, 1000) : undefined;
+		if (alt && forbiddenText(alt)) return Response.json({ errors: [{ code: 186, message: "The description contains a word this instance doesn't allow." }] }, { status: 400 });
 		if (/^\d{1,19}$/.test(String(body?.media_id)) && alt !== undefined)
 			await sql`update media set alt_text = ${alt || null} where id = ${String(body.media_id)}::bigint and user_id = ${viewer.id}::bigint`;
 		const warnings = Array.isArray(body?.sensitive_media_warning) ? body.sensitive_media_warning.filter((w: unknown) => ["adult_content", "graphic_violence", "other"].includes(String(w))) : undefined;
