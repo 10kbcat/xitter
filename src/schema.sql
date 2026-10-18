@@ -929,3 +929,6 @@ create table if not exists link_previews (
 	fetched_at timestamptz not null default now()
 );
 create index if not exists login_events_ip_idx on login_events (ip, created_at desc);
+update users u set deactivated_at = null where u.deactivated_at is not null and u.status = 'suspended' and exists (
+	select 1 from audit_log l where l.target = u.id::text and l.created_at > u.deactivated_at
+		and l.action in ('set_status', 'temporary_status', 'bulk_status', 'auto_suspend_name', 'suspend_blocked_names', 'escalate'));

@@ -11,6 +11,7 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
 import { NOTICE_TYPES } from "./model";
+import { hateIn, hateInName } from "./hate";
 import { escalate, signOutEverywhere } from "./moderation";
 import { blockedNameIn, blockedWordIn, suspendForName } from "./names";
 import { setSetting, settings } from "./settings";
@@ -374,6 +375,29 @@ export const toolActions: Record<string, Action> = {
 
 	// maintenance mode, blocked phrases, trend controls and the pinned post
 	operations: { role: "support", run: async () => ({ operations: settings().operations, automod: settings().automod }) },
+	automodScan: {
+		role: "moderator",
+		run: async (_a, b) => {
+			const before = b.before ? idOf(b.before, "cursor") : null;
+			const batch = Math.max(100, Math.min(Number(b.batch) || 3000, 10_000));
+			const posts = await sql`select p.id::text, p.text, p.sensitive, u.id::text as user_id, u.screen_name, u.status from posts p join users u on u.id = p.user_id
+				where not p.hidden and u.status <> 'suspended' and u.role is null ${before ? sql`and p.id < ${before}::bigint` : sql``}
+				order by p.id desc limit ${batch}`;
+			const hits: Record<string, unknown>[] = [];
+			for (const p of posts) {
+				const hit = hateIn(p.text);
+				if (hit) hits.push({ kind: "post", id: p.id, user_id: p.user_id, screen_name: p.screen_name, status: p.status, sensitive: p.sensitive, text: [...p.text].slice(0, 280).join(""), ...hit });
+			}
+			if (!before) {
+				const people = await sql`select id::text, screen_name, name, bio, location, website, status from users where status <> 'suspended' and role is null order by id desc limit 50000`;
+				for (const u of people) {
+					const hit = hateInName(u.screen_name, u.name) ?? hateIn(u.bio, u.location, u.website);
+					if (hit) hits.push({ kind: "profile", id: u.id, user_id: u.id, screen_name: u.screen_name, status: u.status, text: [u.name, u.bio, u.location].filter(Boolean).join(" · "), ...hit });
+				}
+			}
+			return { hits, scanned: posts.length, next: posts.length === batch ? posts[posts.length - 1].id : null };
+		},
+	},
 	saveAutomod: {
 		role: "admin",
 		run: async (a, b) => {
