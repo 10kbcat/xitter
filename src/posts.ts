@@ -137,19 +137,20 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	return posts;
 }
 
-export async function postsByIds(viewerId: string, ids: string[], quotes = true): Promise<Map<string, PostRow>> {
+// `views: false` for lookups nobody sees as a page (push texts)
+export async function postsByIds(viewerId: string, ids: string[], quotes = true, opts: { views?: boolean } = {}): Promise<Map<string, PostRow>> {
 	if (!ids.length) return new Map();
 	const rows = await sql`${select(viewerId)} where p.id = any(${sql.array(ids, "INT8")})`;
 	const posts = await hydrate(viewerId, rows.map(toRow), quotes);
 	// being shown a post counts once per viewer; nobody waits for it
 	const seen = posts.filter((p) => p.author.id !== viewerId).map((p) => p.id);
-	if (seen.length)
+	if (seen.length && opts.views !== false)
 		void sql`insert into post_views (post_id, user_id) select x, ${viewerId}::bigint from unnest(${sql.array(seen, "INT8")}::bigint[]) x on conflict do nothing`.catch(() => {});
 	const out = new Map(posts.map((p) => [p.id, p]));
 	const unknown = ids.filter((id) => !out.has(id));
 	if (unknown.length) {
 		const versions = await sql`select version_id::text, post_id::text, text, created_at from post_versions where version_id = any(${sql.array(unknown, "INT8")})`;
-		const current = await postsByIds(viewerId, [...new Set(versions.map((v: any) => v.post_id as string))] as string[], quotes);
+		const current = await postsByIds(viewerId, [...new Set(versions.map((v: any) => v.post_id as string))] as string[], quotes, opts);
 		for (const v of versions) {
 			const base = current.get(v.post_id);
 			if (base) out.set(v.version_id, { ...base, id: v.version_id, text: v.text, created_at: v.created_at, staleEditOf: base.id });
