@@ -109,7 +109,7 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 			if (poll) p.poll = pollCard(poll);
 		}
 	}
-	const linkOf = (p: PostRow) => (p.poll || p.quote_id || p.article_id || p.media?.length ? undefined : linksIn(p.text).find((l) => previewable(l.url))?.url);
+	const linkOf = (p: PostRow) => (p.poll || p.quote_id || p.article_id || p.media?.length ? undefined : linksIn(p.text).filter((l) => previewable(l.url)).at(-1)?.url);
 	const previews = await previewsFor(posts.map(linkOf).filter((u): u is string => !!u));
 	for (const p of posts) {
 		const preview = previews.get(linkOf(p) ?? "");
@@ -424,7 +424,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	if (names.length)
 		await sql`insert into post_mentions (post_id, user_id)
 			select ${id}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")}) on conflict do nothing`;
-	const link = opts.quoteId || opts.articleId ? undefined : linksIn(text).find((l) => previewable(l.url));
+	const link = opts.quoteId || opts.articleId ? undefined : linksIn(text).filter((l) => previewable(l.url)).at(-1);
 	if (link && !(await sql`select 1 from link_previews where url = ${link.url}`).length) await Promise.race([fetchPreview(link.url), Bun.sleep(4000)]);
 	return id;
 }
