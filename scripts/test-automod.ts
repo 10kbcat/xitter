@@ -136,6 +136,38 @@ try {
 	check((await r.form("/1.1/account/deactivate.json", { password })).status >= 400, "or deactivate its way out of the sanction");
 	await sql`update users set status = 'active' where id = ${rId}::bigint`;
 
+	const pName = name("am_api");
+	const pId = await createUser(pName, pName, password);
+	created.push(pId);
+	await sql`update users set email = 'evader.test@gmail.com' where id = ${pId}::bigint`;
+	const p = await session(pName);
+	const { createToken } = await import("../src/public-api");
+	const apiToken = await createToken(pId, "test", "write");
+	const me = () => fetch(`${origin}/api/v1/me`, { headers: { authorization: `Bearer ${apiToken}` } });
+	check((await me()).status === 200, "an API token works before the suspension");
+	const chatToken = (await p.gql("GenerateXChatTokenMutation", {})).data.data.user_get_x_chat_auth_token.token;
+	check((await fetch(`${origin}/xchat/ws?token=${chatToken}`)).status === 400, "its chat token opens a socket before the suspension");
+	await sql`insert into login_events (id, user_id, ip, app) values (${Date.now()}::bigint, ${pId}::bigint, '203.0.113.77', 'test')`;
+	check((await admin.admin("setStatus", { id: pId, status: "suspended", reason: "test" })).status === 200, "staff suspend the account");
+	check((await me()).status === 401, "an API token issued before the suspension stops working");
+	check((await fetch(`${origin}/xchat/ws?token=${chatToken}`)).status === 403, "and so does a chat token");
+	check((await p.gql("CreateTweet", { tweet_text: "still here?" })).status === 401, "and the old session");
+	check((await sql`select 1 from sessions where user_id = ${pId}::bigint`).length === 0, "every session is gone");
+	const { checkSignup, SignupError } = await import("../src/invites");
+	const signup = async (email: string, ip: string | null) => {
+		try {
+			await checkSignup({ code: "", screenName: name("am_new"), name: "new", password: "longenough1", email, ip });
+			return "ok";
+		} catch (e) {
+			return e instanceof SignupError ? e.message : String(e);
+		}
+	};
+	check((await signup("someone.else@example.com", "203.0.113.77")).includes("isn't available"), "a sign-up from the suspended account's address is refused");
+	check((await signup("e.v.a.d.e.r.test+alt@googlemail.com", "198.51.100.9")).includes("isn't available"), "a sign-up with the same gmail behind dots and a +tag is refused");
+	check((await signup("someone.else@example.com", "198.51.100.9")) === "ok", "an unrelated sign-up goes through");
+	check((await sql`select 1 from audit_log where action = 'evasion_signup_refused' and target = ${pId}`).length === 2, "refused evasions are in the audit log");
+	check((await admin.admin("user", { id: pId })).status === 200, "the admin view loads with its address matches");
+
 	const huge = await fetch(`${origin}/i/api/graphql/q/CreateTweet`, { method: "POST", headers: { ...r.headers, "content-type": "application/json" }, body: "x".repeat(3 * 1024 * 1024) });
 	check(huge.status === 413, "a 3 MB request body is refused");
 	let deep: any = "x";
@@ -153,6 +185,7 @@ try {
 	for (const id of created) {
 		await sql`delete from audit_log where target = ${id}`;
 		await sql`delete from scheduled_posts where user_id = ${id}::bigint`;
+		await sql`delete from login_events where user_id = ${id}::bigint`;
 		await sql`delete from users where id = ${id}::bigint`;
 	}
 	await sql.end();
