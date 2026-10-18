@@ -48,6 +48,7 @@ const select = (viewerId: string) => sql`
 	from posts p
 	join users u on u.id = p.user_id and (not p.hidden or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))
 		and u.id not in ${protectedFor(viewerId)} and u.id not in ${suspendedFor(viewerId)}
+		and u.id not in (select blocker_id from blocks where blocked_id = ${viewerId}::bigint)
 	left join posts rp on rp.id = p.reply_to_id
 	left join users ru on ru.id = coalesce(rp.user_id, p.reply_to_user_id)`;
 
@@ -382,6 +383,7 @@ export async function folderPosts(viewerId: string, folderId: string, limit = 10
 }
 
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
+	if (userId !== viewerId && !(await sql`select 1 from users where id = ${viewerId}::bigint and role is not null`).length) return [];
 	const rows = await sql`${select(viewerId)}
 		join likes lk on lk.post_id = p.id and lk.user_id = ${userId}::bigint
 		order by lk.created_at desc limit ${limit}`;
