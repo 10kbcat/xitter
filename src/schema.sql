@@ -904,9 +904,18 @@ create table if not exists delegation_members (
 );
 create index if not exists delegation_members_member_idx on delegation_members (member_id);
 -- who may invite this account into theirs: Nobody, Everyone or OnlyFollowing
--- (people it follows), as the client names them
-alter table users add column if not exists delegation_invites text not null default 'Nobody'
+-- (people it follows), as the client names them. Everyone by default: an
+-- invite still needs accepting, and with Nobody every invite failed with the
+-- client's bare "Something went wrong". Accounts from before that are moved
+-- over once, while the old default is still on the column.
+alter table users add column if not exists delegation_invites text not null default 'Everyone'
 	check (delegation_invites in ('Nobody', 'Everyone', 'OnlyFollowing'));
+do $$ begin
+	if (select column_default from information_schema.columns where table_name = 'users' and column_name = 'delegation_invites') = '''Nobody''::text' then
+		update users set delegation_invites = 'Everyone' where delegation_invites = 'Nobody';
+		alter table users alter column delegation_invites set default 'Everyone';
+	end if;
+end $$;
 -- X's automated account label: the account that runs this one
 alter table users add column if not exists automated_by bigint references users (id) on delete set null;
 
