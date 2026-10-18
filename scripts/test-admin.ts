@@ -160,7 +160,7 @@ const step1 = await reportFlow(t, { input_flow_data: { requested_variant: JSON.s
 check("the report flow asks for a reason", step1.subtasks?.[0]?.choice_selection?.choices?.length > 3, step1.subtasks?.[0]?.subtask_id);
 const step2 = await reportFlow(t, { flow_token: step1.flow_token, subtask_inputs: [{ subtask_id: "report_reason", choice_selection: { link: "next_link", selected_choices: ["spam"] } }] });
 check("then for details", !!step2.subtasks?.[0]?.enter_text);
-const step3 = await reportFlow(t, { flow_token: step1.flow_token, subtask_inputs: [{ subtask_id: "report_details", enter_text: { link: "next_link", text: "test details" } }] });
+const step3 = await reportFlow(t, { flow_token: step2.flow_token, subtask_inputs: [{ subtask_id: "report_details", enter_text: { link: "next_link", text: "test details" } }] });
 check("then thanks", !!step3.subtasks?.[0]?.cta);
 const open = (await a.admin("reports")).reports ?? [];
 const report = open.find((r: any) => r.post_id === reported);
