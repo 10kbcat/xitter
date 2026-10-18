@@ -213,12 +213,13 @@ const ACTIONS: Record<string, Action> = {
 			const q = String(b.q ?? "").trim().replace(/^@/, "");
 			const status = ["active", "restricted", "limited", "suspended"].includes(b.status) ? b.status : null;
 			const staff = !!b.staff;
-			const rows = await sql`select ${userListCols} from users u
-				where (${q} = '' or u.screen_name ilike ${like(q)} or u.name ilike ${like(q)})
+			const match = sql`(${q} = '' or u.screen_name ilike ${like(q)} or u.name ilike ${like(q)})
 					and (${status}::text is null or u.status = ${status})
-					and (not ${staff} or u.role is not null)
-				order by u.created_at desc limit 50 offset ${Number(b.offset) || 0}`;
-			return { users: rows };
+					and (not ${staff} or u.role is not null)`;
+			const rows = await sql`select ${userListCols} from users u where ${match}
+				order by u.created_at desc, u.id desc limit ${Math.min(Math.max(Number(b.limit) || 50, 1), 500)} offset ${Math.max(Number(b.offset) || 0, 0)}`;
+			const [{ total }] = await sql`select count(*)::int as total from users u where ${match}`;
+			return { users: rows, total };
 		},
 	},
 
@@ -451,13 +452,15 @@ const ACTIONS: Record<string, Action> = {
 		run: async (_a, b) => {
 			const q = String(b.q ?? "").trim();
 			const author = String(b.author ?? "").trim().replace(/^@/, "");
+			const match = sql`(${q} = '' or p.text ilike ${like(q)}) and (${author} = '' or lower(u.screen_name) = lower(${author}))`;
 			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.hidden, p.sensitive, p.notice, p.count_overrides, p.reply_to_id::text as reply_to_id, u.screen_name, u.name,
 				(select count(*)::int from likes l where l.post_id = p.id) as likes,
 				(select count(*)::int from media m where m.post_id = p.id) as media
 				from posts p join users u on u.id = p.user_id
-				where (${q} = '' or p.text ilike ${like(q)}) and (${author} = '' or lower(u.screen_name) = lower(${author}))
-				order by p.id desc limit 50 offset ${Number(b.offset) || 0}`;
-			return { posts: rows };
+				where ${match}
+				order by p.id desc limit ${Math.min(Math.max(Number(b.limit) || 50, 1), 500)} offset ${Math.max(Number(b.offset) || 0, 0)}`;
+			const [{ total }] = await sql`select count(*)::int as total from posts p join users u on u.id = p.user_id where ${match}`;
+			return { posts: rows, total };
 		},
 	},
 

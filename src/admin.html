@@ -724,13 +724,23 @@ const RENDER = {
 			'<label class="row small"><input type="checkbox" id="staff"> Staff only</label></div>' +
 			(can("moderator") ? '<div class="bar" id="bulk" hidden><span class="small" id="picked"></span>' +
 				[["active", "Reinstate", ""], ["restricted", "Restrict", ""], ["limited", "Limit", ""], ["suspended", "Suspend", " danger"]].map(([s, l, c]) => '<button class="btn' + c + '" data-bulk="' + s + '">' + l + "</button>").join("") + "</div>" : "") +
-			'<div id="list" class="scroll"></div>';
+			'<p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
+			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
 		const picked = () => [...main.querySelectorAll("[data-pick]:checked")].map((c) => c.dataset.pick);
-		const load = async () => {
-			const { users } = await api("users", { q: $("#q").value, status: $("#status").value, staff: $("#staff").checked });
-			$("#list").innerHTML = users.length ? userTable(users, false, can("moderator")) : '<div class="empty">No accounts match.</div>';
-			if ($("#bulk")) $("#bulk").hidden = true;
+		// 50 at a time; after a bulk change the same number is fetched again, a new filter starts over
+		let shown = [];
+		const load = async (more) => {
+			const keep = more === true ? picked() : [];
+			const q = { q: $("#q").value, status: $("#status").value, staff: $("#staff").checked };
+			const { users, total } = await api("users", more === true ? { ...q, offset: shown.length } : more === "same" ? { ...q, limit: Math.max(shown.length, 50) } : q);
+			shown = more === true ? shown.concat(users) : users;
+			$("#list").innerHTML = shown.length ? userTable(shown, false, can("moderator")) : '<div class="empty">No accounts match.</div>';
+			keep.forEach((id) => { const c = main.querySelector('[data-pick="' + id + '"]'); if (c) c.checked = true; });
+			$("#total").textContent = total + (total === 1 ? " account" : " accounts") + (shown.length < total ? ", showing " + shown.length : "");
+			$("#more").hidden = shown.length >= total;
+			if ($("#bulk")) $("#bulk").hidden = !keep.length;
 		};
+		$("#more").onclick = () => load(true);
 		main.addEventListener("change", (e) => {
 			if (!e.target.matches("[data-pick]") || !$("#bulk")) return;
 			const n = picked().length;
@@ -740,13 +750,13 @@ const RENDER = {
 		main.querySelectorAll("[data-bulk]").forEach((b) => b.onclick = async () => {
 			const ids = picked();
 			if (b.dataset.bulk === "suspended" && !(await ask("Suspend " + ids.length + " accounts?"))) return;
-			act(() => api("bulkStatus", { ids, status: b.dataset.bulk }), "Standing changed").then(load);
+			act(() => api("bulkStatus", { ids, status: b.dataset.bulk }), "Standing changed").then(() => load("same"));
 		});
 		let t;
-		$("#q").oninput = () => { clearTimeout(t); t = setTimeout(load, 250); };
-		$("#status").onchange = load;
-		$("#staff").onchange = load;
-		await load();
+		$("#q").oninput = () => { clearTimeout(t); t = setTimeout(() => load(false), 250); };
+		$("#status").onchange = () => load(false);
+		$("#staff").onchange = () => load(false);
+		await load(false);
 	},
 
 	async orgs(main) {
@@ -776,9 +786,18 @@ const RENDER = {
 					["likes", "replies", "reposts", "quotes", "bookmarks", "views"].map((k) => '<label class="small" style="width:30%">' + k + '<input data-k="' + k + '" type="number" min="0" value="' + (c[k] ?? "") + '"></label>').join("") +
 					'</div><button class="btn primary" data-save-counts style="margin-top:8px">Save counts</button></div>' : "") + "</div>";
 		};
-		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div><div id="list" class="scroll"></div>';
-		const load = async () => {
-			const { posts } = await api("posts", { q: $("#q").value, author: $("#author").value });
+		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div><p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
+			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
+		// 50 at a time; after an edit the same number is fetched again, a new search starts over
+		let posts = [];
+		const load = async (more) => {
+			const q = { q: $("#q").value, author: $("#author").value };
+			const page = more === "new" ? await api("posts", { ...q, offset: 0 })
+				: more === true ? await api("posts", { ...q, offset: posts.length })
+				: await api("posts", { ...q, offset: 0, limit: Math.max(posts.length, 50) });
+			posts = more === true ? posts.concat(page.posts) : page.posts;
+			$("#total").textContent = page.total + (page.total === 1 ? " post" : " posts") + (posts.length < page.total ? ", showing " + posts.length : "");
+			$("#more").hidden = posts.length >= page.total;
 			$("#list").innerHTML = posts.length
 				? '<table class="table"><tr><th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
 					posts.map((p) => "<tr><td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
@@ -817,8 +836,9 @@ const RENDER = {
 			});
 		};
 		let t;
-		$("#q").oninput = $("#author").oninput = () => { clearTimeout(t); t = setTimeout(load, 250); };
-		await load();
+		$("#q").oninput = $("#author").oninput = () => { clearTimeout(t); t = setTimeout(() => load("new"), 250); };
+		$("#more").onclick = () => load(true);
+		await load("new");
 	},
 
 	async invites(main) {
