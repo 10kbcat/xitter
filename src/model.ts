@@ -123,7 +123,7 @@ export function userResult(u: User) {
 		__typename: "User",
 		action_counts: { favorites_count: u.stats?.likes ?? 0 },
 		affiliates_highlighted_label: badgeLabel(u),
-		...(u.verified_type === "business" ? { business_account: { affiliates_count: u.affiliates ?? 0 } } : {}),
+		...(u.verified_type === "business" || u.verified_type === "government" ? { business_account: { affiliates_count: u.affiliates ?? 0 } } : {}),
 		avatar: { image_url: absolute(u.avatar_url) ?? DEFAULT_AVATAR },
 		...(u.banner_url ? { banner: { image_url: absolute(u.banner_url) } } : {}),
 		core: { created_at: apiDate(u.created_at), name: u.name, screen_name: u.screen_name },

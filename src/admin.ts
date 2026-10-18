@@ -291,8 +291,8 @@ const ACTIONS: Record<string, Action> = {
 			const badge = b.badge || null;
 			if (badge !== null && !["blue", "business", "government", "government_individual"].includes(badge)) throw new AdminError("Unknown badge.");
 			await guard(a, id);
-			// an account stops being an organisation when it loses the gold badge
-			if (badge !== "business") {
+			// an account stops being an organisation when it loses the gold or grey (government) badge
+			if (badge !== "business" && badge !== "government") {
 				await sql`delete from affiliations where org_id = ${id}::bigint`;
 				await sql`delete from affiliation_requests where org_id = ${id}::bigint`;
 			}
@@ -390,7 +390,7 @@ const ACTIONS: Record<string, Action> = {
 	orgs: {
 		role: "support",
 		run: async () => ({
-			orgs: await sql`select ${userListCols} from users u where u.verified_type = 'business' order by u.name`,
+			orgs: await sql`select ${userListCols} from users u where u.verified_type in ('business', 'government') order by u.name`,
 		}),
 	},
 
@@ -424,7 +424,7 @@ const ACTIONS: Record<string, Action> = {
 		run: async (a, b) => {
 			const orgId = idOf(b.orgId, "organisation");
 			const [org] = await sql`select verified_type from users where id = ${orgId}::bigint`;
-			if (org?.verified_type !== "business") throw new AdminError("Only accounts with the gold badge are organisations.");
+			if (org?.verified_type !== "business" && org?.verified_type !== "government") throw new AdminError("Only accounts with the gold or grey organisation badge are organisations.");
 			const [u] = await sql`select id::text as id from users where lower(screen_name) = lower(${String(b.screen_name ?? "").replace(/^@/, "")})`;
 			if (!u) throw new AdminError("No account with that handle.");
 			if (u.id === orgId) throw new AdminError("An organisation can't be its own affiliate.");

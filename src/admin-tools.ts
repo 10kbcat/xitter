@@ -113,7 +113,7 @@ export const toolActions: Record<string, Action> = {
 			await guard(a, id);
 			const badge = b.badgeId ? idOf(b.badgeId) : null;
 			await badgeExists(badge);
-			const rows = await sql`update users set org_badge_id = ${badge}::bigint where id = ${id}::bigint and verified_type = 'business' returning id`;
+			const rows = await sql`update users set org_badge_id = ${badge}::bigint where id = ${id}::bigint and verified_type in ('business', 'government') returning id`;
 			if (!rows.length) throw new AdminError("Only organisations have an organisation badge.");
 			await audit(a, "org_badge", id, { badge });
 			return {};

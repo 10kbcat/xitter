@@ -28,7 +28,7 @@ type Org = { id: string; screen_name: string; name: string; self: boolean };
 // the organisation this account runs: itself, or the one it manages
 async function managedOrg(viewer: Viewer): Promise<Org | undefined> {
 	const [org] = await sql`select u.id::text, u.screen_name, u.name, u.id = ${viewer.id}::bigint as self from users u
-		where u.verified_type = 'business' and (u.id = ${viewer.id}::bigint
+		where u.verified_type in ('business', 'government') and (u.id = ${viewer.id}::bigint
 			or u.id = (select org_id from affiliations where user_id = ${viewer.id}::bigint and manager))`;
 	return org as Org | undefined;
 }
@@ -42,7 +42,7 @@ async function view(viewer: Viewer, error = "", notice = "") {
 	const org = await managedOrg(viewer);
 	const [mine] = await sql`select o.screen_name, a.manager from affiliations a join users o on o.id = a.org_id where a.user_id = ${viewer.id}::bigint`;
 	const asked = await sql`select o.id::text, o.screen_name, o.name from affiliation_requests r join users o on o.id = r.org_id
-		where r.user_id = ${viewer.id}::bigint and o.verified_type = 'business' order by r.created_at`;
+		where r.user_id = ${viewer.id}::bigint and o.verified_type in ('business', 'government') order by r.created_at`;
 	let body = `<h1>Organisation</h1>${notice ? `<p>${esc(notice)}</p>` : ""}${error ? `<p class="err">${esc(error)}</p>` : ""}`;
 
 	if (asked.length)
@@ -97,7 +97,7 @@ export async function orgRoute(req: Request, viewer: Viewer): Promise<Response> 
 		const orgId = field("org");
 		if (!isId(orgId)) return view(viewer, "No such request.");
 		const [r] = await sql`delete from affiliation_requests r using users o
-			where r.org_id = ${orgId}::bigint and r.user_id = ${viewer.id}::bigint and o.id = r.org_id and o.verified_type = 'business' returning o.screen_name`;
+			where r.org_id = ${orgId}::bigint and r.user_id = ${viewer.id}::bigint and o.id = r.org_id and o.verified_type in ('business', 'government') returning o.screen_name`;
 		if (!r) return view(viewer, "That request is gone.");
 		if (action === "decline") return view(viewer, "", `You declined @${r.screen_name}.`);
 		// one organisation per person; accepting moves them
@@ -118,7 +118,7 @@ export async function orgRoute(req: Request, viewer: Viewer): Promise<Response> 
 		const [u] = await sql`select id::text, screen_name, verified_type, status from users where lower(screen_name) = lower(${handle})`;
 		if (!u || u.status === "suspended") return view(viewer, "No account with that handle.");
 		if (u.id === org.id) return view(viewer, "An organisation can't be its own affiliate.");
-		if (u.verified_type === "business") return view(viewer, "Organisations can't be affiliates.");
+		if (u.verified_type === "business" || u.verified_type === "government") return view(viewer, "Organisations can't be affiliates.");
 		if ((await sql`select 1 from affiliations where org_id = ${org.id}::bigint and user_id = ${u.id}::bigint`).length) return view(viewer, `@${u.screen_name} is already an affiliate.`);
 		// a block either way keeps the request from reaching them
 		if ((await sql`select 1 from blocks where (blocker_id = ${u.id}::bigint and blocked_id in (${org.id}::bigint, ${viewer.id}::bigint)) or (blocked_id = ${u.id}::bigint and blocker_id in (${org.id}::bigint, ${viewer.id}::bigint))`).length)

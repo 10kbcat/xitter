@@ -66,7 +66,7 @@ export type MenuLink = { href: string; text: string; icon: string; viewBox?: str
 export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const links: MenuLink[] = [];
 	if (settings().invite_quota.enabled && settings().signup_mode === "invite") links.push({ href: "/account/invites", text: "Invites", icon: TICKET });
-	const [org] = await sql`select 1 from users u where u.id = ${userId}::bigint and (u.verified_type = 'business'
+	const [org] = await sql`select 1 from users u where u.id = ${userId}::bigint and (u.verified_type in ('business', 'government')
 		or exists (select 1 from affiliations where user_id = u.id) or exists (select 1 from affiliation_requests where user_id = u.id))`;
 	if (org) links.push({ href: "/account/organisation", text: "Organisation", icon: BUILDING });
 	links.push({ href: "/account/api", text: "API", icon: CODE, viewBox: "0 -960 960 960" });
