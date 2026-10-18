@@ -112,7 +112,7 @@ function verificationOf(u: User) {
 	};
 }
 
-function chatUser(u: User, viewerId: string, keyed: boolean, extra: object = {}) {
+function chatUser(u: User, viewerId: string, keyed: boolean, trusted: boolean, extra: object = {}) {
 	const self = u.id === viewerId;
 	const blocked = !!(u.stats?.blocking || u.stats?.blockedBy);
 	return {
@@ -128,7 +128,7 @@ function chatUser(u: User, viewerId: string, keyed: boolean, extra: object = {})
 			can_dm_reason: blocked ? "Blocked" : "Allowed",
 			dm_blocking: !!u.stats?.blocking,
 			has_public_key: keyed,
-			is_trusted: self || !!(u.stats?.followedByViewer || u.stats?.followsViewer),
+			is_trusted: self || trusted || !!(u.stats?.followedByViewer || u.stats?.followsViewer),
 			passes_premium_check: true,
 		},
 		core: { __typename: "UserCore", created_at_ms: new Date(u.created_at).getTime(), name: u.name, screen_name: u.screen_name },
@@ -146,11 +146,16 @@ function chatUser(u: User, viewerId: string, keyed: boolean, extra: object = {})
 async function userResults(viewerId: string, ids: string[], opts: { keys?: boolean; tokens?: boolean } = {}) {
 	const users = (await Promise.all(ids.map((id) => userById(viewerId, id)))).filter((u): u is User => !!u);
 	const keyed = await hasKey(users.map((u) => u.id));
+	const trusted = new Set(
+		users.length
+			? (await sql`select trusted_id::text as id from chat_trust where user_id = ${viewerId}::bigint and trusted_id = any(${sql.array(users.map((u) => u.id), "INT8")})`).map((r: { id: string }) => r.id)
+			: [],
+	);
 	return Promise.all(
 		users.map(async (u) => ({
 			__typename: "UserResults",
 			rest_id: u.id,
-			result: chatUser(u, viewerId, keyed.has(u.id), opts.keys ? { get_public_keys: await publicKeys(u.id, !!opts.tokens && u.id === viewerId) } : {}),
+			result: chatUser(u, viewerId, keyed.has(u.id), trusted.has(u.id), opts.keys ? { get_public_keys: await publicKeys(u.id, !!opts.tokens && u.id === viewerId) } : {}),
 		})),
 	);
 }
