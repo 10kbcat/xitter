@@ -28,7 +28,10 @@ create table if not exists posts (
 	conversation_id bigint not null,
 	created_at timestamptz not null default now()
 );
-create index if not exists posts_reply_to_idx on posts (reply_to_id);
+-- replies with their authors, for the counts (posts.ts); replaces two copies
+-- of the same index on reply_to_id
+create index if not exists posts_replies_idx on posts (reply_to_id, user_id);
+drop index if exists posts_reply_to_idx;
 alter table posts drop constraint if exists posts_reply_to_id_fkey;
 alter table posts add column if not exists reply_to_user_id bigint;
 create index if not exists posts_user_idx on posts (user_id, id desc);
@@ -182,7 +185,9 @@ create table if not exists likes (
 	created_at timestamptz not null default now(),
 	primary key (user_id, post_id)
 );
-create index if not exists likes_post_idx on likes (post_id);
+-- with the liker, so a post's count skips suspended accounts from the index alone
+create index if not exists likes_post_user_idx on likes (post_id, user_id);
+drop index if exists likes_post_idx;
 -- what came in since a mark (notifications.ts: push, unread counts)
 create index if not exists likes_created_idx on likes (created_at);
 
@@ -193,7 +198,8 @@ create table if not exists reposts (
 	created_at timestamptz not null default now(),
 	primary key (user_id, post_id)
 );
-create index if not exists reposts_post_idx on reposts (post_id);
+create index if not exists reposts_post_user_idx on reposts (post_id, user_id);
+drop index if exists reposts_post_idx;
 create index if not exists reposts_created_idx on reposts (created_at);
 -- a repost's own id, which the client acts on (posts.ts originalPostId)
 create index if not exists reposts_id_idx on reposts (id);
@@ -287,8 +293,9 @@ create table if not exists post_mentions (
 	primary key (post_id, user_id)
 );
 create index if not exists post_mentions_user_idx on post_mentions (user_id);
-create index if not exists posts_quote_idx on posts (quote_id) where quote_id is not null;
-create index if not exists posts_reply_idx on posts (reply_to_id) where reply_to_id is not null;
+create index if not exists posts_quotes_idx on posts (quote_id, user_id) where quote_id is not null;
+drop index if exists posts_quote_idx;
+drop index if exists posts_reply_idx;
 -- notifications newer than this are unread
 alter table users add column if not exists notifications_seen_at timestamptz not null default now();
 
@@ -339,6 +346,8 @@ alter table users add column if not exists role text check (role in ('admin', 'm
 -- posts); suspended (can't sign in, hidden everywhere)
 alter table users add column if not exists status text not null default 'active'
 	check (status in ('active', 'restricted', 'limited', 'suspended'));
+-- the few suspended accounts every post query leaves out (posts.ts SUSPENDED)
+create index if not exists users_suspended_idx on users (id) where status = 'suspended';
 alter table users add column if not exists last_seen_at timestamptz;
 create table if not exists audit_log (
 	id bigint primary key,
