@@ -37,6 +37,8 @@ try{
 	// letters from other scripts and Unicode styles that pass for Latin ones
 	for(const s of['nіggеr','ИIGGER','nιggεr','ɴɪɢɢᴇʀ','🇳🇮🇬🇬🇪🇷','ｎｉｇｇｅｒ','𝐧𝐢𝐠𝐠𝐞𝐫','ⓝⓘⓖⓖⓔⓡ','n​igger','NÏGGËR'])
 		check(blockedNameIn(s)==='nigger','look-alike caught: '+JSON.stringify(s));
+	// a real one: math symbols and capital Greek as Latin letters
+	check(normalizeName('faΣ ∂ń©ś^¨ńķąć^∂śļą^∂ΔĻ∂∂')==='faedncsnkacdsladaldd','symbols read as letters: ∂ d, © c, Σ e, Δ a');
 	for(const s of['Иван Петров','Νίκος Παπαδόπουλος','Нигерия','Łukasz','Ølstrup'])
 		check(!blockedNameIn(s),'ordinary name passes: '+s);
 	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD]});
