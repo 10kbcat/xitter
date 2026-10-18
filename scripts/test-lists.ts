@@ -85,7 +85,20 @@ check("pin", pin.data?.pin_timeline?.updated_pinned_timeline?.list?.pinning === 
 const pinned = await a.get("PinnedTimelines", {});
 check("pinned timelines", pinned.data.pinned_timelines.pinned_timelines.some((p: any) => p.list?.id_str === id));
 await a.gql("UnpinTimeline", { pinnedTimelineItem: { id, pinned_timeline_type: "List" } });
-check("unpin", (await a.get("PinnedTimelines", {})).data.pinned_timelines.pinned_timelines.length === 0);
+check("unpin", !(await a.get("PinnedTimelines", {})).data.pinned_timelines.pinned_timelines.some((p: any) => p.list?.id_str === id));
+
+// the built-in "All" list: every post, first home tab, fixed, can be unpinned
+const ALL = "1";
+check("All is the first home tab", (await a.get("PinnedTimelines", {})).data.pinned_timelines.pinned_timelines[0]?.list?.id_str === ALL);
+const everything = JSON.stringify(entriesOf((await a.get("ListLatestTweetsTimeline", { listId: ALL, count: 100 })).data.list.tweets_timeline.timeline));
+check("All has posts from members and non-members", everything.includes(post) && everything.includes(other));
+check("All can't take members", !!(await a.gql("ListAddMember", { listId: ALL, userId: userB.rest_id })).errors?.length);
+check("All can't be subscribed", !!(await b.gql("ListSubscribe", { listId: ALL })).errors?.length);
+await a.gql("UnpinTimeline", { pinnedTimelineItem: { id: ALL, pinned_timeline_type: "List" } });
+check("All can be unpinned", !(await a.get("PinnedTimelines", {})).data.pinned_timelines.pinned_timelines.some((p: any) => p.list?.id_str === ALL));
+await a.gql("PinTimeline", { pinnedTimelineItem: { id: ALL, pinned_timeline_type: "List" } });
+check("and pinned back", (await a.get("PinnedTimelines", {})).data.pinned_timelines.pinned_timelines[0]?.list?.id_str === ALL);
+check("/all opens it", (await fetch(`${origin}/all`, { redirect: "manual" })).headers.get("location") === "/i/lists/1");
 
 // privacy
 const edited = await a.gql("UpdateList", { listId: id, name: "Renamed", description: "", isPrivate: true });

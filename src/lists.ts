@@ -30,6 +30,28 @@ function listId(vars: Vars, key = "listId"): string {
 
 const missing = () => new PostError("List not found.", 144);
 
+// "All": every post on the instance. Not a row in `lists`; owned by the
+// instance owner, shown first on the home tabs until the viewer unpins it,
+// and /all opens it.
+export const ALL_ID = "1";
+const fixed = () => new PostError("This list can't be changed.", 150);
+
+async function allRow(viewerId: string): Promise<ListRow | undefined> {
+	const [r] = await sql`select (select id::text from users where role = 'admin' order by created_at, id limit 1) as owner_id,
+		(select count(*)::int from users where status <> 'suspended') as members,
+		coalesce((select (preferences->>'all_tab_hidden')::boolean from users where id = ${viewerId}::bigint), false) as hidden`;
+	if (!r?.owner_id) return undefined;
+	return {
+		id: ALL_ID, owner_id: r.owner_id, name: "All", description: "Every post on this instance, newest first.",
+		is_private: false, banner_media_id: null, created_at: new Date(0),
+		member_count: r.members, subscriber_count: 0, following: false, is_member: false, muting: false, pinning: !r.hidden,
+	};
+}
+
+async function setAllTab(viewerId: string, shown: boolean) {
+	await sql`update users set preferences = preferences || ${JSON.stringify({ all_tab_hidden: !shown })}::text::jsonb where id = ${viewerId}::bigint`;
+}
+
 type ListRow = {
 	id: string;
 	owner_id: string;
@@ -61,6 +83,7 @@ const listSelect = (viewerId: string, target = "0") => sql`
 const visible = (viewerId: string) => sql`(l.owner_id = ${viewerId}::bigint or (not l.is_private and l.owner_id not in ${blockedFor(viewerId)}))`;
 
 async function oneList(viewerId: string, id: string, target?: string): Promise<ListRow | undefined> {
+	if (id === ALL_ID) return allRow(viewerId);
 	const [row] = await sql`${listSelect(viewerId, target)} where l.id = ${id}::bigint and ${visible(viewerId)}`;
 	return row as ListRow | undefined;
 }
@@ -72,6 +95,7 @@ async function requireList(viewerId: string, id: string, target?: string): Promi
 }
 
 async function requireOwn(viewerId: string, id: string): Promise<ListRow> {
+	if (id === ALL_ID) throw fixed();
 	const row = await requireList(viewerId, id);
 	if (row.owner_id !== viewerId) throw new PostError("You can only change your own lists.", 150);
 	return row;
@@ -186,8 +210,8 @@ async function tweetTimeline(viewerId: string, id: string, vars: Vars) {
 	const newer = cursor[0] === "t" && !!at;
 	const items = await feed({
 		viewerId,
-		authors: { list: id },
-		replies: false,
+		authors: id === ALL_ID ? { all: true } : { list: id },
+		replies: id === ALL_ID,
 		kinds: "both",
 		limit: count,
 		...(newer ? { after: at } : { before: at }),
@@ -247,6 +271,7 @@ async function member(v: Viewer, vars: Vars, on: boolean) {
 
 async function subscribe(v: Viewer, vars: Vars, on: boolean) {
 	const id = listId(vars);
+	if (id === ALL_ID) throw fixed();
 	const row = await requireList(v.id, id);
 	if (on) {
 		if (row.is_private && row.owner_id !== v.id) throw missing();
@@ -260,6 +285,7 @@ async function subscribe(v: Viewer, vars: Vars, on: boolean) {
 
 async function mute(v: Viewer, vars: Vars, on: boolean) {
 	const id = listId(vars);
+	if (id === ALL_ID) throw fixed();
 	await requireList(v.id, id);
 	if (on) await sql`insert into list_mutes (list_id, user_id) values (${id}::bigint, ${v.id}::bigint) on conflict do nothing`;
 	else await sql`delete from list_mutes where list_id = ${id}::bigint and user_id = ${v.id}::bigint`;
@@ -318,6 +344,8 @@ async function recommended(viewerId: string, id: string, vars: Vars) {
 async function pinnedItems(viewerId: string) {
 	const rows = (await sql`${listSelect(viewerId)} join pinned_lists p on p.list_id = l.id and p.user_id = ${viewerId}::bigint
 		where ${visible(viewerId)} order by p.position`) as ListRow[];
+	const all = await allRow(viewerId);
+	if (all?.pinning) rows.unshift(all);
 	return (await listObjects(viewerId, rows)).map((list) => ({ __typename: "ListPinnedTimeline", list }));
 }
 
@@ -325,6 +353,8 @@ async function pinnableItems(viewerId: string) {
 	const rows = (await sql`${listSelect(viewerId)}
 		where l.owner_id = ${viewerId}::bigint or exists (select 1 from list_subscribers s where s.list_id = l.id and s.user_id = ${viewerId}::bigint)
 		order by l.created_at desc`) as ListRow[];
+	const all = await allRow(viewerId);
+	if (all) rows.unshift(all);
 	return (await listObjects(viewerId, rows)).map((list) => ({ __typename: "ListPinnedTimeline", list }));
 }
 
@@ -346,9 +376,12 @@ async function pinOne(v: Viewer, vars: Vars, on: boolean) {
 		return { data: { [key]: { __typename: on ? "PinTimelineErrorResult" : "UnpinTimelineErrorResult", reason: "Unsupported", message: "That can't be pinned here." } } };
 	}
 	const id = item.id as string;
+	if (id === ALL_ID) await setAllTab(v.id, on);
 	const row = await oneList(v.id, id);
 	if (!row) return { data: { [key]: { __typename: on ? "PinTimelineErrorResult" : "UnpinTimelineErrorResult", reason: "NotFound", message: "List not found." } } };
-	if (on) {
+	if (id === ALL_ID) {
+		// stored in preferences, above
+	} else if (on) {
 		const [n] = await sql`select count(*)::int as n from pinned_lists where user_id = ${v.id}::bigint`;
 		if (n.n >= MAX_PINNED) {
 			return { data: { pin_timeline: { __typename: "PinTimelineErrorResult", reason: "LimitReached", message: `You can pin up to ${MAX_PINNED} lists.` } } };
@@ -462,6 +495,7 @@ export const listHandlers = {
 	UnpinTimeline: (v: Viewer, vars: Vars) => pinOne(v, vars, false),
 	UpdatePinnedTimelines: async (v: Viewer, vars: Vars) => {
 		const items = Array.isArray(vars.pinnedTimelineItems) ? vars.pinnedTimelineItems : [];
+		await setAllTab(v.id, items.some((i: any) => i?.pinned_timeline_type === "List" && i.id === ALL_ID));
 		await setPinnedLists(v.id, items.filter((i: any) => i?.pinned_timeline_type === "List" && isId(i.id)).map((i: any) => i.id as string));
 		return { data: { update_pinned_timelines: { pinned_timelines: await pinnedItems(v.id) } } };
 	},

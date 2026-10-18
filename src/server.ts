@@ -267,6 +267,8 @@ async function route(req: Request): Promise<Response | undefined> {
 	// is kept for the dialog, which then skips asking for it
 	// X's own add-email flow: ours is a page
 	if (p === "/i/flow/add_email") return Response.redirect("/account/email", 302);
+	// the built-in "All" list (lists.ts)
+	if (p === "/all") return Response.redirect("/i/lists/1", 302);
 	if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
 		const headers = new Headers({ location: "/" });
 		const code = url.searchParams.get("code");
