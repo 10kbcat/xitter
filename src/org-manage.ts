@@ -81,7 +81,7 @@ async function view(viewer: Viewer, error = "", notice = "") {
 		}`;
 	}
 
-	if (!org && !mine && !asked.length) body += '<p class="dim">This page is for organisations (accounts with the gold badge) and the people they add.</p>';
+	if (!org && !mine && !asked.length) body += '<p class="dim">This page is for organisations (accounts with the gold or grey government badge) and the people they add.</p>';
 	return page(body);
 }
 

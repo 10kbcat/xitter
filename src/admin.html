@@ -762,9 +762,9 @@ const RENDER = {
 	async orgs(main) {
 		const { orgs } = await api("orgs");
 		main.innerHTML = "<h1>Organisations</h1>" +
-			'<p class="dim">Organisations are accounts with the gold badge. Their affiliates show the organisation\'s picture as a badge after their name and are listed on its Affiliates tab.</p>' +
+			'<p class="dim">Organisations are accounts with the gold badge or the grey government badge. Their affiliates show the organisation\'s picture as a badge after their name and are listed on its Affiliates tab.</p>' +
 			(can("admin") ? '<div class="box" style="margin-bottom:16px"><h2>New organisation</h2><div class="row"><input id="oh" placeholder="handle"><input id="on" placeholder="Name"><button class="btn primary" id="oc">Create</button></div><div id="osecret"></div></div>' : "") +
-			'<div class="scroll">' + (orgs.length ? userTable(orgs, true) : '<div class="empty">No organisations yet. Give an account the gold badge, or create one above.</div>') + "</div>";
+			'<div class="scroll">' + (orgs.length ? userTable(orgs, true) : '<div class="empty">No organisations yet. Give an account the gold or grey government badge, or create one above.</div>') + "</div>";
 		if ($("#oc")) $("#oc").onclick = () => act(async () => {
 			const r = await api("createOrg", { screen_name: $("#oh").value, name: $("#on").value });
 			$("#osecret").innerHTML = '<div class="secret">Created. Its password: <span class="code">' + esc(r.password) + '</span><br><span class="dim small">Shown once. Give it to whoever runs the organisation.</span></div>';
@@ -1031,7 +1031,7 @@ function userTable(users, orgs = false, pick = false) {
 
 async function renderUser(main, id) {
 	const { user: u, invited, log } = await api("user", { id });
-	const isOrg = u.verified_type === "business";
+	const isOrg = u.verified_type === "business" || u.verified_type === "government";
 	const [affiliates, { badges }, { notes }, { messages }, sessions, handles] = await Promise.all([
 		isOrg ? api("affiliates", { orgId: id }).then((r) => r.affiliates) : [],
 		api("badges"),
