@@ -967,3 +967,7 @@ alter table users add column if not exists label_id bigint references account_la
 
 update posts p set reply_to_user_id = r.user_id from posts r where r.id = p.reply_to_id and p.reply_to_user_id is null;
 update posts set reply_to_id = conversation_id where reply_to_id is null and conversation_id <> id;
+
+alter table users add column if not exists role_granted_by bigint;
+update users u set role_granted_by = (select a.actor_id from audit_log a where a.action = 'set_role' and a.target = u.id::text order by a.created_at desc limit 1)
+	where u.role is not null and u.role_granted_by is null;
