@@ -191,13 +191,13 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		if (!delegateMay(acting.actor!.role, req.method, path, operation)) return apiError(403, 200, "Delegates can't do this for the account.");
 		viewer = acting;
 	}
+	const limited = limitApi(viewer, req.method, path, operation, url);
+	if (limited) return limited;
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
-	const limited = limitApi(viewer, req.method, path, operation, url);
-	if (limited) return limited;
 	if (viewer.status === "restricted" && bucketsFor(req.method, path, operation, url).some((b) => b === "post" || b === "dm"))
 		return apiError(403, 326, "Your account can't post or send messages right now.");
 	if (req.method !== "GET" && !/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path) && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY)
