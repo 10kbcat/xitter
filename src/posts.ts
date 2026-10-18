@@ -327,6 +327,20 @@ export async function replies(viewerId: string, id: string, limit = 100): Promis
 	return hydrate(viewerId, rows.map(toRow));
 }
 
+export async function repliesBelow(viewerId: string, id: string, limit = 1000): Promise<PostRow[]> {
+	const rows = await sql`${select(viewerId)} where p.id in (
+			with recursive tree as (
+				select id, 1 as depth from posts where reply_to_id = ${id}::bigint
+				union all
+				select x.id, t.depth + 1 from posts x join tree t on x.reply_to_id = t.id where t.depth < 40
+			) select id from tree limit ${limit})
+		and p.reply_hidden_at is null and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
+		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)}`;
+	return rows.map(toRow);
+}
+
+export const hydratePosts = (viewerId: string, posts: PostRow[]) => hydrate(viewerId, posts);
+
 // Hide reply: only the author of the conversation's first post may hide a
 // reply in it, or show it again.
 export async function setReplyHidden(viewerId: string, replyId: string, hidden: boolean): Promise<void> {
