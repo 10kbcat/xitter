@@ -1027,3 +1027,124 @@ do $$ begin
 		insert into schema_steps (name) values ('chat_trust');
 	end if;
 end $$;
+
+-- Account counters for userCols (users.ts), kept by the triggers below: counted
+-- on every read, one account with 60k posts cost 80 ms on each of its post
+-- cards. Posts with media go by the uploader, who is always the post's author
+-- (media.ts attachMedia).
+create table if not exists user_stats (
+	user_id bigint primary key references users (id) on delete cascade,
+	posts int not null default 0,
+	articles int not null default 0,
+	media_posts int not null default 0,
+	likes int not null default 0,
+	highlights int not null default 0,
+	followers int not null default 0,
+	following int not null default 0
+);
+create index if not exists media_user_post_idx on media (user_id, post_id) where post_id is not null;
+
+create or replace function user_stats_posts() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'INSERT' then
+		insert into user_stats (user_id, posts, articles)
+			select user_id, count(*), count(article_id) from new_rows group by user_id
+			on conflict (user_id) do update set posts = user_stats.posts + excluded.posts, articles = user_stats.articles + excluded.articles;
+	else
+		update user_stats s set posts = s.posts - d.posts, articles = s.articles - d.articles
+			from (select user_id, count(*) as posts, count(article_id) as articles from old_rows group by user_id) d where s.user_id = d.user_id;
+	end if;
+	return null;
+end $$;
+create or replace trigger user_stats_posts_insert after insert on posts referencing new table as new_rows for each statement execute function user_stats_posts();
+create or replace trigger user_stats_posts_delete after delete on posts referencing old table as old_rows for each statement execute function user_stats_posts();
+
+create or replace function user_stats_likes() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'INSERT' then
+		insert into user_stats (user_id, likes) select user_id, count(*) from new_rows group by user_id
+			on conflict (user_id) do update set likes = user_stats.likes + excluded.likes;
+	else
+		update user_stats s set likes = s.likes - d.n from (select user_id, count(*) as n from old_rows group by user_id) d where s.user_id = d.user_id;
+	end if;
+	return null;
+end $$;
+create or replace trigger user_stats_likes_insert after insert on likes referencing new table as new_rows for each statement execute function user_stats_likes();
+create or replace trigger user_stats_likes_delete after delete on likes referencing old table as old_rows for each statement execute function user_stats_likes();
+
+create or replace function user_stats_highlights() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'INSERT' then
+		insert into user_stats (user_id, highlights) select user_id, count(*) from new_rows group by user_id
+			on conflict (user_id) do update set highlights = user_stats.highlights + excluded.highlights;
+	else
+		update user_stats s set highlights = s.highlights - d.n from (select user_id, count(*) as n from old_rows group by user_id) d where s.user_id = d.user_id;
+	end if;
+	return null;
+end $$;
+create or replace trigger user_stats_highlights_insert after insert on highlights referencing new table as new_rows for each statement execute function user_stats_highlights();
+create or replace trigger user_stats_highlights_delete after delete on highlights referencing old table as old_rows for each statement execute function user_stats_highlights();
+
+create or replace function user_stats_follows() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'INSERT' then
+		insert into user_stats (user_id, followers, following)
+			select id, sum(followers), sum(following) from (
+				select followee_id as id, 1 as followers, 0 as following from new_rows
+				union all select follower_id, 0, 1 from new_rows
+			) x group by id
+			on conflict (user_id) do update set followers = user_stats.followers + excluded.followers, following = user_stats.following + excluded.following;
+	else
+		update user_stats s set followers = s.followers - d.followers, following = s.following - d.following
+			from (select id, sum(followers) as followers, sum(following) as following from (
+				select followee_id as id, 1 as followers, 0 as following from old_rows
+				union all select follower_id, 0, 1 from old_rows
+			) x group by id) d where s.user_id = d.id;
+	end if;
+	return null;
+end $$;
+create or replace trigger user_stats_follows_insert after insert on follows referencing new table as new_rows for each statement execute function user_stats_follows();
+create or replace trigger user_stats_follows_delete after delete on follows referencing old table as old_rows for each statement execute function user_stats_follows();
+
+-- posts with media are counted again for the uploaders whose attachments
+-- changed: one index range each. An account being deleted is skipped, its
+-- counters go with it.
+create or replace function user_stats_media() returns trigger language plpgsql as $$
+declare
+	affected bigint[];
+begin
+	if tg_op = 'INSERT' then
+		select array_agg(distinct user_id) into affected from new_rows where post_id is not null;
+	elsif tg_op = 'DELETE' then
+		select array_agg(distinct user_id) into affected from old_rows where post_id is not null;
+	else
+		select array_agg(distinct n.user_id) into affected from new_rows n join old_rows o on o.id = n.id where n.post_id is distinct from o.post_id;
+	end if;
+	if affected is null then return null; end if;
+	insert into user_stats (user_id, media_posts)
+		select a, (select count(distinct m.post_id) from media m where m.user_id = a and m.post_id is not null)
+		from unnest(affected) a where exists (select 1 from users where id = a)
+		on conflict (user_id) do update set media_posts = excluded.media_posts;
+	return null;
+end $$;
+create or replace trigger user_stats_media_insert after insert on media referencing new table as new_rows for each statement execute function user_stats_media();
+create or replace trigger user_stats_media_update after update on media referencing new table as new_rows old table as old_rows for each statement execute function user_stats_media();
+create or replace trigger user_stats_media_delete after delete on media referencing old table as old_rows for each statement execute function user_stats_media();
+
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'user_stats') then
+		insert into user_stats (user_id, posts, articles, media_posts, likes, highlights, followers, following)
+			select u.id,
+				(select count(*) from posts x where x.user_id = u.id),
+				(select count(*) from posts x where x.user_id = u.id and x.article_id is not null),
+				(select count(distinct m.post_id) from media m where m.user_id = u.id and m.post_id is not null),
+				(select count(*) from likes x where x.user_id = u.id),
+				(select count(*) from highlights x where x.user_id = u.id),
+				(select count(*) from follows x where x.followee_id = u.id),
+				(select count(*) from follows x where x.follower_id = u.id)
+			from users u
+			on conflict (user_id) do update set posts = excluded.posts, articles = excluded.articles, media_posts = excluded.media_posts,
+				likes = excluded.likes, highlights = excluded.highlights, followers = excluded.followers, following = excluded.following;
+		insert into schema_steps (name) values ('user_stats');
+	end if;
+end $$;
