@@ -32,6 +32,8 @@ create index if not exists posts_reply_to_idx on posts (reply_to_id);
 alter table posts drop constraint if exists posts_reply_to_id_fkey;
 alter table posts add column if not exists reply_to_user_id bigint;
 create index if not exists posts_user_idx on posts (user_id, id desc);
+-- replies to an account's posts, newest first (notifications.ts)
+create index if not exists posts_reply_user_idx on posts (reply_to_user_id, created_at) where reply_to_user_id is not null;
 
 create table if not exists custom_badges (
 	id bigint primary key, name text not null check(char_length(name) between 1 and 60),
@@ -181,6 +183,8 @@ create table if not exists likes (
 	primary key (user_id, post_id)
 );
 create index if not exists likes_post_idx on likes (post_id);
+-- what came in since a mark (notifications.ts: push, unread counts)
+create index if not exists likes_created_idx on likes (created_at);
 
 create table if not exists reposts (
 	id bigint not null,
@@ -190,6 +194,7 @@ create table if not exists reposts (
 	primary key (user_id, post_id)
 );
 create index if not exists reposts_post_idx on reposts (post_id);
+create index if not exists reposts_created_idx on reposts (created_at);
 -- a repost's own id, which the client acts on (posts.ts originalPostId)
 create index if not exists reposts_id_idx on reposts (id);
 
@@ -216,7 +221,8 @@ create table if not exists follows (
 	primary key (follower_id, followee_id),
 	check (follower_id <> followee_id)
 );
-create index if not exists follows_followee_idx on follows (followee_id);
+create index if not exists follows_followee_created_idx on follows (followee_id, created_at);
+drop index if exists follows_followee_idx;
 
 create table if not exists media (
 	id bigint primary key,
@@ -438,6 +444,8 @@ create table if not exists chat_events (
 );
 create index if not exists chat_events_conversation_idx on chat_events (conversation_id, kind, seq desc);
 create index if not exists chat_events_sender_idx on chat_events (sender_id);
+-- messages since a mark (push.ts, mail-digest.ts)
+create index if not exists chat_events_created_idx on chat_events (created_at);
 alter table chat_members add column if not exists accepted boolean not null default true;
 alter table chat_members add column if not exists archived boolean not null default false;
 alter table chat_members add column if not exists muted boolean not null default false;
@@ -770,6 +778,9 @@ create index if not exists mail_log_created_idx on mail_log (created_at desc);
 -- when the activity and message digests last went to this account
 alter table users add column if not exists activity_mailed_at timestamptz;
 alter table users add column if not exists messages_mailed_at timestamptz;
+-- when a digest last found nothing to mail (mail-digest.ts)
+alter table users add column if not exists activity_checked_at timestamptz;
+alter table users add column if not exists messages_checked_at timestamptz;
 
 -- browser push subscriptions (push.ts); settings are the per-type switches
 create table if not exists push_subscriptions (
