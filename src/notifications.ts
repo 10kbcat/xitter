@@ -8,7 +8,7 @@ import { blockedFor, hasMutedWord, mutedFor, suspendedFor } from "./blocks";
 import type { User } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
-import { tweetResult, userResult } from "./model";
+import { plainTweetResult, tweetResult, userResult } from "./model";
 import type { PostRow } from "./model";
 import { postsByIds } from "./posts";
 import { settings } from "./settings";
@@ -162,7 +162,7 @@ function notificationEntry(g: Group, users: Map<string, User>, posts: Map<string
 				notification_url: { url, urlType: "ExternalUrl" },
 				template: {
 					__typename: "TimelineNotificationAggregateUserActions",
-					target_objects: post ? [{ __typename: "TimelineNotificationTweetRef", tweet_results: { result: tweetResult(post) } }] : [],
+					target_objects: post ? [{ __typename: "TimelineNotificationTweetRef", tweet_results: { result: plainTweetResult(post) } }] : [],
 					from_users: from.map((u) => ({ __typename: "TimelineNotificationUserRef", user_results: { result: userResult(u) } })),
 				},
 				// a number: the client passes it straight to Date

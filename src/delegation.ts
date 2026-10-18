@@ -50,7 +50,7 @@ export async function actingViewer(member: Viewer, ownerId: string): Promise<Vie
 
 // What a member can't do as the shared account: anything about its sign-in,
 // settings or delegation, and its messages (end-to-end keys are the owner's).
-const DELEGATE_DENIED_OPS = /XChat|DirectMessage|DmInbox|SendMessage|ConversationEvent|Preference|_settings_|Settings?Mutation|Password|Email|Phone|TwoFactor|Session|Deactivat|ScreenName|UserAccountLabel|Delegat/;
+const DELEGATE_DENIED_OPS = /XChat|DirectMessage|DmInbox|SendMessage|ConversationEvent|Preference|_settings_|Settings?Mutation|Password|Email|Phone|TwoFactor|Session|Deactivat|ScreenName|UserAccountLabel|AccountParody|Delegat/;
 const DELEGATE_DENIED_REST = /^\/(1\.1|2)\/(dm|direct_messages)\/|^\/1\.1\/account\/(?!settings\.json$|verify_credentials)|^\/1\.1\/strato\/column\/.*\/clients\//;
 // Post analytics are for Admins (as the client's role screen says).
 const ANALYTICS_OPS = /^(accountOverviewDailyQuery|accountOverviewHourlyQuery|activeFollowersTileQuery|useFetchAnalyticsQuery|contentPageQuery|postDetailsProviderQuery)$/;

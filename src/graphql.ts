@@ -41,6 +41,7 @@ import {
 	editPost,
 	feed,
 	getPost,
+	originalPostId,
 	likedPosts,
 	postsByIds,
 	replies,
@@ -74,6 +75,28 @@ const SUSPENDED_USER = {
 	unavailable_header: richText("Account suspended"),
 	unavailable_message: richText("This account broke the rules of this instance and was suspended."),
 };
+
+const PARODY_LABELS = new Set(["None", "Parody", "Commentary", "Fan"]);
+// the client's confirm dialog says a change locks the label for 48 hours
+const PARODY_LOCK_MS = 48 * 3600_000;
+async function parodySettings(userId: string) {
+	const [u] = await sql`select parody_label, parody_label_at from users where id = ${userId}::bigint`;
+	const left = u?.parody_label_at ? new Date(u.parody_label_at).getTime() + PARODY_LOCK_MS - Date.now() : 0;
+	const locked = left > 0;
+	return {
+		disabled_duration_msec: locked ? left : 0,
+		is_label_update_disabled: locked,
+		parody_commentary_fan_label: u?.parody_label ?? "None",
+		update_disabled_reason: locked ? `You changed your label recently. You can change it again in ${Math.ceil(left / 3600_000)} hours.` : null,
+	};
+}
+async function setParodyLabel(userId: string, label: unknown) {
+	if (typeof label !== "string" || !PARODY_LABELS.has(label)) throw new PostError("Pick Parody, Commentary, Fan or None.", 214);
+	const now = await parodySettings(userId);
+	if (now.parody_commentary_fan_label === label) return;
+	if (now.is_label_update_disabled) throw new PostError(now.update_disabled_reason!, 214);
+	await sql`update users set parody_label = ${label}, parody_label_at = now() where id = ${userId}::bigint`;
+}
 
 function postId(vars: Vars, key = "tweet_id"): string {
 	const id = vars[key];
@@ -463,6 +486,16 @@ const handlers: Record<string, Handler> = {
 		};
 	},
 	// Settings > About your account: country or region on the About page, and the For you switch
+	// Settings > Your account > Profile label: parody, commentary or fan account
+	AccountParodyScreenImplV2ParodyLabelSettingQuery: async (v: Viewer) => ({ data: { get_parody_label_settings: await parodySettings(v.id) } }),
+	AccountParodyScreenImplV2ParodyLabelMutation: async (v: Viewer, vars: Vars) => {
+		await setParodyLabel(v.id, vars.parodyProfileLabel);
+		return { data: { update_parody_label: { __typename: "PCFLabelSettings", parody_commentary_fan_label: String(vars.parodyProfileLabel) } } };
+	},
+	AccountParodyUserMutation: async (v: Viewer, vars: Vars) => {
+		await setParodyLabel(v.id, vars.parodyProfileLabel);
+		return { data: { user_preferences_put: "Done" } };
+	},
 	UserPreferencesMutation: async (v: Viewer, vars: Vars) => {
 		const next: Record<string, unknown> = {};
 		if (vars.inferred_location_resolution_preference === "Country" || vars.inferred_location_resolution_preference === "Region" || vars.inferred_location_resolution_preference === "Unspecified")
@@ -553,9 +586,10 @@ const handlers: Record<string, Handler> = {
 		return { data: { tweet_bookmark_put: "Done" } };
 	},
 	DeleteBookmark: async (v, vars) => {
-		await setMark("bookmarks", v.id, postId(vars), false);
+		const id = await originalPostId(postId(vars));
+		await setMark("bookmarks", v.id, id, false);
 		// an unbookmarked post leaves the viewer's folders too
-		await sql`delete from bookmark_folder_posts where post_id = ${postId(vars)}::bigint and folder_id in (select id from bookmark_folders where user_id = ${v.id}::bigint)`;
+		await sql`delete from bookmark_folder_posts where post_id = ${id}::bigint and folder_id in (select id from bookmark_folders where user_id = ${v.id}::bigint)`;
 		return { data: { tweet_bookmark_delete: "Done" } };
 	},
 	CreateRetweet: async (v, vars) => {
@@ -563,7 +597,7 @@ const handlers: Record<string, Handler> = {
 		return { data: { create_retweet: { retweet_results: { result: { rest_id: id } } } } };
 	},
 	DeleteRetweet: async (v, vars) => {
-		const id = postId(vars, "source_tweet_id");
+		const id = await originalPostId(postId(vars, "source_tweet_id"));
 		await unrepost(v.id, id);
 		return { data: { unretweet: { source_tweet_results: { result: { rest_id: id } } } } };
 	},

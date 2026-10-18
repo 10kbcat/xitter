@@ -173,7 +173,18 @@ export async function editPost(userId: string, postId: string, text: string): Pr
 }
 
 export async function getPost(viewerId: string, id: string): Promise<PostRow | undefined> {
-	return (await postsByIds(viewerId, [id])).get(id);
+	const post = (await postsByIds(viewerId, [id])).get(id);
+	if (post) return post;
+	const original = await originalPostId(id);
+	return original === id ? undefined : (await postsByIds(viewerId, [original])).get(original);
+}
+
+// X's client acts on a repost by the repost's own id (like, bookmark, repost,
+// open); X takes it as the post that was reposted. Ids never collide: posts
+// and reposts draw from the same generator.
+export async function originalPostId(id: string): Promise<string> {
+	const [r] = await sql`select post_id::text from reposts where id = ${id}::bigint`;
+	return r?.post_id ?? id;
 }
 
 // One entry of a timeline: a post, or someone's repost of it. Reposts have
@@ -426,6 +437,7 @@ export async function pinnedReplyOf(postId: string): Promise<string | null> {
 type Mark = "likes" | "bookmarks";
 
 export async function setMark(table: Mark, userId: string, postId: string, on: boolean) {
+	postId = await originalPostId(postId);
 	// a deleted post, or one this account can't see (blocked, protected,
 	// hidden): X's "not found", not a database error
 	if (on && !(await getPost(userId, postId))) throw new PostError("No status found with that ID.", 144);
@@ -439,6 +451,7 @@ export async function setMark(table: Mark, userId: string, postId: string, on: b
 }
 
 export async function repost(userId: string, postId: string): Promise<string> {
+	postId = await originalPostId(postId);
 	// a protected account's posts can't be passed on
 	const [owner] = await sql`select u.protected, u.id::text as owner from posts p join users u on u.id = p.user_id where p.id = ${postId}::bigint`;
 	if (!owner || !(await getPost(userId, postId))) throw new PostError("No status found with that ID.", 144);
@@ -450,6 +463,7 @@ export async function repost(userId: string, postId: string): Promise<string> {
 }
 
 export async function unrepost(userId: string, postId: string) {
+	postId = await originalPostId(postId);
 	await sql`delete from reposts where user_id = ${userId}::bigint and post_id = ${postId}::bigint`;
 }
 

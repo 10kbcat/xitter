@@ -20,6 +20,8 @@ export function noteText(text: string) {
 }
 
 const DEFAULT_AVATAR = `${PUBLIC_ORIGIN}/abs/sticky/default_profile_images/default_profile_normal.png`;
+// an account's picture as a full URL, X's default one when it has none
+export const avatarUrl = (url: string | null | undefined) => absolute(url ?? null) ?? DEFAULT_AVATAR;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -151,7 +153,7 @@ export function userResult(u: User) {
 		location: { location: u.location },
 		media_permissions: { can_media_tag: true },
 		notifications_settings: { notifications_enabled: !!u.stats?.notifying },
-		parody_commentary_fan_label: "None",
+		parody_commentary_fan_label: u.parody_label ?? "None",
 		pinned_items: u.pinned_post_id ? { tweet_ids_str: [u.pinned_post_id] } : {},
 		possibly_sensitive: false,
 		privacy: { protected: !!u.protected },
@@ -233,7 +235,7 @@ export function legacyUser(u: User) {
 		muting: u.stats?.muting ?? false,
 		has_graduated_access: true,
 		created_at: u.created_at.toISOString(),
-		parody_commentary_fan_label: "None",
+		parody_commentary_fan_label: u.parody_label ?? "None",
 		can_dm: false,
 	};
 }
@@ -358,6 +360,10 @@ export function tweetResult(p: PostRow, withTypename = true): Record<string, unk
 		} } : {}),
 	};
 }
+
+// A notification's post (its preview line): the client reads only a plain
+// Tweet there, so a post with a notice or limited replies goes unwrapped.
+export const plainTweetResult = (p: PostRow) => plainTweet(p, true);
 
 // A label under a post, as X sends it (softInterventionPivot): its kind, the
 // text, and the link the text and its "Learn more" lead to (the instance's

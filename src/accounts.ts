@@ -13,6 +13,7 @@
 import { recordSignIn } from "./login-history";
 import { SECURE, type Viewer, clearedCookies, logout, parseCookies, sessionCookies } from "./auth";
 import { sql } from "./db";
+import { avatarUrl } from "./model";
 
 // X keeps five accounts at most
 const MAX = 5;
@@ -69,7 +70,7 @@ export async function accountsRoute(method: string, path: string, viewer: Viewer
 					user_id: s.userId,
 					name: u.name,
 					screen_name: u.screen_name,
-					avatar_image_url: u.avatar_url,
+					avatar_image_url: avatarUrl(u.avatar_url),
 					is_suspended: false,
 					is_verified: !!u.verified_type,
 					is_protected: false,

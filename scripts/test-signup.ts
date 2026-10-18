@@ -86,7 +86,7 @@ const setup = (o: Record<string, string>) => step("verify_signup", { session_tok
 s = await setup({ username: "settings" });
 check("reserved names are refused", /reserved/.test(s.errors.username ?? ""), s.errors);
 s = await setup({ username: "ab" });
-check("short names are refused", /4 to 15/.test(s.errors.username ?? ""), s.errors);
+check("short names are refused", /at least 4/.test(s.errors.username ?? ""), s.errors);
 s = await setup({ username: "POZO" });
 check("taken names are refused, whatever the case", /taken/.test(s.errors.username ?? ""), s.errors);
 s = await setup({ password: "short" });

@@ -188,6 +188,8 @@ create table if not exists reposts (
 	primary key (user_id, post_id)
 );
 create index if not exists reposts_post_idx on reposts (post_id);
+-- a repost's own id, which the client acts on (posts.ts originalPostId)
+create index if not exists reposts_id_idx on reposts (id);
 
 create table if not exists bookmarks (
 	user_id bigint not null references users (id) on delete cascade,
@@ -907,3 +909,10 @@ alter table users add column if not exists delegation_invites text not null defa
 	check (delegation_invites in ('Nobody', 'Everyone', 'OnlyFollowing'));
 -- X's automated account label: the account that runs this one
 alter table users add column if not exists automated_by bigint references users (id) on delete set null;
+
+-- X's parody, commentary and fan account label (Settings > Your account >
+-- Profile label), shown on the profile and the account's posts
+alter table users add column if not exists parody_label text not null default 'None'
+	check (parody_label in ('None', 'Parody', 'Commentary', 'Fan'));
+-- when it last changed: the client warns further changes wait 48 hours
+alter table users add column if not exists parody_label_at timestamptz;

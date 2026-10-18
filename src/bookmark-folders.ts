@@ -7,7 +7,7 @@ import { isId, newId } from "./ids";
 import { cursorEntry, tweetEntry } from "./model";
 import { PUBLIC_ORIGIN } from "./config";
 import { mediaUrl, posterUrl } from "./media";
-import { PostError, folderPosts, setMark } from "./posts";
+import { PostError, folderPosts, originalPostId, setMark } from "./posts";
 
 type Vars = Record<string, any>;
 const MAX_FOLDERS = 25;
@@ -72,16 +72,18 @@ export const bookmarkFolderHandlers = {
 	},
 	bookmarkTweetToFolder: async (v: Viewer, vars: Vars) => {
 		const f = await mine(v.id, folderId(vars));
-		const post = String(vars.tweet_id ?? "");
-		if (!isId(post)) throw new PostError("Invalid post id.", 144);
+		const raw = String(vars.tweet_id ?? "");
+		if (!isId(raw)) throw new PostError("Invalid post id.", 144);
+		const post = await originalPostId(raw);
 		await setMark("bookmarks", v.id, post, true);
 		await sql`insert into bookmark_folder_posts (folder_id, post_id) values (${f.id}::bigint, ${post}::bigint) on conflict do nothing`;
 		return { data: { bookmark_collection_tweet_put: "Done" } };
 	},
 	RemoveTweetFromBookmarkFolder: async (v: Viewer, vars: Vars) => {
 		const f = await mine(v.id, folderId(vars));
-		const post = String(vars.tweet_id ?? "");
-		if (!isId(post)) throw new PostError("Invalid post id.", 144);
+		const raw = String(vars.tweet_id ?? "");
+		if (!isId(raw)) throw new PostError("Invalid post id.", 144);
+		const post = await originalPostId(raw);
 		await sql`delete from bookmark_folder_posts where folder_id = ${f.id}::bigint and post_id = ${post}::bigint`;
 		return { data: { bookmark_collection_tweet_delete: "Done" } };
 	},

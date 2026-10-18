@@ -34,6 +34,8 @@ export type User = {
 	affiliates?: number;
 	// the screen name of the account that runs this one (X's automated label)
 	automated_by?: string | null;
+	// X's profile label: Parody, Commentary or Fan account (or None)
+	parody_label?: string;
 	// posts only for approved followers
 	protected?: boolean;
 	language?: string;
