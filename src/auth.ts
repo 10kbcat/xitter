@@ -32,6 +32,8 @@ export type User = {
 	org?: { id: string; name: string; screen_name: string; avatar_url: string | null; since?: string } | null;
 	// for organisations: how many affiliates they have
 	affiliates?: number;
+	// the screen name of the account that runs this one (X's automated label)
+	automated_by?: string | null;
 	// posts only for approved followers
 	protected?: boolean;
 	language?: string;
@@ -59,7 +61,13 @@ export type User = {
 	};
 };
 
-export type Viewer = User & { csrf: string; token: string; postSource?: string };
+export type Viewer = User & {
+	csrf: string;
+	token: string;
+	postSource?: string;
+	// set while a delegate acts as this account (delegation.ts): who they are
+	actor?: { id: string; screen_name: string; role: "Admin" | "Contributor" };
+};
 
 export const SECURE = PUBLIC_ORIGIN.startsWith("https:") ? "; Secure" : "";
 const YEAR = 60 * 60 * 24 * 365;
@@ -117,14 +125,21 @@ export function parseCookies(req: Request): Record<string, string> {
 
 import { countryFromHeader } from "./countries";
 
+const viewerCols = () => sql`u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.language, u.created_at,
+	u.preferences->>'discoverable_by_email' = 'true' as discoverable_by_email,
+	(select coalesce(json_agg(json_build_object('id', b.id::text, 'name', b.name) order by ub.position, b.name), '[]')
+		from user_badges ub join custom_badges b on b.id = ub.badge_id where ub.user_id = u.id) as badges`;
+
+// an account as a viewer without a session of its own (a delegate acting as it)
+export async function viewerById(id: string): Promise<Omit<Viewer, "csrf" | "token"> | undefined> {
+	const [row] = await sql`select ${viewerCols()} from users u where u.id = ${id}::bigint and u.status <> 'suspended'`;
+	return row as Viewer | undefined;
+}
+
 export async function getViewer(req: Request): Promise<Viewer | undefined> {
 	const token = parseCookies(req).auth_token;
 	if (!token) return undefined;
-	const [row] = await sql`
-		select u.id, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.language, u.created_at, s.csrf, s.token,
-		u.preferences->>'discoverable_by_email' = 'true' as discoverable_by_email,
-		(select coalesce(json_agg(json_build_object('id', b.id::text, 'name', b.name) order by ub.position, b.name), '[]')
-			from user_badges ub join custom_badges b on b.id = ub.badge_id where ub.user_id = u.id) as badges
+	const [row] = await sql`select ${viewerCols()}, s.csrf, s.token
 		from sessions s join users u on u.id = s.user_id
 		where s.token = ${token} and u.status <> 'suspended'`;
 	// for the admin panel's session list; written at most once a minute

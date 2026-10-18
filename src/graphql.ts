@@ -2,6 +2,8 @@
 // with every build; the name after it is stable.
 
 import { ChatError, chatHandlers } from "./chat";
+import { delegationHandlers } from "./delegation";
+import { automationHandlers } from "./automation";
 import { analyticsHandlers } from "./analytics";
 import { bookmarkFolderHandlers } from "./bookmark-folders";
 import { communityHandlers } from "./communities";
@@ -991,6 +993,25 @@ Object.assign(handlers, bookmarkFolderHandlers);
 Object.assign(handlers, scheduledHandlers);
 Object.assign(handlers, gifHandlers);
 Object.assign(handlers, analyticsHandlers);
+Object.assign(handlers, delegationHandlers);
+
+// The signed-in account. The page carries it already (shell.ts); the client
+// asks when it builds its view of an account a delegate switches into, and
+// checks the answer is that account (delegation.ts).
+Object.assign(handlers, {
+	Viewer: async (v: Viewer) => {
+		const u = await userById(v.id, v.id);
+		if (!u) throw new PostError("User not found.", 50);
+		return {
+			data: {
+				is_super_follow_subscriber: false,
+				viewer: { create_community_action_result: { __typename: "CommunityCreateAction" }, user_features: [], user_results: { result: userResult(u) } },
+			},
+		};
+	},
+	GetUserClaims: () => ({ data: { viewer_v2: { claims: [] } } }),
+} satisfies Record<string, Handler>);
+Object.assign(handlers, automationHandlers);
 
 export const knownOperation = (name: string) => name in handlers;
 

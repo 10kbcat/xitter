@@ -104,7 +104,24 @@ export function badgeList(u: User): Badge[] {
 	return out;
 }
 
+// X's one label slot: "Automated by @owner" for a bot, else the first badge.
+// A bot's badges then all go through the page script (badges.ts).
+export const labelTakesSlot = (u: User) => !!u.automated_by;
+
+function automatedLabel(owner: string) {
+	const text = `Automated by @${owner}`;
+	return {
+		label: {
+			description: "Automated",
+			// the mention links to the managing account
+			longDescription: { text, entities: [{ fromIndex: text.indexOf("@"), toIndex: text.length, ref: { type: "TimelineRichTextMention", screen_name: owner, mention_results: {} } }] },
+			userLabelType: "AutomatedLabel",
+		},
+	};
+}
+
 function badgeLabel(u: User) {
+	if (u.automated_by) return automatedLabel(u.automated_by);
 	const [first] = badgeList(u);
 	if (!first) return {};
 	return {

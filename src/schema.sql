@@ -885,3 +885,25 @@ alter table users add column if not exists count_overrides jsonb;
 -- Replies the author of a conversation's first post hid from it (X's "Hide
 -- reply"). They leave the conversation and show under "Hidden replies".
 alter table posts add column if not exists reply_hidden_at timestamptz;
+
+-- X's Delegate: an account (owner) shares itself with members, who then act as
+-- it from their own sign-in. Each account has one group, so the group's id is
+-- the owner's. An invite stays Pending until the member accepts it.
+create table if not exists delegation_members (
+	id bigint primary key,
+	owner_id bigint not null references users (id) on delete cascade,
+	member_id bigint not null references users (id) on delete cascade,
+	role text not null check (role in ('Admin', 'Contributor')),
+	status text not null default 'Pending' check (status in ('Pending', 'Accepted')),
+	invited_by bigint references users (id) on delete set null,
+	created_at timestamptz not null default now(),
+	unique (owner_id, member_id),
+	check (owner_id <> member_id)
+);
+create index if not exists delegation_members_member_idx on delegation_members (member_id);
+-- who may invite this account into theirs: Nobody, Everyone or OnlyFollowing
+-- (people it follows), as the client names them
+alter table users add column if not exists delegation_invites text not null default 'Nobody'
+	check (delegation_invites in ('Nobody', 'Everyone', 'OnlyFollowing'));
+-- X's automated account label: the account that runs this one
+alter table users add column if not exists automated_by bigint references users (id) on delete set null;

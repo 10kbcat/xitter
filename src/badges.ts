@@ -4,7 +4,7 @@
 // the client shows that badge: posts, profiles, account lists, hover cards.
 
 import { sql } from "./db";
-import { badgeList } from "./model";
+import { badgeList, labelTakesSlot } from "./model";
 import { toUser, userCols } from "./users";
 
 // GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold }, ... },
@@ -17,7 +17,7 @@ export async function extraBadges(viewerId: string, url: URL): Promise<Response>
 		const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")})`;
 		for (const r of rows) {
 			const u = toUser(r);
-			const badges = badgeList(u).slice(1).map(({ url, description }) => ({ url, description }));
+			const badges = badgeList(u).slice(labelTakesSlot(u) ? 0 : 1).map(({ url, description }) => ({ url, description }));
 			const gold = u.translator === "moderator";
 			if (badges.length || gold) out[u.screen_name.toLowerCase()] = { badges, gold };
 		}

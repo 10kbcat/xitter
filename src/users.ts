@@ -17,6 +17,7 @@ export const userCols = (viewerId: string) => sql`
 	(select json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', case when o.org_badge_id is not null then '/public/badge-' || o.org_badge_id::text || '.png' else o.avatar_url end, 'since', af.created_at)
 		from affiliations af join users o on o.id = af.org_id where af.user_id = u.id) as a_org,
 	(select count(*)::int from affiliations af where af.org_id = u.id) as a_affiliates,
+	(select m.screen_name from users m where m.id = u.automated_by) as a_automated_by,
 	(select count(distinct m.post_id)::int from media m join posts x on x.id = m.post_id where x.user_id = u.id) as a_media_posts,
 	(select count(*)::int from likes x where x.user_id = u.id) as a_likes,
 	(select count(*)::int from highlights x where x.user_id = u.id) as a_highlights,
@@ -52,6 +53,7 @@ export function toUser(r: any): User {
 		status: r.a_status,
 		org: r.a_org ?? null,
 		affiliates: r.a_affiliates,
+		automated_by: r.a_automated_by ?? null,
 		created_at: r.a_created_at,
 		stats: {
 			posts: r.a_posts,
