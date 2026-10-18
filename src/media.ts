@@ -126,12 +126,15 @@ function idFields(id: string) {
 // ffmpeg is missing or fails, the uncropped GIF is kept: avatars are drawn
 // center-cropped anyway.
 const CROP_NOTE = /xitter-crop:(\d+),(\d+),(\d+),(\d+)$/;
+// the header's canvas size, which every decoded frame takes in ffmpeg; anyone
+// can add the note, and a 15 MB GIF can claim 65535x65535
+const MAX_CROP_PIXELS = 2048 * 2048;
 
 async function croppedGif(id: string, data: Buffer, image: Image): Promise<{ data: Buffer; image: Image }> {
 	const note = CROP_NOTE.exec(data.toString("latin1", Math.max(0, data.length - 64)));
 	if (!note) return { data, image };
 	const gif = data.subarray(0, data.length - note[0].length);
-	if (image.width < 1 || image.height < 1) return { data: gif, image };
+	if (image.width < 1 || image.height < 1 || image.width * image.height > MAX_CROP_PIXELS) return { data: gif, image };
 	const [left, top, width, height] = note.slice(1).map(Number);
 	const x = Math.min(left, image.width - 1);
 	const y = Math.min(top, image.height - 1);
