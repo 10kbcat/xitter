@@ -916,3 +916,15 @@ alter table users add column if not exists parody_label text not null default 'N
 	check (parody_label in ('None', 'Parody', 'Commentary', 'Fan'));
 -- when it last changed: the client warns further changes wait 48 hours
 alter table users add column if not exists parody_label_at timestamptz;
+
+create table if not exists link_previews (
+	url text primary key,
+	ok boolean not null,
+	title text not null default '',
+	description text not null default '',
+	site text not null default '',
+	image text,
+	width int not null default 0,
+	height int not null default 0,
+	fetched_at timestamptz not null default now()
+);
