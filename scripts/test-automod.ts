@@ -188,6 +188,34 @@ try {
 	(await import("../src/held")).forgetHeld();
 	check((await usernameState(pName)) === "available", "and it can be taken again");
 
+	const sName = name("am_sus");
+	const sId = await createUser(sName, sName, password);
+	created.push(sId);
+	const fName = name("am_fol");
+	const fId = await createUser(fName, fName, password);
+	created.push(fId);
+	const author = await session(sName);
+	const fan = await session(fName);
+	await fan.form("/1.1/friendships/create.json", { user_id: sId });
+	await admin.form("/1.1/friendships/create.json", { user_id: sId });
+	const tag = `sustag${Date.now().toString(36)}`;
+	const sPost = (await tweet(author, `soon gone #${tag}`)).data.data.create_tweet.tweet_results.result.rest_id;
+	await fan.gql("CreateRetweet", { tweet_id: sPost });
+	const fanPost = (await tweet(fan, "my own post")).data.data.create_tweet.tweet_results.result.rest_id;
+	await author.gql("CreateTweet", { tweet_text: "a reply from soon gone", reply: { in_reply_to_tweet_id: fanPost } });
+	const homeOf = async (s: Awaited<ReturnType<typeof session>>) => JSON.stringify((await s.gql("HomeLatestTimeline", { count: 40 })).data);
+	check((await homeOf(fan)).includes("soon gone"), "a followed account's post is on the home timeline");
+	const { trendingHashtags } = await import("../src/search");
+	check((await trendingHashtags(1, 200)).some((t) => t.tag === `#${tag}`), "and its hashtag trends");
+	check((await admin.admin("setStatus", { id: sId, status: "suspended", reason: "test" })).status === 200, "staff suspend the followed account");
+	check(!(await homeOf(fan)).includes("soon gone"), "its posts and their reposts leave the follower's home timeline");
+	check(!(await homeOf(admin)).includes("soon gone"), "and staff's home timeline too");
+	check(!JSON.stringify((await fan.gql("UserTweets", { userId: fId, count: 40 })).data).includes("soon gone"), "the follower's repost of it leaves their profile");
+	check(!JSON.stringify((await fan.gql("TweetDetail", { focalTweetId: fanPost })).data).includes("a reply from soon gone"), "its replies leave threads");
+	check(!JSON.stringify((await fan.gql("SearchTimeline", { rawQuery: tag, product: "Latest", count: 20 })).data).includes("soon gone"), "and search");
+	check(!(await trendingHashtags(1, 200)).some((t) => t.tag === `#${tag}`), "and its hashtags stop trending");
+	check(JSON.stringify((await admin.gql("TweetDetail", { focalTweetId: sPost })).data).includes("soon gone"), "staff can still open the post itself");
+
 	const oldName = name("am_old");
 	const oldId = await createUser(oldName, oldName, password);
 	created.push(oldId);
