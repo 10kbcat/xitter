@@ -25,9 +25,17 @@ const {operations}=(await admin.admin('operations')).data;
 try{
 	check((await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD]})).status===200,'list saved');
 	await loadSettings();
-	check(normalizeName('Z0rb_l3-ffLAX')==='zorbleflax','normalised: case, digits, separators, repeats');
+	check(normalizeName('Z0rb_l3-ffLAX')==='z0rbl3fflax','normalised: case and separators');
 	check(blockedNameIn('xx_z0rbl3fl4x_xx')===WORD,'matched inside a longer name');
+	check(blockedNameIn('ZZZORB1EEEFLAX')===WORD,'repeats and 1 for l');
 	check(!blockedNameIn('harmless name'),'clean name passes');
+	await admin.admin('saveOperations',{...operations,blocked_names:[WORD,'nigger','kkk']});
+	await loadSettings();
+	check(blockedNameIn('N_1-GGG3rr')==='nigger','digits, separators and repeats');
+	check(!blockedNameIn('Nigeria')&&!blockedNameIn('Niger Delta'),'a doubled letter needs two: Nigeria passes');
+	check(blockedNameIn('kkkk')==='kkk'&&!blockedNameIn('kick'),'kkk needs three ks, a single k passes');
+	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD]});
+	await loadSettings();
 	const signup=async(screenName:string,name:string)=>{try{await checkSignup({screenName,name,password:'longenough1',email:'n@example.com'} as any);return 'ok';}catch(e){return e instanceof SignupError?e.message:String(e);}};
 	check((await signup('z0rbleflax','fine')).includes("isn't allowed"),'sign-up refused for a blocked handle');
 	check((await signup('cleanhandle','Mr Zorbleflax')).includes("isn't allowed"),'sign-up refused for a blocked display name');

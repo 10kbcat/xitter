@@ -1,31 +1,44 @@
 // Blocked names (admin panel > Settings): words no handle or display name may
 // contain. Sign-up with one is refused; an account that renames itself to one
 // is suspended on the spot. Matching ignores case, accents, separators,
-// look-alike digits and symbols, and repeated letters, so "N_1-gg3rr" matches
-// "nigger".
+// look-alike digits and symbols, and extra repeats, so "N_1-gggg3rr" matches
+// "nigger". A doubled letter in the word still needs two in the name, or
+// "nigger" would block "Nigeria".
 
 import { sql } from "./db";
 import { newId } from "./ids";
 import { settings } from "./settings";
 
-const LOOKALIKE: Record<string, string> = { "0": "o", "1": "i", "!": "i", "|": "i", "3": "e", "4": "a", "@": "a", "5": "s", "$": "s", "7": "t", "8": "b", "9": "g", "6": "g", "+": "t" };
+// what else can stand for a letter; "1" is both i and l
+const LOOKALIKE: Record<string, string> = { a: "4@", b: "8", e: "3", g: "96", i: "1!|", l: "1|", o: "0", s: "5$", t: "7+", z: "2" };
 
+// lowercase letters plus the look-alike digits and symbols; repeats are kept
 export function normalizeName(text: string): string {
 	return text
 		.normalize("NFKD")
 		.replace(/\p{M}/gu, "")
 		.toLowerCase()
-		.replace(/[0-9!|@$+]/g, (c) => LOOKALIKE[c] ?? c)
-		.replace(/[^\p{L}]/gu, "")
-		.replace(/(\p{L})\1+/gu, "$1");
+		.replace(/[^\p{L}0-9!|@$+]/gu, "");
+}
+
+// "nigger" -> n+[i1!|]+[g96]{2,}[e3]+r+
+function wordPattern(word: string): RegExp {
+	const letters = word.replace(/[^\p{L}]/gu, "");
+	return new RegExp(letters.replace(/(\p{L})\1*/gu, (run, c) => {
+		const cls = LOOKALIKE[c] ? `[${c}${LOOKALIKE[c].replace(/[|$+]/g, "\\$&")}]` : c;
+		return run.length > 1 ? `${cls}{${run.length},}` : `${cls}+`;
+	}), "u");
 }
 
 // the first blocked word the text contains, if any
 export function blockedNameIn(...texts: string[]): string | undefined {
-	const words = settings().operations.blocked_names.map(normalizeName).filter(Boolean);
+	const words = settings().operations.blocked_names.filter((w) => /\p{L}/u.test(normalizeName(w)));
 	if (!words.length) return undefined;
 	const all = texts.map(normalizeName);
-	return words.find((w) => all.some((t) => t.includes(w)));
+	return words.find((w) => {
+		const re = wordPattern(normalizeName(w));
+		return all.some((t) => re.test(t));
+	});
 }
 
 // An account that took a blocked name: suspended and signed out everywhere,
