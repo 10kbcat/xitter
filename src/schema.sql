@@ -928,3 +928,4 @@ create table if not exists link_previews (
 	height int not null default 0,
 	fetched_at timestamptz not null default now()
 );
+create index if not exists login_events_ip_idx on login_events (ip, created_at desc);
