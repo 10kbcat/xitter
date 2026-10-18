@@ -485,6 +485,8 @@ export const toolActions: Record<string, Action> = {
 				blocked_names: lines(b.blocked_names ?? [], "name"),
 				hidden_trends: lines(b.hidden_trends, "trend", true),
 				promoted_trends: lines(b.promoted_trends, "trend", true),
+				trend_min_people: Math.max(1, Math.min(Math.trunc(Number(b.trend_min_people ?? settings().operations.trend_min_people)) || 1, 1000)),
+				trend_min_account_days: Math.max(0, Math.min(Math.trunc(Number(b.trend_min_account_days ?? settings().operations.trend_min_account_days)) || 0, 365)),
 				global_pin: pin,
 			});
 			await audit(a, "save_operations", null, { maintenance: b.maintenance, pin });

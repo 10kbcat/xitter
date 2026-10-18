@@ -72,6 +72,8 @@ const DEFAULTS = {
 		blocked_names: [] as string[],
 		hidden_trends: [] as string[],
 		promoted_trends: [] as string[],
+		trend_min_people: 3,
+		trend_min_account_days: 3,
 		global_pin: null as string | null,
 	},
 	automod: { enabled: true, strike_days: 365, ladder: [0, 24, 168, 720, -1] as number[] },

@@ -954,6 +954,9 @@ const RENDER = {
 			(admin ? '<button class="btn primary" id="saveAutomod">Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Trends</h2><div class="field"><label>Hidden hashtags, one per line</label><textarea id="hiddenTrends"' + dis + ">" + esc(o.hidden_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
 			'<div class="field"><label>Promoted hashtags, shown first</label><textarea id="promotedTrends"' + dis + ">" + esc(o.promoted_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
+			'<div class="row"><div class="field"><label>People needed before a hashtag trends</label><input id="trendPeople" type="number" min="1" max="1000" value="' + esc(String(o.trend_min_people ?? 3)) + '"' + dis + "></div>" +
+			'<div class="field"><label>Days an account must exist to count</label><input id="trendDays" type="number" min="0" max="365" value="' + esc(String(o.trend_min_account_days ?? 3)) + '"' + dis + "></div></div>" +
+			'<p class="dim small">Each person counts once per hashtag, and accounts that last signed in from the same address count as one person.</p>' +
 			(admin ? '<button class="btn primary" data-save-ops>Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Pinned post</h2><p class="dim small">Shown at the top of everyone\'s home timeline. Paste a post\'s link or id; empty unpins.</p>' +
 			'<div class="field"><input id="pin" value="' + esc(o.global_pin || "") + '" placeholder="https://…/status/123"' + dis + "></div>" +
@@ -1015,6 +1018,8 @@ const RENDER = {
 			blocked_names: listOf("#blockedNames"),
 			hidden_trends: listOf("#hiddenTrends"),
 			promoted_trends: listOf("#promotedTrends"),
+			trend_min_people: Number($("#trendPeople").value),
+			trend_min_account_days: Number($("#trendDays").value),
 			global_pin: ((v) => (/\/status\/(\d{1,19})/.exec(v) || [])[1] || v || null)($("#pin").value.trim()),
 		}), "Saved").then(route));
 		main.querySelectorAll("[data-slot]").forEach((input) => input.onchange = () => {
