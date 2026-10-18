@@ -178,10 +178,11 @@ export async function refuseHate(userId: string, text: string, where: Parameters
 }
 
 export async function editPost(userId: string, postId: string, text: string): Promise<void> {
+	// the length first: the checks below scan the whole text
+	await checkLength(userId, text);
 	await refuseHate(userId, text);
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	if (!text.trim()) throw new PostError("Your post is empty.", 170);
-	await checkLength(userId, text);
 	const [post] = await sql`select p.id::text, p.text, p.created_at, p.edit_count, p.edited_at, u.status,
 			exists (select 1 from users x where x.id = p.user_id and x.pinned_post_id = p.id) as pinned
 		from posts p join users u on u.id = p.user_id where p.id = ${postId}::bigint and p.user_id = ${userId}::bigint`;
@@ -408,9 +409,9 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string } = {}): Promise<string> {
 	const [author] = await sql`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
+	await checkLength(userId, text);
 	await refuseHate(userId, text);
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
-	await checkLength(userId, text);
 	const id = newId();
 	let conversationId = id;
 	let replyToUserId: string | null = null;
