@@ -398,8 +398,8 @@ const reactors = (kind: "reposts" | "likes", key: string): Handler => async (vie
 	if (!isId(vars.tweetId) || vars.cursor) return empty;
 	const rows =
 		kind === "reposts"
-			? await sql`select r.user_id::text as id from reposts r where r.post_id = ${vars.tweetId}::bigint and r.user_id not in ${blockedFor(viewer.id)} and r.user_id not in ${protectedFor(viewer.id)} order by r.created_at desc limit 100`
-			: await sql`select l.user_id::text as id from likes l where l.post_id = ${vars.tweetId}::bigint and l.user_id not in ${blockedFor(viewer.id)} and l.user_id not in ${protectedFor(viewer.id)} order by l.created_at desc limit 100`;
+			? await sql`select r.user_id::text as id from reposts r where r.post_id = ${vars.tweetId}::bigint and r.user_id not in ${blockedFor(viewer.id)} and r.user_id not in ${protectedFor(viewer.id)} and r.user_id not in ${outOfView(viewer.id)} order by r.created_at desc limit 100`
+			: await sql`select l.user_id::text as id from likes l where l.post_id = ${vars.tweetId}::bigint and l.user_id not in ${blockedFor(viewer.id)} and l.user_id not in ${protectedFor(viewer.id)} and l.user_id not in ${outOfView(viewer.id)} order by l.created_at desc limit 100`;
 	const users = await usersByIds(viewer.id, rows.map((r: any) => r.id));
 	const base = BigInt(newId());
 	const entries = rows.flatMap((r: any, i: number) => (users.has(r.id) ? [userEntry(users.get(r.id)!, (base - BigInt(i) - 1n).toString())] : []));
@@ -903,7 +903,7 @@ async function search(viewer: Viewer, vars: Vars) {
 	let next: string | undefined;
 
 	if (product === "People") {
-		const ids = await searchUsers(query, count, offset);
+		const ids = await searchUsers(viewer.id, query, count, offset);
 		const users = await usersByIds(viewer.id, ids);
 		ids.forEach((id, i) => users.get(id) && entries.push(userEntry(users.get(id)!, sort(i))));
 		if (ids.length === count) next = `o${offset + count}`;
@@ -922,7 +922,7 @@ async function search(viewer: Viewer, vars: Vars) {
 	} else if (product === "Latest" || product === "Top") {
 		const top = product === "Top";
 		if (top && !offset && !/(^|\s)-?\w+:/.test(query)) {
-			const userIds = await searchUsers(query, 3);
+			const userIds = await searchUsers(viewer.id, query, 3);
 			const users = await usersByIds(viewer.id, userIds);
 			const items = userIds.map((id) => users.get(id)).filter((u) => !!u);
 			if (items.length)

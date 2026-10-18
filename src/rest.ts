@@ -349,7 +349,7 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	// suggestions under the search box: accounts, and hashtags when one is being typed
 	if (path === "/1.1/search/typeahead.json") {
 		const q = (new URL(req.url).searchParams.get("q") ?? "").trim().slice(0, 100);
-		const users = q && !q.startsWith("#") ? await usersByIds(viewer.id, await searchUsers(q, 8)) : new Map();
+		const users = q && !q.startsWith("#") ? await usersByIds(viewer.id, await searchUsers(viewer.id, q, 8)) : new Map();
 		const tags = q.startsWith("#") ? await hashtagsLike(q, 8) : [];
 		return Response.json({
 			num_results: users.size + tags.length,

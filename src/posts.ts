@@ -16,6 +16,9 @@ export const MAX_POST_LENGTH = 280;
 export const MENTION = /(?<![\w@])@(\w{1,15})/g;
 const NO_LIMIT = "9223372036854775807";
 
+// accounts whose likes, reposts and replies no longer count for anyone
+const SUSPENDED = sql`(select id from users where status = 'suspended')`;
+
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
 	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id, p.edit_count, p.edited_at, p.reply_policy,
@@ -29,11 +32,11 @@ const select = (viewerId: string) => sql`
 		ru.id as reply_user_id, ru.screen_name as reply_screen_name,
 		${userCols(viewerId)},
 		-- staff can set the shown counts (admin panel); the lists behind them stay real
-		coalesce((p.count_overrides->>'likes')::int, (select count(*)::int from likes x where x.post_id = p.id)) as like_count,
-		coalesce((p.count_overrides->>'reposts')::int, (select count(*)::int from reposts x where x.post_id = p.id)) as repost_count,
+		coalesce((p.count_overrides->>'likes')::int, (select count(*)::int from likes x where x.post_id = p.id and x.user_id not in ${SUSPENDED})) as like_count,
+		coalesce((p.count_overrides->>'reposts')::int, (select count(*)::int from reposts x where x.post_id = p.id and x.user_id not in ${SUSPENDED})) as repost_count,
 		coalesce((p.count_overrides->>'bookmarks')::int, (select count(*)::int from bookmarks x where x.post_id = p.id)) as bookmark_count,
-		coalesce((p.count_overrides->>'replies')::int, (select count(*)::int from posts x where x.reply_to_id = p.id)) as reply_count,
-		coalesce((p.count_overrides->>'quotes')::int, (select count(*)::int from posts x where x.quote_id = p.id)) as quote_count,
+		coalesce((p.count_overrides->>'replies')::int, (select count(*)::int from posts x where x.reply_to_id = p.id and x.user_id not in ${SUSPENDED})) as reply_count,
+		coalesce((p.count_overrides->>'quotes')::int, (select count(*)::int from posts x where x.quote_id = p.id and x.user_id not in ${SUSPENDED})) as quote_count,
 		coalesce((p.count_overrides->>'views')::int, (select count(*)::int from post_views x where x.post_id = p.id)) as view_count,
 		p.notice,
 		exists (select 1 from likes x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as liked,
@@ -41,7 +44,7 @@ const select = (viewerId: string) => sql`
 		exists (select 1 from bookmarks x where x.post_id = p.id and x.user_id = ${viewerId}::bigint) as bookmarked
 	from posts p
 	join users u on u.id = p.user_id and (not p.hidden or exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null))
-		and u.id not in ${protectedFor(viewerId)}
+		and u.id not in ${protectedFor(viewerId)} and u.id not in ${suspendedFor(viewerId)}
 	left join posts rp on rp.id = p.reply_to_id
 	left join users ru on ru.id = rp.user_id`;
 

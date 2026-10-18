@@ -143,9 +143,9 @@ export async function followList(viewerId: string, userId: string, kind: "follow
 	const rows =
 		kind === "following"
 			? await sql`select ${userCols(viewerId)} from follows f join users u on u.id = f.followee_id
-				where f.follower_id = ${userId}::bigint order by f.created_at desc limit ${limit}`
+				where f.follower_id = ${userId}::bigint and u.id not in ${outOfView(viewerId)} order by f.created_at desc limit ${limit}`
 			: await sql`select ${userCols(viewerId)} from follows f join users u on u.id = f.follower_id
-				where f.followee_id = ${userId}::bigint order by f.created_at desc limit ${limit}`;
+				where f.followee_id = ${userId}::bigint and u.id not in ${outOfView(viewerId)} order by f.created_at desc limit ${limit}`;
 	return rows.map(toUser);
 }
 

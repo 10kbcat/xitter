@@ -230,7 +230,7 @@ const ROUTES: Route[] = [
 		run: async (v, _m, _r, url) => {
 			const q = (url.searchParams.get("q") ?? "").trim();
 			if (!q) throw new ApiError(400, "Give a query in q.");
-			const ids = await searchUsers(q, limitOf(url));
+			const ids = await searchUsers(v.id, q, limitOf(url));
 			const byId = await usersByIds(v.id, ids);
 			return { data: (ids as string[]).map((id) => byId.get(id)).filter((x): x is User => !!x).map(userJson) };
 		},

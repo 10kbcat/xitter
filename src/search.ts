@@ -99,7 +99,9 @@ export async function searchPosts(
 	if (!cond) return [];
 	const media = opts.media ? sql`and exists (select 1 from media fm where fm.post_id = p.id)` : sql``;
 	// "Visibility limited" posts (staff's Fosnr label) don't come up in search
-	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)} and p.user_id not in ${outOfView(opts.viewerId)} and p.notice->>'type' is distinct from 'Fosnr'`;
+	// suspended accounts' posts stay out of search for staff too
+	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)} and p.user_id not in ${outOfView(opts.viewerId)}
+		and p.user_id not in (select id from users where status = 'suspended') and p.notice->>'type' is distinct from 'Fosnr'`;
 	if (opts.top) {
 		const rows = await sql`select p.id from posts p where ${cond} ${media} ${hidden}
 			order by ((select count(*) from likes x where x.post_id = p.id) + 2 * (select count(*) from reposts x where x.post_id = p.id)
@@ -113,7 +115,9 @@ export async function searchPosts(
 }
 
 // accounts by handle, name or bio; handle matches first
-export async function searchUsers(query: string, limit: number, offset = 0) {
+// Suspended accounts stay out of search for everyone, staff included (they
+// have the admin panel); limited ones and blocks follow the usual rules.
+export async function searchUsers(viewerId: string, query: string, limit: number, offset = 0) {
 	const words = tokens(query.replace(/^@/, "").trim())
 		.filter((t) => !t.startsWith("-") && !t.includes(":"))
 		.map((t) => t.replace(/^"|"$/g, "").replace(/^@/, ""));
@@ -122,6 +126,7 @@ export async function searchUsers(query: string, limit: number, offset = 0) {
 	const cond = each.reduce((acc, c) => sql`${acc} and ${c}`);
 	const first = words[0];
 	const rows = await sql`select u.id from users u where ${cond}
+			and u.status <> 'suspended' and u.id not in ${outOfView(viewerId)} and u.id not in ${blockedFor(viewerId)}
 		order by (lower(u.screen_name) = lower(${first})) desc, (u.screen_name ilike ${`${first.replace(/[\\%_]/g, "")}%`}) desc,
 			(select count(*) from follows f where f.followee_id = u.id) desc, u.id
 		limit ${limit} offset ${offset}`;
