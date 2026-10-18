@@ -29,6 +29,8 @@ create table if not exists posts (
 	created_at timestamptz not null default now()
 );
 create index if not exists posts_reply_to_idx on posts (reply_to_id);
+alter table posts drop constraint if exists posts_reply_to_id_fkey;
+alter table posts add column if not exists reply_to_user_id bigint;
 create index if not exists posts_user_idx on posts (user_id, id desc);
 
 create table if not exists custom_badges (
@@ -962,3 +964,6 @@ create table if not exists account_labels (
 	created_at timestamptz not null default now()
 );
 alter table users add column if not exists label_id bigint references account_labels(id) on delete set null;
+
+update posts p set reply_to_user_id = r.user_id from posts r where r.id = p.reply_to_id and p.reply_to_user_id is null;
+update posts set reply_to_id = conversation_id where reply_to_id is null and conversation_id <> id;
