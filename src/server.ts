@@ -12,7 +12,7 @@ import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
 import { cachedPatch, patchFile, patchText } from "./patch";
 import { clientError, recordError } from "./errors";
-import { staffGate } from "./staff-access";
+import { asRequest, markStaff, staffGate } from "./staff-access";
 import { backupPath, startBackups } from "./backups";
 import { memberInvitesRoute } from "./member-invites";
 import { orgRoute } from "./org-manage";
@@ -256,7 +256,7 @@ await resumeVideos(MEDIA_DIR);
 // the request; caught here it is logged with its path and account
 async function handle(req: Request): Promise<Response | undefined> {
 	try {
-		return await route(req);
+		return await asRequest(() => route(req));
 	} catch (e) {
 		const viewer = await getViewer(req).catch(() => undefined);
 		await recordError("server", e, { path: `${req.method} ${new URL(req.url).pathname}`, userId: viewer?.id });
@@ -337,6 +337,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/manifest.json") return new Response(null, { status: 404 });
 
 	const viewer = await getViewer(req);
+	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();
 	// a suspended account can't sign in, so it appeals here with its password
 	if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
 	// maintenance: staff carry on, everyone else signed in waits

@@ -1,5 +1,6 @@
 import type { User } from "./auth";
 import { blockedFor, isBlockedEitherWay, mutedFor, outOfView } from "./blocks";
+import { staffViewer } from "./staff-access";
 import { sql } from "./db";
 
 // an account's custom badges in order, as a json list of { id, name }
@@ -140,7 +141,7 @@ export async function followList(viewerId: string, userId: string, kind: "follow
 	if (userId !== viewerId) {
 		const [hidden] = await sql`select 1 from users u where u.id = ${userId}::bigint and u.protected
 			and not exists (select 1 from follows f where f.follower_id = ${viewerId}::bigint and f.followee_id = u.id)
-			and not exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null)`;
+			and not ${staffViewer(viewerId)}`;
 		if (hidden) return [];
 	}
 	const rows =
