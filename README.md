@@ -157,6 +157,8 @@ scripts/fetch-client.ts --latest` re-pins the build.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgres://dev@localhost:5432/xitter` | Postgres connection |
+| `DB_POOL_MAX` | `20` | Postgres connections the server keeps open |
+| `DB_STATEMENT_TIMEOUT`, `DB_LOCK_TIMEOUT` | `30s`, `10s` | A query running or waiting on a lock longer than this is cancelled, so one stuck query can't hold every connection (the migration at start-up has no limit) |
 | `PORT` | `3000` | Listen port |
 | `PUBLIC_ORIGIN` | `http://localhost:$PORT` | Address browsers use to reach the instance |
 | `CLIENT_DIR` | `client` | Where the pinned client is stored |
