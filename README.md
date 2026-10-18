@@ -261,14 +261,16 @@ It reads through look-alike letters from other alphabets, Unicode styles,
 leetspeak, invisible characters, accents, repeated letters, letters spelled
 out one by one and reversed or upside-down text. Reclaimed queer words pass
 unless the text attacks someone, and NSFW text isn't touched. DMs are end-to-end
-encrypted, so the server can't read them. Each refusal is an appealable
-strike, and strikes, from staff or automatic, follow a ladder set in
-Settings > Automod (by default a warning, a day, a week, 30 days, then
-permanent). `bun test ./scripts/test-hate.ts` checks evasions and false
+encrypted, so the server can't read them. The first refusals each week (5 by
+default) are second chances: the content isn't published, and the person gets a
+notice and a modal saying what was caught and how many chances are left. After
+that each refusal is an appealable strike, and strikes, from staff or
+automatic, follow a ladder set in Settings > Automod (by default a warning, a
+day, a week, 30 days, then permanent). `bun test ./scripts/test-hate.ts` checks evasions and false
 positives without a server; `bun scripts/test-automod.ts` checks the ladder,
 expiry, write paths and request limits against one.
 
-- `GET /_debug/unknown` lists the client calls no handler answers yet, most
+- `GET /_debug/unknown` (admins only) lists the client calls no handler answers yet, most
   frequent first. Start there when a screen is empty.
 - `scripts/test-*.ts` check each feature end to end against a running server,
   for example `bun scripts/test-posts.ts <user A> <user B> <password>`. Each

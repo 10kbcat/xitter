@@ -173,7 +173,7 @@ export async function refuseHate(userId: string, text: string, where: Parameters
 	const hit = hateIn(text);
 	if (!hit) return;
 	await automodStrike(userId, hit, where, text);
-	throw new PostError("Your post contains a slur or hate speech this instance doesn't allow.", 186);
+	throw new PostError("Your post wasn't published: it contains a slur or hate speech this instance doesn't allow.", 186);
 }
 
 export async function editPost(userId: string, postId: string, text: string): Promise<void> {

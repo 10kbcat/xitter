@@ -76,7 +76,7 @@ const DEFAULTS = {
 		trend_min_account_days: 3,
 		global_pin: null as string | null,
 	},
-	automod: { enabled: true, strike_days: 365, ladder: [0, 24, 168, 720, -1] as number[] },
+	automod: { enabled: true, strike_days: 365, ladder: [0, 24, 168, 720, -1] as number[], second_chances: 5 },
 	// the admin panel itself (admin.ts staffGate): staff must have two-factor on;
 	// only these addresses (IPs or CIDR ranges) reach it, none meaning any
 	security: { staff_2fa: false, admin_ips: [] as string[] },

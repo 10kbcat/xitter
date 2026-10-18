@@ -467,8 +467,10 @@ export const toolActions: Record<string, Action> = {
 			if (!Array.isArray(b.ladder) || !b.ladder.length || b.ladder.length > 10) throw new AdminError("Give 1–10 steps.");
 			const ladder = b.ladder.map(Number);
 			if (ladder.some((h: number) => !Number.isInteger(h) || h < -1 || h > 87_600)) throw new AdminError("Each step is 0 (a warning), hours of suspension, or -1 (permanent).");
-			await setSetting("automod", { enabled: b.enabled, strike_days: days, ladder });
-			await audit(a, "save_automod", null, { enabled: b.enabled, strike_days: days, ladder });
+			const chances = Number(b.second_chances ?? settings().automod.second_chances);
+			if (!Number.isInteger(chances) || chances < 0 || chances > 100) throw new AdminError("Second chances are 0–100 a week.");
+			await setSetting("automod", { enabled: b.enabled, strike_days: days, ladder, second_chances: chances });
+			await audit(a, "save_automod", null, { enabled: b.enabled, strike_days: days, ladder, second_chances: chances });
 			return {};
 		},
 	},

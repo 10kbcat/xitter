@@ -951,6 +951,7 @@ const RENDER = {
 			'<label class="row" style="margin:6px 0"><input type="checkbox" id="amOn"' + (am.enabled ? " checked" : "") + dis + "> Strike accounts automatically</label>" +
 			'<div class="field"><label>Strikes count for (days)</label><input id="amDays" type="number" min="1" max="3650" value="' + esc(am.strike_days) + '"' + dis + "></div>" +
 			'<div class="field"><label>Steps, one per strike: 0 is a warning, a number is hours suspended, -1 is permanent</label><input id="amLadder" value="' + esc(am.ladder.join(", ")) + '"' + dis + "></div>" +
+			'<div class="field"><label>Second chances a week: refused content that doesn\'t count as a strike, 0 for none</label><input id="amChances" type="number" min="0" max="100" value="' + esc(am.second_chances ?? 5) + '"' + dis + "></div>" +
 			(admin ? '<button class="btn primary" id="saveAutomod">Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Trends</h2><div class="field"><label>Hidden hashtags, one per line</label><textarea id="hiddenTrends"' + dis + ">" + esc(o.hidden_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
 			'<div class="field"><label>Promoted hashtags, shown first</label><textarea id="promotedTrends"' + dis + ">" + esc(o.promoted_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
@@ -1010,7 +1011,7 @@ const RENDER = {
 				act(() => api("blockedNameAccounts", { suspend: true }), "Suspended").then(route);
 			};
 		});
-		if ($("#saveAutomod")) $("#saveAutomod").onclick = () => act(() => api("saveAutomod", { enabled: $("#amOn").checked, strike_days: Number($("#amDays").value), ladder: $("#amLadder").value.split(",").map((x) => Number(x.trim())) }), "Automod saved").then(route);
+		if ($("#saveAutomod")) $("#saveAutomod").onclick = () => act(() => api("saveAutomod", { enabled: $("#amOn").checked, strike_days: Number($("#amDays").value), ladder: $("#amLadder").value.split(",").map((x) => Number(x.trim())), second_chances: Number($("#amChances").value) }), "Automod saved").then(route);
 		main.querySelectorAll("[data-save-ops]").forEach((b) => b.onclick = () => act(() => api("saveOperations", {
 			maintenance: $("#maint").checked,
 			message: $("#maintMsg").value,
@@ -1083,7 +1084,7 @@ const RENDER = {
 	async audit(main, filter = {}) {
 		const { entries } = await api("audit", filter);
 		main.innerHTML = '<h1>Audit log</h1><div class="bar"><input id="auditWho" placeholder="@handle" value="' + esc(filter.target || "") + '">' +
-			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "resolve_appeal", "save_automod"]
+			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "resolve_appeal", "save_automod"]
 				.map((a) => '<option value="' + a + '"' + (filter.action === a ? " selected" : "") + ">" + a.replace(/_/g, " ") + "</option>").join("") + "</select>" +
 			'<label class="row"><input type="checkbox" id="auditAuto"' + (filter.automatic ? " checked" : "") + '> Automatic only</label><button class="btn" id="auditGo">Filter</button></div><div class="scroll">' + (entries.length
 			? '<table class="table"><tr><th>When</th><th>Who</th><th>Did</th><th>To</th><th>Details</th></tr>' +
