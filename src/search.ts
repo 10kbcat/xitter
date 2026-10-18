@@ -90,6 +90,8 @@ export function postCondition(query: string, viewerId: string): Clause | undefin
 	return parts.length ? parts.reduce((acc, c) => sql`${acc} and ${c}`) : undefined;
 }
 
+const TOP_POOL = 5000;
+
 // post ids for a query: Latest is newest first, Top by likes and reposts first
 export async function searchPosts(
 	query: string,
@@ -103,7 +105,7 @@ export async function searchPosts(
 	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)} and p.user_id not in ${outOfView(opts.viewerId)}
 		and p.user_id not in (select id from users where status = 'suspended') and p.notice->>'type' is distinct from 'Fosnr'`;
 	if (opts.top) {
-		const rows = await sql`select p.id from posts p where ${cond} ${media} ${hidden}
+		const rows = await sql`select p.id from (select p.id from posts p where ${cond} ${media} ${hidden} order by p.id desc limit ${TOP_POOL}) p
 			order by ((select count(*) from likes x where x.post_id = p.id) + 2 * (select count(*) from reposts x where x.post_id = p.id)
 				+ (select count(*) from posts x where x.reply_to_id = p.id)) desc, p.id desc
 			limit ${opts.limit} offset ${opts.offset ?? 0}`;

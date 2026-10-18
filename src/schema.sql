@@ -247,6 +247,7 @@ create or replace view feed_items as
 	union all
 	select r.id, r.post_id, r.user_id, r.user_id, false, r.created_at
 	from reposts r;
+create index if not exists posts_top_level_idx on posts (id) where reply_to_id is null;
 
 -- videos: converted after upload; 'processing' until ffmpeg is done
 alter table media add column if not exists duration_ms integer;
