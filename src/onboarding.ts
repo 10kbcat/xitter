@@ -226,7 +226,8 @@ function fieldError(field: string, text: string): Message[] {
 // the code, normalised, if it can still be used
 async function validCode(raw: string): Promise<string | undefined> {
 	const code = normalizeCode(raw);
-	const [ok] = await sql`select 1 from invites where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now())`;
+	const [ok] = await sql`select 1 from invites where code = ${code} and not revoked and uses < max_uses and (expires_at is null or expires_at > now())
+		and not exists (select 1 from users c where c.id = invites.created_by and c.status = 'suspended' and c.deactivated_at is null)`;
 	return ok ? code : undefined;
 }
 
