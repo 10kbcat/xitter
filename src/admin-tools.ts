@@ -223,12 +223,16 @@ export const toolActions: Record<string, Action> = {
 		role: "moderator",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			const [ap] = await sql`select user_id::text from moderation_appeals where id = ${id}::bigint and status = 'open'`;
+			const [ap] = await sql`select user_id::text, message_id::text from moderation_appeals where id = ${id}::bigint and status = 'open'`;
 			if (!ap) throw new AdminError("No such open appeal.", 404);
 			await guard(a, ap.user_id);
 			if (!["accepted", "rejected"].includes(b.status)) throw new AdminError("Choose an outcome.");
 			await sql`update moderation_appeals set status = ${b.status}, staff_reply = ${textOf(b.reply)}, reviewer_id = ${a.id}::bigint, resolved_at = now() where id = ${id}::bigint`;
 			await audit(a, "resolve_appeal", ap.user_id, { appeal: id, status: b.status });
+			if (b.status === "accepted" && ap.message_id) {
+				const revoked = await sql`update staff_messages set revoked_at = now() where id = ${ap.message_id}::bigint and kind = 'strike' and revoked_at is null returning id`;
+				if (revoked.length) await audit(a, "revoke_strike", ap.user_id, { message: ap.message_id, appeal: id });
+			}
 			return {};
 		},
 	},
