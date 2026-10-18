@@ -256,8 +256,13 @@ async function route(req: Request): Promise<Response | undefined> {
 	// X's sign-in screens (jf.x.com), answered here
 	// inside the signed-in client the same screens come through /i/jfapi
 	if (p.startsWith("/onboarding/web") || p.startsWith("/i/jfapi/onboarding/web")) {
+		// only the steps that try something count as tries; the screens also post
+		// on every keystroke (is this name free?), which would use them up while
+		// one person types
 		if (req.method === "POST") {
-			const h = hit("auth", requestIp(req) ?? "unknown");
+			const ip = requestIp(req) ?? "unknown";
+			const step = p.replace(/^\/i\/jfapi/, "");
+			const h = step.startsWith("/onboarding/web/actions/") ? hit("auth", ip) : hit("endpoint", `${ip}:${step.replace(/\d+/g, "#")}`);
 			if (!h.ok) return limitedResponse(h);
 		}
 		const screen = await onboarding(req, p.replace(/^\/i\/jfapi/, ""));

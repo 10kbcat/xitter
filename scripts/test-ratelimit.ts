@@ -52,6 +52,27 @@ check(write.status === 200, "background event logging doesn't use up the write l
 const like = await gql("FavoriteTweet", { tweet_id: made[0] });
 check(like.status === 200, "a like still goes through", like.status);
 
+// one endpoint used up leaves the others working
+const stuck = (op: string) => fetch(`${origin}/i/api/graphql/q/${op}?variables=%7B%7D`, { headers });
+let stuckStatus = 0;
+for (let i = 0; i <= RULES.endpoint.limit; i++) stuckStatus = (await stuck("DataSaverMode")).status;
+check(stuckStatus === 429, "one endpoint asked for past its limit gets 429", stuckStatus);
+const other = await stuck("ViewerBadgeCounts");
+check(other.status === 200, "another endpoint still answers", other.status);
+
+// the right password doesn't use up the account's tries
+const enterPassword = (user: string, pass: string) =>
+	fetch(`${origin}/onboarding/web/actions/login_enter_password`, { method: "POST", body: new URLSearchParams({ username: user, password: pass }) }).then(async (res) => new TextDecoder("latin1").decode(await res.arrayBuffer()));
+let signedIn = "";
+for (let i = 0; i <= RULES.password.limit; i++) signedIn = await enterPassword(username, password);
+check(!signedIn.includes("Too many tries") && !signedIn.includes("Wrong username"), "signing in more often than the limit still works");
+
+// the name check while typing doesn't use up the address's sign-in tries
+for (let i = 0; i <= RULES.auth.limit; i++)
+	await fetch(`${origin}/onboarding/web/remotes/suggest_username?form_atom_id=x`, { method: "POST", body: new URLSearchParams({ username: `typing${i}`, name: "" }) });
+const begin = await fetch(`${origin}/onboarding/web/actions/begin_login`, { method: "POST", body: new URLSearchParams({ username_or_email: username }) });
+check(begin.status === 200, "typing doesn't count as sign-in tries", begin.status);
+
 // password tries count per account, also for names that don't exist
 const name = `nobody_${Date.now() % 1e6}`;
 let lastText = "";

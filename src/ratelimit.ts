@@ -18,8 +18,13 @@ type Rule = { limit: number; window: number };
 // The per-account buckets take their limit from settings (Admin > Settings),
 // so `limit` there is only the fallback.
 export const RULES = {
-	// any API call; a page load makes about 30
+	// any API call but the client's background posts. A page load makes about
+	// 30, clicking through a page every two seconds about 100 a minute.
 	read: { limit: 6000, window: 15 * MIN },
+	// calls to one endpoint (a GraphQL operation or a REST path), background
+	// posts included, as X limits them: a client stuck re-asking for one thing
+	// loses only that, not the whole site
+	endpoint: { limit: 1000, window: 15 * MIN },
 	// any write not covered below
 	write: { limit: 1500, window: 15 * MIN },
 	post: { limit: 150, window: 15 * MIN },
@@ -38,7 +43,8 @@ export const RULES = {
 
 export type Bucket = keyof typeof RULES;
 
-type Window = { count: number; reset: number };
+// noted: the refusal was logged, once per window
+type Window = { count: number; reset: number; noted?: boolean };
 const windows = new Map<string, Window>();
 
 setInterval(() => {
@@ -48,27 +54,54 @@ setInterval(() => {
 
 export type Hit = { ok: boolean; limit: number; remaining: number; reset: number };
 
-// counts one request against `bucket` for `who` (an account id or an address)
-export function hit(bucket: Bucket, who: string): Hit {
-	const { window } = RULES[bucket];
+export function limitOf(bucket: Bucket): number {
 	const set = (settings().rate_limits as Record<string, number>)[bucket];
-	const limit = Number.isInteger(set) && set > 0 ? set : RULES[bucket].limit;
-	if (OFF) return { ok: true, limit, remaining: limit, reset: Date.now() + window };
+	return Number.isInteger(set) && set > 0 ? set : RULES[bucket].limit;
+}
+
+function current(bucket: Bucket, who: string, now: number): Window {
 	const key = `${bucket}:${who}`;
-	const now = Date.now();
 	let w = windows.get(key);
-	if (!w || w.reset <= now) windows.set(key, (w = { count: 0, reset: now + window }));
-	// a refused request isn't counted: a client retrying while limited would
-	// otherwise keep its window full for good
-	if (w.count >= limit) {
-		if (w.count === limit) {
-			w.count++;
-			console.log(`rate limit: ${bucket} used up by ${who} (${limit} per ${window / MIN} min)`);
-		}
-		return { ok: false, limit, remaining: 0, reset: w.reset };
+	if (!w || w.reset <= now) windows.set(key, (w = { count: 0, reset: now + RULES[bucket].window }));
+	return w;
+}
+
+// Counts one request against each of `keys` (bucket, then an account id or an
+// address), or against none when one of them is used up: a refused request
+// isn't counted, or a client retrying while limited would keep its windows
+// full for good. The answer is the first full window, else the tightest.
+export function take(keys: [Bucket, string][], onRefused?: (bucket: Bucket, first: boolean) => void): Hit {
+	const now = Date.now();
+	if (OFF || !keys.length) {
+		const bucket = keys[0]?.[0] ?? "read";
+		const limit = limitOf(bucket);
+		return { ok: true, limit, remaining: limit, reset: now + RULES[bucket].window };
 	}
-	w.count++;
-	return { ok: true, limit, remaining: limit - w.count, reset: w.reset };
+	const limits = keys.map(([bucket]) => limitOf(bucket));
+	const ws = keys.map(([bucket, who]) => current(bucket, who, now));
+	const full = ws.findIndex((w, i) => w.count >= limits[i]);
+	if (full >= 0) {
+		const w = ws[full];
+		onRefused?.(keys[full][0], !w.noted);
+		w.noted = true;
+		return { ok: false, limit: limits[full], remaining: 0, reset: w.reset };
+	}
+	let tightest: Hit | undefined;
+	ws.forEach((w, i) => {
+		w.count++;
+		if (!tightest || limits[i] - w.count < tightest.remaining) tightest = { ok: true, limit: limits[i], remaining: limits[i] - w.count, reset: w.reset };
+	});
+	return tightest!;
+}
+
+// counts one request against `bucket` for `who` (an account id or an address)
+export const hit = (bucket: Bucket, who: string): Hit => take([[bucket, who]]);
+
+// whether `bucket` is used up for `who`, without counting anything
+export function used(bucket: Bucket, who: string): boolean {
+	if (OFF) return false;
+	const w = windows.get(`${bucket}:${who}`);
+	return !!w && w.reset > Date.now() && w.count >= limitOf(bucket);
 }
 
 export const limitHeaders = (h: Hit) => ({
@@ -110,25 +143,45 @@ async function readOperationTypes() {
 readOperationTypes();
 setInterval(readOperationTypes, 10 * MIN).unref();
 
-// The buckets one API request counts against, beside "read" for every call.
+// what the client calls an endpoint for limits: the GraphQL operation, or the
+// REST path with its ids folded so one user's calls share a window
+const endpointOf = (path: string, operation: string | undefined) => operation ?? path.replace(/\d+/g, "#");
+
+const UPLOAD = /^\/(i|1\.1)\/media\/upload2?\.json$/;
+
+// The buckets one API request counts against, beside "endpoint" for every call
+// but upload chunks (a long video sends hundreds) and "read" for every call but
+// the background ones.
 export function bucketsFor(method: string, path: string, operation: string | undefined, url: URL): Bucket[] {
-	if (/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path)) return url.searchParams.get("command") === "INIT" ? ["upload"] : [];
+	if (UPLOAD.test(path)) return url.searchParams.get("command") === "INIT" ? ["read", "upload"] : ["read"];
 	if (BACKGROUND.test(path) || (operation && BACKGROUND_OPS.test(operation))) return [];
 	if (operation) {
-		if (POST_OPS.test(operation)) return ["post"];
-		if (ENGAGE_OPS.test(operation)) return ["engage"];
-		if (DM_OPS.test(operation)) return method === "GET" ? [] : ["dm"];
-		return method === "GET" || queries.has(operation) ? [] : ["write"];
+		if (POST_OPS.test(operation)) return ["read", "post"];
+		if (ENGAGE_OPS.test(operation)) return ["read", "engage"];
+		if (DM_OPS.test(operation)) return method === "GET" ? ["read"] : ["read", "dm"];
+		return method === "GET" || queries.has(operation) ? ["read"] : ["read", "write"];
 	}
-	if (ENGAGE_REST.test(path)) return ["engage"];
-	return method === "GET" ? [] : ["write"];
+	if (ENGAGE_REST.test(path)) return ["read", "engage"];
+	return method === "GET" ? ["read"] : ["read", "write"];
 }
 
 // Counts an API request; a response when one of its limits is used up.
 export function limitApi(viewer: Viewer, method: string, path: string, operation: string | undefined, url: URL): Response | undefined {
 	if (viewer.role) return undefined;
-	for (const bucket of ["read", ...bucketsFor(method, path, operation, url)] as Bucket[]) {
-		const h = hit(bucket, viewer.id);
-		if (!h.ok) return limitedResponse(h);
-	}
+	const endpoint = endpointOf(path, operation);
+	const keys = bucketsFor(method, path, operation, url).map((b): [Bucket, string] => [b, viewer.id]);
+	if (!UPLOAD.test(path)) keys.unshift(["endpoint", `${viewer.id}:${endpoint}`]);
+	const h = take(keys, (bucket, first) => {
+		if (first) noteRefusal(bucket, endpoint, viewer.id);
+	});
+	if (!h.ok) return limitedResponse(h);
+}
+
+// The server log and Admin > Errors get one line per used-up bucket and
+// endpoint, once per window, so staff can see which limit people run into and on what.
+export function noteRefusal(bucket: Bucket, endpoint: string, userId: string) {
+	const per = `${limitOf(bucket)} per ${RULES[bucket].window / MIN} minutes`;
+	console.log(`rate limit: ${bucket} used up by ${userId} on ${endpoint} (${per})`);
+	// imported here so the limits stay free of the database for scripts that read RULES
+	void import("./errors").then(({ recordError }) => recordError("server", new Error(`Rate limit ${bucket} (${per}) used up, on ${endpoint}`), { path: endpoint, userId }));
 }
