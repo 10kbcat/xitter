@@ -86,7 +86,7 @@ const LOGO_CSS = `${LOGO} svg{opacity:0}
 ${LOGO}{background:url(/public/icon-light.png) center/36px no-repeat}
 ${DARK} ${LOGO}{background-image:url(/public/icon-dark.png)}
 ${WIDE} ${LOGO}{width:150px;background-image:url(/public/logo-light.png);background-size:128px auto;background-position:10px center}
-${WIDE}${DARK} ${LOGO}{background-image:url(/public/logo-dark.png)}
+${DARK}[data-wide-nav] ${LOGO}{background-image:url(/public/logo-dark.png)}
 ${DIALOG_LOGO}{background:url(/public/icon-light.png) center/contain no-repeat}
 ${DARK} ${DIALOG_LOGO}{background-image:url(/public/icon-dark.png)}
 ${DIALOG_LOGO} svg{opacity:0}
