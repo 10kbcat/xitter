@@ -586,6 +586,17 @@ const ACTIONS: Record<string, Action> = {
 				});
 				changed.push("limits");
 			}
+			if (b.rate_limits && typeof b.rate_limits === "object") {
+				const next = { ...s.rate_limits };
+				for (const k of Object.keys(next) as (keyof typeof next)[]) {
+					if (b.rate_limits[k] === undefined) continue;
+					const x = Number(b.rate_limits[k]);
+					if (!Number.isInteger(x) || x < 1 || x > 1_000_000) throw new AdminError(`The ${k} limit must be a whole number from 1 to 1000000.`);
+					next[k] = x;
+				}
+				await setSetting("rate_limits", next);
+				changed.push("rate_limits");
+			}
 			if (b.announcement && typeof b.announcement === "object") {
 				const text = String(b.announcement.text ?? "").trim().slice(0, 500);
 				const link = String(b.announcement.link ?? "").trim();

@@ -907,6 +907,10 @@ const RENDER = {
 			[["image_mb", "Image size, MB"], ["video_mb", "Video size, MB"], ["video_seconds", "Video length, seconds"]]
 				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" data-limit="' + k + '" value="' + esc(s.limits[k]) + '"' + dis + "></div>").join("") +
 			(admin ? '<button class="btn primary" id="saveLimits">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Rate limits</h2><p class="dim small">Requests per account per 15 minutes. Staff have no limits. Hitting one shows the app\'s "try again later" and a line in the server log.</p>' +
+			[["read", "Any request (a page load is about 30)"], ["write", "Other changes (settings, deletes, lists…)"], ["post", "Posts and replies"], ["engage", "Likes, reposts, bookmarks, follows"], ["dm", "Messages sent"], ["upload", "Files uploaded"]]
+				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" min="1" data-rate="' + k + '" value="' + esc(s.rate_limits[k]) + '"' + dis + "></div>").join("") +
+			(admin ? '<button class="btn primary" id="saveRates">Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Announcement</h2><p class="dim small">A banner above everyone\'s timeline until they close it. Saving new text shows it again to everyone.</p>' +
 			'<div class="field"><label>Text (empty removes the banner)</label><textarea id="annText" maxlength="500"' + dis + ">" + esc(s.announcement.text) + "</textarea></div>" +
 			'<div class="field"><label>Link (optional)</label><input id="annLink" value="' + esc(s.announcement.link) + '"' + dis + "></div>" +
@@ -953,6 +957,11 @@ const RENDER = {
 			const l = {};
 			main.querySelectorAll("[data-limit]").forEach((i) => l[i.dataset.limit] = i.value);
 			save({ limits: l }, "Limits saved");
+		};
+		if ($("#saveRates")) $("#saveRates").onclick = () => {
+			const r = {};
+			main.querySelectorAll("[data-rate]").forEach((i) => r[i.dataset.rate] = i.value);
+			save({ rate_limits: r }, "Rate limits saved");
 		};
 		$("#saveAnn").onclick = () => save({ announcement: { text: $("#annText").value, link: $("#annLink").value } }, "Announcement saved");
 		$("#saveRules").onclick = () => save({ rules: $("#rules").value }, "Rules saved");
