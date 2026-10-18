@@ -19,9 +19,25 @@ export const REASONS: Record<string, { text: string; subtext: string }> = {
 	other: { text: "Something else", subtext: "Tell us in the next step" },
 };
 
+// The flow's state rides in its token, so a restart or a second process
+// between steps doesn't lose the report. Nothing in it needs to be secret:
+// the reporter must match the session, and anyone may report any post.
 type Draft = { reporter: string; postId: string | null; userId: string | null; reason?: string; at: number };
-const drafts = new Map<string, Draft>();
 const DRAFT_MS = 60 * 60 * 1000;
+
+const tokenOf = (d: Draft) => `report:${Buffer.from(JSON.stringify(d)).toString("base64url")}`;
+
+function draftOf(token: string): Draft | undefined {
+	if (!token.startsWith("report:")) return undefined;
+	try {
+		const d = JSON.parse(Buffer.from(token.slice(7), "base64url").toString());
+		const id = (v: unknown) => (v === null || isId(v) ? v : undefined);
+		if (!isId(d.reporter) || id(d.postId) === undefined || id(d.userId) === undefined || typeof d.at !== "number") return undefined;
+		return { reporter: d.reporter, postId: d.postId, userId: d.userId, reason: REASONS[d.reason] ? d.reason : undefined, at: d.at };
+	} catch {
+		return undefined;
+	}
+}
 
 const text = (t: string) => ({ text: t, entities: [] });
 const link = (type: string, id: string, label?: string) => ({ link_type: type, link_id: id, ...(label ? { label } : {}) });
@@ -79,7 +95,6 @@ function target(body: any): { postId: string | null; userId: string | null } {
 
 export async function reportFlow(viewer: Viewer, url: URL, body: any): Promise<Response> {
 	const now = Date.now();
-	for (const [k, d] of drafts) if (now - d.at > DRAFT_MS) drafts.delete(k);
 
 	// a new flow
 	if (url.searchParams.get("flow_name") || !body?.flow_token) {
@@ -88,28 +103,30 @@ export async function reportFlow(viewer: Viewer, url: URL, body: any): Promise<R
 			const [p] = await sql`select user_id::text as user_id from posts where id = ${postId}::bigint`;
 			userId = p?.user_id ?? null;
 		}
-		const token = `report:${newId()}`;
-		drafts.set(token, { reporter: viewer.id, postId, userId, at: now });
-		return Response.json(flow(token, reasonStep(postId ? "post" : "account")));
+		const draft = { reporter: viewer.id, postId, userId, at: now };
+		return Response.json(flow(tokenOf(draft), reasonStep(postId ? "post" : "account")));
 	}
 
-	const token = String(body.flow_token);
-	const draft = drafts.get(token);
-	if (!draft || draft.reporter !== viewer.id) return Response.json({ errors: [{ code: 366, message: "This report expired. Please start again." }] }, { status: 400 });
-	draft.at = now;
+	const draft = draftOf(String(body.flow_token));
+	if (!draft || draft.reporter !== viewer.id || now - draft.at > DRAFT_MS) {
+		return Response.json({ errors: [{ code: 366, message: "This report expired. Please start again." }] }, { status: 400 });
+	}
 	const inputs: any[] = Array.isArray(body.subtask_inputs) ? body.subtask_inputs : [];
 	const reason = inputs.find((i) => i.subtask_id === "report_reason")?.choice_selection?.selected_choices?.[0];
 	if (reason && REASONS[reason]) {
-		draft.reason = reason;
-		return Response.json(flow(token, detailsStep()));
+		return Response.json(flow(tokenOf({ ...draft, reason }), detailsStep()));
 	}
 	const details = inputs.find((i) => i.subtask_id === "report_details")?.enter_text;
 	if (details && draft.reason) {
 		const textIn = details.link === "skip_link" ? "" : String(details.text ?? "").slice(0, 1000);
-		await sql`insert into reports (id, reporter_id, post_id, user_id, reason, details)
-			values (${newId()}::bigint, ${viewer.id}::bigint, ${draft.postId}::bigint, ${draft.userId}::bigint, ${draft.reason}, ${textIn})`;
-		drafts.delete(token);
-		return Response.json(flow(token, doneStep()));
+		// a resent last step files once
+		const [dupe] = await sql`select 1 from reports where reporter_id = ${viewer.id}::bigint and post_id is not distinct from ${draft.postId}::bigint
+			and user_id is not distinct from ${draft.userId}::bigint and reason = ${draft.reason} and created_at > now() - interval '1 minute'`;
+		if (!dupe) {
+			await sql`insert into reports (id, reporter_id, post_id, user_id, reason, details)
+				values (${newId()}::bigint, ${viewer.id}::bigint, ${draft.postId}::bigint, ${draft.userId}::bigint, ${draft.reason}, ${textIn})`;
+		}
+		return Response.json(flow(String(body.flow_token), doneStep()));
 	}
-	return Response.json(flow(token, reasonStep(draft.postId ? "post" : "account")));
+	return Response.json(flow(String(body.flow_token), reasonStep(draft.postId ? "post" : "account")));
 }
