@@ -268,6 +268,12 @@ async function route(req: Request): Promise<Response | undefined> {
 	rememberIp(req, server.requestIP(req)?.address);
 	const url = new URL(req.url);
 	const p = url.pathname;
+	if (req.method !== "GET" && req.method !== "HEAD" && req.headers.has("cookie")) {
+		const site = req.headers.get("sec-fetch-site");
+		const origin = req.headers.get("origin");
+		if (site ? site !== "same-origin" && site !== "none" : origin && origin !== PUBLIC_ORIGIN && origin !== url.origin)
+			return new Response("This request came from another site.", { status: 403 });
+	}
 	if (p.startsWith("/abs/")) return serveClient(req, p);
 	// chat: the live socket (its token from GenerateXChatTokenMutation) and
 	// the way to the key backup realm
