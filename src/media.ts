@@ -9,6 +9,7 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
+import { protectedFor, suspendedFor } from "./blocks";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { settings } from "./settings";
@@ -329,36 +330,63 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 	return uploadError("Unknown command.");
 }
 
-const mimeCache = new Map<string, string>();
+type Served = { mime: string; owner: string; post: string | null };
+const mimeCache = new Map<string, Served>();
 const MAX_MIME_CACHE = 4096;
+const ownerCache = new Map<string, { hidden: boolean; at: number }>();
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
+const PRIVATE = "private, max-age=3600";
+
+async function servedOf(id: string): Promise<Served | undefined> {
+	const hit = mimeCache.get(id);
+	if (hit) {
+		mimeCache.delete(id);
+		mimeCache.set(id, hit);
+		return hit;
+	}
+	const [row] = await sql`select mime, user_id::text as owner, post_id::text as post from media where id = ${id}::bigint`;
+	if (!row) return undefined;
+	if (row.post) {
+		if (mimeCache.size >= MAX_MIME_CACHE) mimeCache.delete(mimeCache.keys().next().value!);
+		mimeCache.set(id, row as Served);
+	}
+	return row as Served;
+}
+
+async function ownerHidden(owner: string) {
+	const hit = ownerCache.get(owner);
+	if (hit && Date.now() - hit.at < 30_000) return hit.hidden;
+	const [row] = await sql`select protected or status = 'suspended' or deactivated_at is not null as hidden from users where id = ${owner}::bigint`;
+	if (ownerCache.size >= MAX_MIME_CACHE) ownerCache.delete(ownerCache.keys().next().value!);
+	ownerCache.set(owner, { hidden: !!row?.hidden, at: Date.now() });
+	return !!row?.hidden;
+}
+
+async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefined> {
+	if (!served.post || !(await ownerHidden(served.owner))) return IMMUTABLE;
+	const [unseen] = await sql`select 1 where ${served.owner}::bigint in ${protectedFor(viewer.id)} or ${served.owner}::bigint in ${suspendedFor(viewer.id)}`;
+	return unseen ? undefined : PRIVATE;
+}
 
 // /media/<id>[.ext], /media/banner/<id>[/<size>] and /media/poster/<id>.jpg; the
 // client asks for sizes through the query string or a path suffix, and gets the
 // original either way. Byte ranges are answered so the video player can seek.
-export async function serveMedia(req: Request, pathname: string): Promise<Response> {
+export async function serveMedia(req: Request, pathname: string, viewer: Viewer): Promise<Response> {
 	const poster = /^\/media\/poster\/(\d{1,19})\.jpg$/.exec(pathname);
 	if (poster) {
 		const file = posterFile(MEDIA_DIR, poster[1]);
-		if (!existsSync(file)) return new Response("not found", { status: 404 });
-		return new Response(Bun.file(file), { headers: { "content-type": "image/jpeg", "cache-control": IMMUTABLE, "x-content-type-options": "nosniff" } });
+		const served = existsSync(file) ? await servedOf(poster[1]) : undefined;
+		const cache = served && (await cacheFor(viewer, served));
+		if (!cache) return new Response("not found", { status: 404 });
+		return new Response(Bun.file(file), { headers: { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff" } });
 	}
 	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
 	if (!m || !existsSync(fileOf(m[1]))) return new Response("not found", { status: 404 });
-	let mime = mimeCache.get(m[1]);
-	if (mime) {
-		mimeCache.delete(m[1]);
-		mimeCache.set(m[1], mime);
-	}
-	if (!mime) {
-		const [row] = await sql`select mime from media where id = ${m[1]}::bigint`;
-		if (!row) return new Response("not found", { status: 404 });
-		mime = row.mime as string;
-		if (mimeCache.size >= MAX_MIME_CACHE) mimeCache.delete(mimeCache.keys().next().value!);
-		mimeCache.set(m[1], mime);
-	}
-	const headers: Record<string, string> = { "content-type": mime, "cache-control": IMMUTABLE, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
+	const served = await servedOf(m[1]);
+	const cache = served && (await cacheFor(viewer, served));
+	if (!served || !cache) return new Response("not found", { status: 404 });
+	const headers: Record<string, string> = { "content-type": served.mime, "cache-control": cache, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
 	const size = statSync(fileOf(m[1])).size;
 	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
 	if (range && (range[1] || range[2])) {
