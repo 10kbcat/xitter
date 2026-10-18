@@ -42,6 +42,9 @@ import {
 	likedPosts,
 	postsByIds,
 	replies,
+	hiddenReplies,
+	hasHiddenReplies,
+	setReplyHidden,
 	repost,
 	setMark,
 	setPinned,
@@ -184,7 +187,10 @@ const tweetDetail: Handler = async (viewer, vars) => {
 		const canPin = !focal.reply_to_id && focal.author.id === viewer.id;
 		let sort = BigInt(newId());
 		for (const p of above) entries.push(tweetEntry(p, (sort--).toString()));
-		entries.push(tweetEntry(focal, (sort--).toString()));
+		const focalEntry = tweetEntry(focal, (sort--).toString());
+		// the "View hidden replies" link under a conversation's first post
+		if (!focal.reply_to_id && (await hasHiddenReplies(id))) Object.assign(focalEntry.content.itemContent, { hasModeratedReplies: true });
+		entries.push(focalEntry);
 		for (const p of below) {
 			const isPinned = p.id === pinned;
 			entries.push(replyEntry(p, (sort--).toString(), { pinned: isPinned, ...(canPin ? { feedbackKey: isPinned ? PIN_KEYS.Pinned : PIN_KEYS.Pinnable } : {}) }));
@@ -510,6 +516,22 @@ const handlers: Record<string, Handler> = {
 	HomeTimeline: forYou,
 	HomeLatestTimeline: home(true),
 	TweetDetail: tweetDetail,
+	// Hide reply, and the "Hidden replies" page of a conversation
+	ModerateTweet: async (v, vars) => {
+		await setReplyHidden(v.id, postId(vars, "tweetId"), true);
+		return { data: { tweet_moderate_put: "Done" } };
+	},
+	UnmoderateTweet: async (v, vars) => {
+		await setReplyHidden(v.id, postId(vars, "tweetId"), false);
+		return { data: { tweet_unmoderate_put: "Done" } };
+	},
+	ModeratedTimeline: async (v, vars) => {
+		const root = postId(vars, "rootTweetId");
+		const posts = vars.cursor ? [] : await hiddenReplies(v.id, root);
+		const base = BigInt(newId());
+		const entries: unknown[] = posts.map((p, i) => tweetEntry(p, (base - BigInt(i) - 1n).toString()));
+		return { data: { tweet: { result: { __typename: "Tweet", rest_id: root, timeline_response: { timeline: { instructions: [{ type: "TimelineAddEntries", entries }] } } } } } };
+	},
 	Bookmarks: bookmarks,
 	CreateTweet: createTweet,
 	DeleteTweet: async (v, vars) => {

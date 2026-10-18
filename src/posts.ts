@@ -282,9 +282,32 @@ export async function ancestors(viewerId: string, replyToId: string): Promise<Po
 }
 
 export async function replies(viewerId: string, id: string, limit = 100): Promise<PostRow[]> {
-	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
+	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.reply_hidden_at is null
+		and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
 		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)} order by p.id asc limit ${limit}`;
 	return hydrate(viewerId, rows.map(toRow));
+}
+
+// Hide reply: only the author of the conversation's first post may hide a
+// reply in it, or show it again.
+export async function setReplyHidden(viewerId: string, replyId: string, hidden: boolean): Promise<void> {
+	const [r] = await sql`select root.user_id::text as root_author from posts p join posts root on root.id = p.conversation_id
+		where p.id = ${replyId}::bigint and p.reply_to_id is not null`;
+	if (!r) throw new PostError("No status found with that ID.", 144);
+	if (r.root_author !== viewerId) throw new PostError("Only the author of the conversation can hide replies.", 200);
+	await sql`update posts set reply_hidden_at = ${hidden ? sql`now()` : null} where id = ${replyId}::bigint`;
+}
+
+// what the "Hidden replies" page lists, newest hidden first
+export async function hiddenReplies(viewerId: string, rootId: string, limit = 100): Promise<PostRow[]> {
+	const rows = await sql`${select(viewerId)} where p.conversation_id = ${rootId}::bigint and p.reply_hidden_at is not null
+		and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)} order by p.reply_hidden_at desc limit ${limit}`;
+	return hydrate(viewerId, rows.map(toRow));
+}
+
+export async function hasHiddenReplies(rootId: string): Promise<boolean> {
+	const [r] = await sql`select 1 from posts where conversation_id = ${rootId}::bigint and reply_hidden_at is not null limit 1`;
+	return !!r;
 }
 
 export async function bookmarkedPosts(viewerId: string, limit = 100): Promise<PostRow[]> {

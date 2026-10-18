@@ -881,3 +881,7 @@ create table if not exists hashflags (
 alter table posts add column if not exists notice jsonb;
 alter table posts add column if not exists count_overrides jsonb;
 alter table users add column if not exists count_overrides jsonb;
+
+-- Replies the author of a conversation's first post hid from it (X's "Hide
+-- reply"). They leave the conversation and show under "Hidden replies".
+alter table posts add column if not exists reply_hidden_at timestamptz;
