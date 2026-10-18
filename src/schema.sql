@@ -379,7 +379,18 @@ create index if not exists reports_status_idx on reports (status, created_at des
 
 -- for "About this account": when the badge was given, and past handles
 alter table users add column if not exists verified_at timestamptz;
-update users set verified_at = created_at where verified_type is not null and verified_at is null;
+-- One-off data fixes run once, the first time a server that has them starts;
+-- run on every start, the larger ones scanned whole tables each time.
+create table if not exists schema_steps (
+	name text primary key,
+	done_at timestamptz not null default now()
+);
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'verified_at') then
+		update users set verified_at = created_at where verified_type is not null and verified_at is null;
+		insert into schema_steps (name) values ('verified_at');
+	end if;
+end $$;
 create table if not exists username_changes (
 	user_id bigint not null references users (id) on delete cascade,
 	old_name text not null,
@@ -736,8 +747,13 @@ alter table communities add column if not exists banner_height integer;
 alter table communities add column if not exists topic_id bigint references topics (id) on delete set null;
 
 -- grey badges: 'government' is an organisation (square picture), 'government_individual' an official
-alter table users drop constraint if exists users_verified_type_check;
-alter table users add constraint users_verified_type_check check (verified_type in ('blue', 'business', 'government', 'government_individual'));
+-- (replaced only while it lacks the new value: adding it checks every row)
+do $$ begin
+	if not exists (select 1 from pg_constraint where conname = 'users_verified_type_check' and pg_get_constraintdef(oid) like '%government_individual%') then
+		alter table users drop constraint if exists users_verified_type_check;
+		alter table users add constraint users_verified_type_check check (verified_type in ('blue', 'business', 'government', 'government_individual'));
+	end if;
+end $$;
 
 -- every mail the instance tried to send (mail.ts)
 create table if not exists mail_log (
@@ -941,9 +957,14 @@ create table if not exists link_previews (
 	fetched_at timestamptz not null default now()
 );
 create index if not exists login_events_ip_idx on login_events (ip, created_at desc);
-update users u set deactivated_at = null where u.deactivated_at is not null and u.status = 'suspended' and exists (
-	select 1 from audit_log l where l.target = u.id::text and l.created_at > u.deactivated_at
-		and l.action in ('set_status', 'temporary_status', 'bulk_status', 'auto_suspend_name', 'suspend_blocked_names', 'escalate'));
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'suspended_not_deactivated') then
+		update users u set deactivated_at = null where u.deactivated_at is not null and u.status = 'suspended' and exists (
+			select 1 from audit_log l where l.target = u.id::text and l.created_at > u.deactivated_at
+				and l.action in ('set_status', 'temporary_status', 'bulk_status', 'auto_suspend_name', 'suspend_blocked_names', 'escalate'));
+		insert into schema_steps (name) values ('suspended_not_deactivated');
+	end if;
+end $$;
 create table if not exists retired_identities (
 	kind text not null check (kind in ('handle', 'email', 'ip')),
 	value text not null,
@@ -966,17 +987,32 @@ create table if not exists account_labels (
 );
 alter table users add column if not exists label_id bigint references account_labels(id) on delete set null;
 
-update posts p set reply_to_user_id = r.user_id from posts r where r.id = p.reply_to_id and p.reply_to_user_id is null;
-update posts set reply_to_id = conversation_id where reply_to_id is null and conversation_id <> id;
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'reply_to_user_id') then
+		update posts p set reply_to_user_id = r.user_id from posts r where r.id = p.reply_to_id and p.reply_to_user_id is null;
+		update posts set reply_to_id = conversation_id where reply_to_id is null and conversation_id <> id;
+		insert into schema_steps (name) values ('reply_to_user_id');
+	end if;
+end $$;
 
 alter table users add column if not exists role_granted_by bigint;
-update users u set role_granted_by = (select a.actor_id from audit_log a where a.action = 'set_role' and a.target = u.id::text order by a.created_at desc limit 1)
-	where u.role is not null and u.role_granted_by is null;
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'role_granted_by') then
+		update users u set role_granted_by = (select a.actor_id from audit_log a where a.action = 'set_role' and a.target = u.id::text order by a.created_at desc limit 1)
+			where u.role is not null and u.role_granted_by is null;
+		insert into schema_steps (name) values ('role_granted_by');
+	end if;
+end $$;
 
-insert into chat_trust (user_id, trusted_id)
-	select distinct e.sender_id, m.user_id from chat_events e join chat_members m on m.conversation_id = e.conversation_id and m.user_id <> e.sender_id
-	where e.kind = 1 and e.conversation_id ~ '^[0-9]+[-:][0-9]+$'
-	on conflict do nothing;
-update chat_members m set accepted = true where not m.accepted and m.conversation_id ~ '^[0-9]+[-:][0-9]+$'
-	and exists (select 1 from chat_members peer join chat_trust t on t.user_id = m.user_id and t.trusted_id = peer.user_id
-		where peer.conversation_id = m.conversation_id and peer.user_id <> m.user_id);
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'chat_trust') then
+		insert into chat_trust (user_id, trusted_id)
+			select distinct e.sender_id, m.user_id from chat_events e join chat_members m on m.conversation_id = e.conversation_id and m.user_id <> e.sender_id
+			where e.kind = 1 and e.conversation_id ~ '^[0-9]+[-:][0-9]+$'
+			on conflict do nothing;
+		update chat_members m set accepted = true where not m.accepted and m.conversation_id ~ '^[0-9]+[-:][0-9]+$'
+			and exists (select 1 from chat_members peer join chat_trust t on t.user_id = m.user_id and t.trusted_id = peer.user_id
+				where peer.conversation_id = m.conversation_id and peer.user_id <> m.user_id);
+		insert into schema_steps (name) values ('chat_trust');
+	end if;
+end $$;
