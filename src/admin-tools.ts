@@ -11,7 +11,7 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
 import { NOTICE_TYPES } from "./model";
-import { escalate } from "./moderation";
+import { escalate, signOutEverywhere } from "./moderation";
 import { blockedNameIn, blockedWordIn, suspendForName } from "./names";
 import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
@@ -200,7 +200,7 @@ export const toolActions: Record<string, Action> = {
 			const hours = Number(b.hours);
 			if (!Number.isFinite(hours) || hours < 1 || hours > 8760) throw new AdminError("Choose 1–8760 hours.");
 			await sql`update users set status_restore = coalesce(status_restore, status), status = ${b.status}, status_until = now() + ${hours} * interval '1 hour', deactivated_at = null where id = ${id}::bigint`;
-			if (b.status === "suspended") await sql`delete from sessions where user_id = ${id}::bigint`;
+			if (b.status === "suspended") await signOutEverywhere(id);
 			await audit(a, "temporary_status", id, { status: b.status, hours, previous: user.status, reason: String(b.reason ?? "").slice(0, 500) || undefined });
 			return {};
 		},
@@ -216,8 +216,8 @@ export const toolActions: Record<string, Action> = {
 			}
 			await sql.begin(async (tx) => {
 				await tx`update users set status = ${b.status}, status_until = null, status_restore = null, deactivated_at = null where id = any(${tx.array(ids, "INT8")})`;
-				if (b.status === "suspended") await tx`delete from sessions where user_id = any(${tx.array(ids, "INT8")})`;
 			});
+			if (b.status === "suspended") await signOutEverywhere(...ids);
 			await audit(a, "bulk_status", null, { ids, status: b.status });
 			return { count: ids.length };
 		},
