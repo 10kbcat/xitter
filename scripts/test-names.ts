@@ -34,6 +34,11 @@ try{
 	check(blockedNameIn('N_1-GGG3rr')==='nigger','digits, separators and repeats');
 	check(!blockedNameIn('Nigeria')&&!blockedNameIn('Niger Delta'),'a doubled letter needs two: Nigeria passes');
 	check(blockedNameIn('kkkk')==='kkk'&&!blockedNameIn('kick'),'kkk needs three ks, a single k passes');
+	// letters from other scripts and Unicode styles that pass for Latin ones
+	for(const s of['nіggеr','ИIGGER','nιggεr','ɴɪɢɢᴇʀ','🇳🇮🇬🇬🇪🇷','ｎｉｇｇｅｒ','𝐧𝐢𝐠𝐠𝐞𝐫','ⓝⓘⓖⓖⓔⓡ','n​igger','NÏGGËR'])
+		check(blockedNameIn(s)==='nigger','look-alike caught: '+JSON.stringify(s));
+	for(const s of['Иван Петров','Νίκος Παπαδόπουλος','Нигерия','Łukasz','Ølstrup'])
+		check(!blockedNameIn(s),'ordinary name passes: '+s);
 	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD]});
 	await loadSettings();
 	const signup=async(screenName:string,name:string)=>{try{await checkSignup({screenName,name,password:'longenough1',email:'n@example.com'} as any);return 'ok';}catch(e){return e instanceof SignupError?e.message:String(e);}};
@@ -59,6 +64,15 @@ try{
 	await admin.admin('blockedNameAccounts',{suspend:true});
 	check(await status(created[0])==='suspended'&&await status(created[2])!=='suspended','suspend button: members only');
 	check((await (await fetch(origin+'/admin',{headers:admin.headers})).text()).includes('blockedNames'),'admin page carries the box');
+	// blocked phrases in posts go through the same look-alike folding
+	await admin.admin('saveOperations',{...operations,blocked_names:[...(operations.blocked_names??[]),WORD],blocked_phrases:[...operations.blocked_phrases,'zorble flax']});
+	const tweet=async(text:string)=>(await(await fetch(origin+'/i/api/graphql/q/CreateTweet',{method:'POST',headers:{...admin.headers,'content-type':'application/json'},body:JSON.stringify({variables:{tweet_text:text}})})).json()) as any;
+	const refused=await tweet('look: zоrblе​ flаx here');
+	check(refused.errors?.[0]?.code===186,'blocked phrase with Cyrillic and a zero-width space refused');
+	const fine=await tweet('zorbles flax is two words apart');
+	const fineId=fine.data?.create_tweet?.tweet_results?.result?.rest_id;
+	check(!!fineId,'other spacing still posts (phrases keep word breaks)');
+	if(fineId)await fetch(origin+'/i/api/graphql/q/DeleteTweet',{method:'POST',headers:{...admin.headers,'content-type':'application/json'},body:JSON.stringify({variables:{tweet_id:fineId}})});
 	console.log(`all passed (${checks})`);
 }finally{
 	await admin.admin('saveOperations',operations);

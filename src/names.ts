@@ -12,13 +12,37 @@ import { settings } from "./settings";
 // what else can stand for a letter; "1" is both i and l
 const LOOKALIKE: Record<string, string> = { a: "4@", b: "8", e: "3", g: "96", i: "1!|", l: "1|", o: "0", s: "5$", t: "7+", z: "2" };
 
-// lowercase letters plus the look-alike digits and symbols; repeats are kept
-export function normalizeName(text: string): string {
+// Letters from other scripts that pass for Latin ones; NFKD already folds
+// full-width, bold/italic math and circled letters. Pairs: look-alike, Latin.
+const GLYPHS = Object.fromEntries(
+	[
+		// Cyrillic, including faux-Cyrillic (И for N, Я for R)
+		"аaвbеeёeкkмmнhоoрpсcтtуyхxіiїiјjѕsԁdьbъbпnиnйnяrгrшwщwцuчyзeэeдdлnғfқkңhүyұyһhӏl",
+		// Greek
+		"αaβbγyδdεeζzηnθoιiκkλnμuνvοoπnρpσoςcτtυuφoχxψwωw",
+		// small caps and other Latin look-alikes NFKD leaves alone
+		"ᴀaʙbᴄcᴅdᴇeɢgʜhɪiᴊjᴋkʟlᴍmɴnᴏoᴘpʀrꜱsᴛtᴜuᴠvᴡwʏyᴢzıiȷjłløođdħhŋnſsɑaɡgɩiʋv",
+	]
+		.join("")
+		.match(/../gsu)!
+		.map((pair) => [...pair] as [string, string]),
+);
+// regional indicators (flag letters) 🇦..🇿
+const FLAG_A = 0x1f1e6;
+
+// NFKD, no accents, lowercase, every look-alike letter as its Latin one
+export function foldGlyphs(text: string): string {
 	return text
 		.normalize("NFKD")
 		.replace(/\p{M}/gu, "")
 		.toLowerCase()
-		.replace(/[^\p{L}0-9!|@$+]/gu, "");
+		.replace(/[\u{1F1E6}-\u{1F1FF}]/gu, (c) => String.fromCharCode(97 + c.codePointAt(0)! - FLAG_A))
+		.replace(/\p{L}/gu, (c) => GLYPHS[c] ?? c);
+}
+
+// lowercase letters plus the look-alike digits and symbols; repeats are kept
+export function normalizeName(text: string): string {
+	return foldGlyphs(text).replace(/[^\p{L}0-9!|@$+]/gu, "");
 }
 
 // "nigger" -> n+[i1!|]+[g96]{2,}[e3]+r+

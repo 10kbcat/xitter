@@ -3,6 +3,7 @@
 // replaced whenever the panel saves one.
 
 import { sql } from "./db";
+import { foldGlyphs } from "./names";
 
 export type SignupMode = "invite" | "open" | "closed";
 
@@ -96,10 +97,15 @@ export async function loadSettings() {
 export const settings = (): Settings => current;
 // GIF search needs a Klipy key; without one the button stays hidden
 export const feature = (f: Feature) => (f === "gifs" && !process.env.KLIPY_API_KEY ? false : current.features[f] !== false);
-// the admin's blocked phrases, matched in any case
+// the admin's blocked phrases, in any case and through look-alike letters and
+// invisible characters (names.ts); spacing still counts, unlike names
+const phraseForm = (text: string) => foldGlyphs(text).replace(/\p{Cf}/gu, "");
 export const hasBlockedPhrase = (text: string) => {
-	const lower = text.toLowerCase();
-	return current.operations.blocked_phrases.some((phrase) => lower.includes(phrase));
+	const folded = phraseForm(text);
+	return current.operations.blocked_phrases.some((phrase) => {
+		const p = phraseForm(phrase);
+		return !!p && folded.includes(p);
+	});
 };
 
 export async function setSetting<K extends Key>(key: K, value: Settings[K]) {
