@@ -8,6 +8,10 @@ export const sql = new SQL(process.env.DATABASE_URL ?? "postgres://dev@localhost
 		statement_timeout: process.env.DB_STATEMENT_TIMEOUT ?? "30s",
 		lock_timeout: process.env.DB_LOCK_TIMEOUT ?? "10s",
 		idle_in_transaction_session_timeout: "60s",
+		// No JIT: the feed queries' correlated subqueries push their estimated cost
+		// far past the JIT threshold, and compiling them took seconds on every
+		// call, several times longer than running them.
+		jit: "off",
 	},
 });
 
