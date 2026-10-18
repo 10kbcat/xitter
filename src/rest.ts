@@ -1,5 +1,6 @@
 // The few REST endpoints the client still uses next to GraphQL.
 
+import { blockedNameIn, suspendForName } from "./names";
 import { hashflagsJson } from "./hashflags";
 import { accountsRoute } from "./accounts";
 import type { Viewer } from "./auth";
@@ -74,6 +75,11 @@ async function profileRoute(path: string, viewer: Viewer, req: Request): Promise
 			const value = f[field].trim();
 			if ([...value].length > max) return profileError(`${field} is limited to ${max} characters.`);
 			if (field === "name" && !value) return profileError("Name can't be blank.");
+			// a blocked word in the display name (names.ts): suspended, staff only refused
+			if (field === "name" && blockedNameIn(value)) {
+				if (!viewer.role) await suspendForName(viewer.id, value);
+				return profileError("That name isn't allowed here.");
+			}
 			if (field === "url" && value && !/^https?:\/\/\S+$/.test(value)) return profileError("Website must be an http or https address.");
 			await sql`update users set ${sql({ [column]: value })} where id = ${viewer.id}::bigint`;
 		}

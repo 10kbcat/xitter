@@ -901,6 +901,9 @@ const RENDER = {
 			'<div class="box"><h2>Blocked phrases</h2><p class="dim small">Posts and articles containing any of these can\'t be published. One per line, any case.</p>' +
 			'<textarea id="blocked"' + dis + ">" + esc(o.blocked_phrases.join("\n")) + "</textarea>" +
 			(admin ? '<button class="btn primary" data-save-ops style="margin-top:8px">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Blocked names</h2><p class="dim small">No handle or display name may contain these. Sign-up with one is refused; an account that renames itself to one is suspended at once (staff are only refused). Case, accents, separators, digits for letters (n1gg3r) and repeated letters are ignored. One per line.</p>' +
+			'<textarea id="blockedNames"' + dis + ">" + esc((o.blocked_names || []).join("\n")) + "</textarea>" +
+			(admin ? '<div class="row" style="margin-top:8px"><button class="btn primary" data-save-ops>Save</button><button class="btn" id="checkNames">Check existing accounts</button></div><div id="nameHits"></div>' : "") + "</div>" +
 			'<div class="box"><h2>Trends</h2><div class="field"><label>Hidden hashtags, one per line</label><textarea id="hiddenTrends"' + dis + ">" + esc(o.hidden_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
 			'<div class="field"><label>Promoted hashtags, shown first</label><textarea id="promotedTrends"' + dis + ">" + esc(o.promoted_trends.map((t) => "#" + t).join("\n")) + "</textarea></div>" +
 			(admin ? '<button class="btn primary" data-save-ops>Save</button>' : "") + "</div>" +
@@ -934,10 +937,23 @@ const RENDER = {
 		$("#saveAnn").onclick = () => save({ announcement: { text: $("#annText").value, link: $("#annLink").value } }, "Announcement saved");
 		$("#saveRules").onclick = () => save({ rules: $("#rules").value }, "Rules saved");
 		const listOf = (id) => $(id).value.split("\n").map((x) => x.trim()).filter(Boolean);
+		// accounts that already carry a blocked name, then suspend them in one go
+		if ($("#checkNames")) $("#checkNames").onclick = () => act(async () => {
+			const { accounts } = await api("blockedNameAccounts", {});
+			const box = $("#nameHits");
+			if (!accounts.length) { box.innerHTML = '<p class="dim small">No account matches the saved list. Save the list first if you changed it.</p>'; return; }
+			box.innerHTML = '<p class="small">' + accounts.length + " match:</p><ul class=\"small\">" + accounts.map((u) => '<li><a href="#user/' + esc(u.id) + '">@' + esc(u.screen_name) + "</a> " + esc(u.name) + (u.staff ? ' <span class="dim">(staff, not suspended)</span>' : "") + "</li>").join("") + "</ul>" +
+				'<button class="btn danger" id="suspendNames">Suspend them</button>';
+			$("#suspendNames").onclick = async () => {
+				if (!(await ask("Suspend these accounts?"))) return;
+				act(() => api("blockedNameAccounts", { suspend: true }), "Suspended").then(route);
+			};
+		});
 		main.querySelectorAll("[data-save-ops]").forEach((b) => b.onclick = () => act(() => api("saveOperations", {
 			maintenance: $("#maint").checked,
 			message: $("#maintMsg").value,
 			blocked_phrases: listOf("#blocked"),
+			blocked_names: listOf("#blockedNames"),
 			hidden_trends: listOf("#hiddenTrends"),
 			promoted_trends: listOf("#promotedTrends"),
 			global_pin: ((v) => (/\/status\/(\d{1,19})/.exec(v) || [])[1] || v || null)($("#pin").value.trim()),

@@ -58,6 +58,8 @@ const DEFAULTS = {
 		maintenance: false,
 		message: "The instance is undergoing maintenance.",
 		blocked_phrases: [] as string[],
+		// words no handle or display name may contain (names.ts)
+		blocked_names: [] as string[],
 		hidden_trends: [] as string[],
 		promoted_trends: [] as string[],
 		global_pin: null as string | null,

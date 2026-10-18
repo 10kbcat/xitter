@@ -11,6 +11,7 @@ import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
 import { NOTICE_TYPES } from "./model";
+import { blockedNameIn, suspendForName } from "./names";
 import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
 import { BACKUP_DIR, createBackup, deleteBackup, listBackups } from "./backups";
@@ -262,6 +263,18 @@ export const toolActions: Record<string, Action> = {
 			return {};
 		},
 	},
+	// accounts whose handle or name holds a blocked word now: listed, and
+	// suspended when `suspend` is set (staff are listed, never suspended)
+	blockedNameAccounts: {
+		role: "admin",
+		run: async (a, b) => {
+			const rows = await sql`select id::text, screen_name, name, role, status from users where status <> 'suspended'`;
+			const hits = rows.filter((u: any) => blockedNameIn(u.screen_name, u.name));
+			if (b.suspend) for (const u of hits) if (!u.role) await suspendForName(u.id, u.screen_name);
+			if (b.suspend) await audit(a, "suspend_blocked_names", null, { count: hits.filter((u: any) => !u.role).length });
+			return { accounts: hits.map((u: any) => ({ id: u.id, screen_name: u.screen_name, name: u.name, staff: !!u.role })) };
+		},
+	},
 	// a label under the post (X's soft interventions); type null takes it off
 	setPostNotice: {
 		role: "moderator",
@@ -366,6 +379,7 @@ export const toolActions: Record<string, Action> = {
 				maintenance: b.maintenance,
 				message: b.message.trim() || "The instance is undergoing maintenance.",
 				blocked_phrases: lines(b.blocked_phrases, "phrase"),
+				blocked_names: lines(b.blocked_names ?? [], "name"),
 				hidden_trends: lines(b.hidden_trends, "trend", true),
 				promoted_trends: lines(b.promoted_trends, "trend", true),
 				global_pin: pin,

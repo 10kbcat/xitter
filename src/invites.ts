@@ -2,6 +2,7 @@
 // admin panel later. A code is spent in the same transaction that creates the
 // account, so two people can't both use its last use.
 
+import { blockedNameIn } from "./names";
 import { sql } from "./db";
 import { isFlag } from "./flags";
 import { newId } from "./ids";
@@ -55,6 +56,8 @@ export async function checkSignup(f: SignupForm) {
 	const name = f.name.trim() || screenName;
 	if (!/^[A-Za-z0-9_]{4,15}$/.test(screenName)) throw new SignupError("Usernames are 4 to 15 letters, digits or underscores.");
 	if (RESERVED.has(screenName.toLowerCase())) throw new SignupError("That username is reserved.");
+	// a blocked word in the handle or name (names.ts): no account at all
+	if (blockedNameIn(screenName, name)) throw new SignupError("That username isn't allowed here.");
 	if ([...name].length > 50) throw new SignupError("Names are at most 50 characters.");
 	if (f.password.length < 8) throw new SignupError("Passwords are at least 8 characters.");
 	if ((await getSetting("signup_mode")) === "closed") throw new SignupError("Sign-up is closed on this instance.");

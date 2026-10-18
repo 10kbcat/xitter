@@ -1,5 +1,6 @@
 // Settings > Your account: password, deactivation. Username and language go
 // through account/settings.json (rest.ts) and use the helpers here.
+import { blockedNameIn, suspendForName } from "./names";
 import { sql } from "./db";
 import type { Viewer } from "./auth";
 
@@ -29,6 +30,12 @@ export async function changeUsername(viewer: Viewer, wanted: string): Promise<st
 	if (!/^[A-Za-z0-9_]{1,15}$/.test(wanted)) return "Usernames can only contain letters, numbers and underscores, up to 15 characters.";
 	const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${wanted}) and id <> ${viewer.id}::bigint`;
 	if (taken) return "That username has been taken. Please choose another.";
+	// a blocked word (names.ts): staff are only refused, anyone else is suspended
+	const blocked = blockedNameIn(wanted);
+	if (blocked) {
+		if (!viewer.role) await suspendForName(viewer.id, wanted);
+		return "That username isn't allowed here.";
+	}
 	await sql`insert into username_changes (user_id, old_name, new_name) values (${viewer.id}::bigint, ${viewer.screen_name}, ${wanted})`;
 	await sql`update users set screen_name = ${wanted} where id = ${viewer.id}::bigint`;
 	return undefined;
