@@ -25,7 +25,7 @@ import { rankedFeed } from "./ranking";
 import * as articles from "./articles";
 import type { Viewer } from "./auth";
 import { notificationsTimeline, unreadCount } from "./notifications";
-import { searchPosts, searchUsers, trendingHashtags } from "./search";
+import { cachedTrends, searchPosts, searchUsers } from "./search";
 import { isId, newId } from "./ids";
 import { attachMedia } from "./media";
 import { type ThreadItem, cursorEntry, feedEntry, gridAppend, gridEntry, pinnedEntry, showMoreThreadsEntry, threadEntry, threadItems, tombstoneEntry, tweetEntry, tweetResult, userEntry, userResult } from "./model";
@@ -999,7 +999,7 @@ const trendItem = (t: { tag: string; posts: number }, i: number, label = "Trendi
 // viewer's Explore settings say
 async function explorePage(viewer: Viewer) {
 	const scope = await trendScope(viewer.id);
-	const trends = await trendingHashtags(7, 20, scope);
+	const trends = await cachedTrends(7, 20, scope);
 	const base = BigInt(newId());
 	const entries: unknown[] = trends.map((t, i) => ({
 		entryId: `trend-${t.tag.slice(1)}`,
@@ -1015,7 +1015,7 @@ async function explorePage(viewer: Viewer) {
 // the "What's happening" box beside every page: the top few trends
 async function exploreSidebar(viewer: Viewer) {
 	const scope = await trendScope(viewer.id);
-	const trends = await trendingHashtags(7, 5, scope);
+	const trends = await cachedTrends(7, 5, scope);
 	const id = newId();
 	const entries = trends.length
 		? [

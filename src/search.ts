@@ -149,8 +149,31 @@ export async function hashtagsLike(prefix: string, limit: number): Promise<strin
 // hashtags of the last days with how many posts used them, for Explore
 // `country`: only posts by accounts based there. `followedBy`: posts by accounts
 // that viewer follows count twice (personalized trends).
-export async function trendingHashtags(days: number, limit: number, scope: { country?: string | null; followedBy?: string } = {}): Promise<{ tag: string; posts: number }[]> {
-	const rows = await sql`select tag, sum(posts)::int as n, sum(w)::int as score from (
+type TrendScope = { country?: string | null; followedBy?: string };
+const trendRows = new Map<string, { at: number; rows: Promise<any[]> }>();
+
+export async function trendingHashtags(days: number, limit: number, scope: TrendScope = {}): Promise<{ tag: string; posts: number }[]> {
+	return rankTrends(await queryTrends(days, limit, scope), limit);
+}
+
+export async function cachedTrends(days: number, limit: number, scope: TrendScope = {}): Promise<{ tag: string; posts: number }[]> {
+	const { trend_min_people: people, trend_min_account_days: age } = settings().operations;
+	const key = JSON.stringify([days, limit, scope.country ?? null, scope.followedBy ?? null, people, age]);
+	const cached = trendRows.get(key);
+	if (!cached || Date.now() - cached.at > 60_000) {
+		if (trendRows.size >= 5000) trendRows.clear();
+		const loading = queryTrends(days, limit, scope).catch((e) => {
+			trendRows.delete(key);
+			throw e;
+		});
+		trendRows.set(key, { at: Date.now(), rows: loading });
+		return rankTrends(await loading, limit);
+	}
+	return rankTrends(await cached.rows, limit);
+}
+
+async function queryTrends(days: number, limit: number, scope: TrendScope) {
+	return await sql`select tag, sum(posts)::int as n, sum(w)::int as score from (
 			select tag, who, count(distinct id) as posts, max(w) as w from (
 				select p.id, lower((regexp_matches(p.text, ${HASHTAG_RE}, 'g'))[1]) as tag,
 					coalesce((select e.ip from login_events e where e.user_id = p.user_id and e.ip is not null order by e.created_at desc limit 1), p.user_id::text) as who,
@@ -160,8 +183,10 @@ export async function trendingHashtags(days: number, limit: number, scope: { cou
 					and u.status = 'active' and u.created_at <= now() - make_interval(days => ${settings().operations.trend_min_account_days})
 					${scope.country ? sql`and u.country = ${scope.country}` : sql``}) t
 			group by tag, who) people
-		group by tag having count(*) >= ${settings().operations.trend_min_people} order by score desc, n desc, tag limit ${limit}`;
-	// an admin can hide hashtags and put others first (Settings, Trends)
+		group by tag having count(*) >= ${settings().operations.trend_min_people} order by score desc, n desc, tag limit ${limit + 50}`;
+}
+
+function rankTrends(rows: any[], limit: number) {
 	const { hidden_trends: hidden, promoted_trends: promoted } = settings().operations;
 	const found = rows.filter((r: any) => !hidden.includes(r.tag)).map((r: any) => ({ tag: `#${r.tag}`, posts: r.n }));
 	const first = promoted.filter((tag) => !hidden.includes(tag)).map((tag) => found.find((t) => t.tag === `#${tag}`) ?? { tag: `#${tag}`, posts: 0 });
