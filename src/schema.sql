@@ -452,6 +452,10 @@ create table if not exists chat_events (
 	created_at timestamptz not null default now()
 );
 create index if not exists chat_events_conversation_idx on chat_events (conversation_id, kind, seq desc);
+-- a conversation's newest event of any kind (the inbox's order, chat.ts), and
+-- each member's newest read marker
+create index if not exists chat_events_conversation_seq_idx on chat_events (conversation_id, seq desc);
+create index if not exists chat_events_sender_kind_idx on chat_events (conversation_id, kind, sender_id, seq desc);
 create index if not exists chat_events_sender_idx on chat_events (sender_id);
 -- messages since a mark (push.ts, mail-digest.ts)
 create index if not exists chat_events_created_idx on chat_events (created_at);
