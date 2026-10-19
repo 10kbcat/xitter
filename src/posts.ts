@@ -406,6 +406,9 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 	return hydrate(viewerId, rows.map(toRow));
 }
 
+export const seenBy = (userId: string) =>
+	sql`(u.id = ${userId}::bigint or ((not p.hidden or ${staffViewer(userId)}) and u.id not in ${protectedFor(userId)} and u.id not in ${suspendedFor(userId)}))`;
+
 export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string } = {}): Promise<string> {
 	const [author] = await sql`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
@@ -416,7 +419,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	let conversationId = id;
 	let replyToUserId: string | null = null;
 	if (opts.replyToId) {
-		const [parent] = await sql`select conversation_id, user_id from posts where id = ${opts.replyToId}::bigint`;
+		const [parent] = await sql`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
@@ -428,7 +431,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		if (limited.no) throw new PostError("The author of the original post limited who can reply to it.", 433);
 	}
 	if (opts.quoteId) {
-		const [quoted] = await sql`select id, user_id from posts where id = ${opts.quoteId}::bigint`;
+		const [quoted] = await sql`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
 		const [owner] = await sql`select protected from users where id = ${quoted.user_id}::bigint`;
