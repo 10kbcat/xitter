@@ -183,6 +183,12 @@ scripts/fetch-client.ts --latest` re-pins the build.
 Everything else (name, sign-up mode, features, limits, announcement, rules,
 logos) is set in the admin panel.
 
+## Federation
+
+Instances listed in `instances.json` share public accounts and posts with each
+other. [FEDERATION.md](FEDERATION.md) covers the list, the protocol,
+defederation and superadmins.
+
 ## Encrypted chat and key backup
 
 Chat encrypts messages and attachments in the browser. Xitter keeps ciphertext,
