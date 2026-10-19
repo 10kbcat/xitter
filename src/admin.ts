@@ -104,7 +104,7 @@ const instanceOf = (v: unknown) => {
 };
 
 const ACTIONS: Record<string, Action> = {
-	federation: { role: "support", run: async () => {
+	federation: { role: "support", run: async (a) => {
 		const blocks = await listBlocks();
 		const stats = await sql`select p.instance, p.cursor::text, p.last_ok_at, p.last_error, p.last_error_at, p.key,
 			(select count(*)::int from users u where u.instance = p.instance) as accounts,
@@ -123,6 +123,7 @@ const ACTIONS: Record<string, Action> = {
 			registry: { sequence: registrySequence(), checked_at: registryCheckedAt ? new Date(registryCheckedAt).toISOString() : null, error: registryError },
 			outbox_head: head,
 			superadmins: SUPERADMINS.map((x) => `${x.screen_name}@${x.instance}`),
+			superadmin: !!a.superadmin,
 			instances: await Promise.all(
 				[...known].sort().map(async (id) => {
 					const l = listedInstance(id);
