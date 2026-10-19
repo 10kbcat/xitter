@@ -4,8 +4,8 @@ export type Superadmin = { readonly instance: string; readonly screen_name: stri
 
 const HARDCODED: readonly Superadmin[] = [
 	{ instance: "xitter.opuadm.com", screen_name: "meow", user_id: null, instance_key: null },
-	{ instance: "xit.chococat.lol", screen_name: "pozo", user_id: null, instance_key: null },
-	{ instance: "xit.chococat.lol", screen_name: "tiago", user_id: null, instance_key: null },
+	{ instance: "xit.chococat.lol", screen_name: "pozo", user_id: null, instance_key: "C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w" },
+	{ instance: "xit.chococat.lol", screen_name: "tiago", user_id: null, instance_key: "C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w" },
 ];
 
 const testing = process.env.FEDERATION_ALLOW_HTTP && process.env.XITTER_TEST_SUPERADMINS;
