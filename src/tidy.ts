@@ -323,6 +323,20 @@ export const TIDY_SCRIPT = `(function(){
 		document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
 			if(T.menuItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
 		});
+		// signed out on a phone, X's page leads with "Get the app", which opens X's
+		// own app or its store page and looks like being sent to x.com; here
+		// signing in is the way in, so its link takes the button's place
+		document.querySelectorAll("button").forEach(function(b){
+			if(b.innerText.trim()!=="Get the app"||b.style.display==="none")return;
+			b.style.display="none";
+			var box=b.parentElement;
+			while(box&&!box.querySelector('a[href="/i/flow/login"]'))box=box.parentElement;
+			if(!box)return;
+			box.querySelectorAll("span").forEach(function(n){if(n.innerText.trim()==="Already have an account?")n.style.display="none"});
+			var a=box.querySelector('a[href="/i/flow/login"]');
+			a.style.backgroundColor="#eff3f4";a.style.borderColor="#eff3f4";
+			a.querySelectorAll("span,div").forEach(function(n){n.style.color="#0f1419"});
+		});
 		// the verified-badge popup's "Upgrade to get verified": nothing to upgrade to here
 		document.querySelectorAll('a,button,[role="button"]').forEach(function(b){
 			if(b.innerText&&b.innerText.trim()==="Upgrade to get verified")b.style.display="none";
