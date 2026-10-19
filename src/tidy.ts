@@ -68,6 +68,7 @@ const ROBOT = "M11 2h2v3h5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 
 // Material Symbols "upload"
 const UPLOAD = "M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z";
 // Material Symbols "public"
+const CAT = "M5 3.5 9.2 7.6A9 9 0 0 1 12 7.2a9 9 0 0 1 2.8.4L19 3.5V12a7 7 0 0 1-14 0V3.5Zm4.5 8.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm5 0a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z";
 const GLOBE = "M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q41-45 62.5-100.5T800-480q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z";
 // Every link is a tab on the account pages. `where` adds it to the client too:
 // the More menu, Settings > Your account, or both. The menu keeps only what
@@ -84,6 +85,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 		exists (select 1 from staff_messages where user_id = u.id and revoked_at is null) or exists (select 1 from moderation_appeals where user_id = u.id) as notices
 		from users u where u.id = ${userId}::bigint`;
 	if (u?.org) links.push({ href: "/account/organisation", text: "Organisation", description: "Manage affiliates, or answer an organisation that asked to add you.", icon: BUILDING, where: "settings" });
+	links.push({ href: "/account/decoration", text: "Avatar decoration", description: "Put cat ears or a decoration around your avatar.", icon: CAT, where: "both" });
 	links.push({ href: "/account/automation", text: "Automation", description: "Name the account that runs this one.", icon: ROBOT, where: "tabs" });
 	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD, where: "both" });
 	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960", where: "settings" });
