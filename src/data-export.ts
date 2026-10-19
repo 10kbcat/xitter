@@ -19,9 +19,26 @@ async function build(tx: SQL, viewer: Viewer, exportId: string) {
 		'generated_at', ${new Date().toISOString()}::text,
 		'account', (select to_jsonb(x) from (select screen_name, name, bio, location, website, email, language, protected, ${iso(sql`created_at`)} as created_at
 			from users where id = ${id}::bigint) x),
-		'posts', ${list(sql`select id::text as id, text, ${iso(sql`created_at`)} as created_at, reply_to_id::text as reply_to_id from posts where user_id = ${id}::bigint order by id`)},
+		'posts', ${list(sql`select id::text as id, text, ${iso(sql`created_at`)} as created_at, reply_to_id::text as reply_to_id, poll_id::text as poll_id from posts where user_id = ${id}::bigint order by id`)},
 		'drafts', ${list(sql`select id::text as id, request, ${iso(sql`created_at`)} as created_at from scheduled_posts where user_id = ${id}::bigint and kind = 'draft' order by id`)},
 		'scheduled_posts', ${list(sql`select id::text as id, request, ${iso(sql`execute_at`)} as execute_at, ${iso(sql`created_at`)} as created_at from scheduled_posts where user_id = ${id}::bigint and kind = 'scheduled' order by execute_at, id`)},
+		'polls', ${list(sql`select p.id::text as id, p.choices, p.duration_minutes,
+			${iso(sql`p.ends_at`)} as ends_at, ${iso(sql`p.created_at`)} as created_at,
+			case when p.choice_media is null then null else (select array_agg(m.id::text order by choice.n)
+				from unnest(p.choice_media) with ordinality as choice(media_id, n)
+				left join media m on m.id = choice.media_id and m.user_id = ${id}::bigint) end as choice_media
+			from polls p where p.user_id = ${id}::bigint order by p.id`)},
+		'poll_votes', ${list(sql`select poll_id::text as poll_id, choice, ${iso(sql`created_at`)} as created_at
+			from poll_votes where user_id = ${id}::bigint order by created_at, poll_id`)},
+		'media', ${list(sql`select id::text as id, kind, mime, size, width, height, post_id::text as post_id, position,
+			duration_ms, alt_text, sensitive_warning, state, detached, ${iso(sql`created_at`)} as created_at
+			from media where user_id = ${id}::bigint order by id`)},
+		'bookmark_folders', ${list(sql`select id::text as id, name, ${iso(sql`created_at`)} as created_at
+			from bookmark_folders where user_id = ${id}::bigint order by created_at, id`)},
+		'bookmark_folder_posts', ${list(sql`select fp.folder_id::text as folder_id, fp.post_id::text as post_id, ${iso(sql`fp.created_at`)} as created_at
+			from bookmark_folder_posts fp join bookmark_folders f on f.id = fp.folder_id
+			join bookmarks b on b.post_id = fp.post_id and b.user_id = ${id}::bigint
+			where f.user_id = ${id}::bigint order by fp.folder_id, fp.created_at, fp.post_id`)},
 		'likes', ${list(sql`select post_id::text as post_id, ${iso(sql`created_at`)} as created_at from likes where user_id = ${id}::bigint order by likes.created_at`)},
 		'bookmarks', ${list(sql`select post_id::text as post_id, ${iso(sql`created_at`)} as created_at from bookmarks where user_id = ${id}::bigint order by bookmarks.created_at`)},
 		'following', ${list(sql`select u.screen_name, ${iso(sql`f.created_at`)} as created_at from follows f join users u on u.id = f.followee_id where f.follower_id = ${id}::bigint`)},
