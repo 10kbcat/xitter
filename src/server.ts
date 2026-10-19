@@ -42,6 +42,7 @@ import { apiDocsPage } from "./api-docs";
 import { hashflagAsset } from "./hashflags";
 import { startMailDigests } from "./mail-digest";
 import { SERVICE_WORKER, startPush } from "./push";
+import { manifest } from "./pwa";
 import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 
@@ -334,7 +335,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p.startsWith("/public/")) return servePublic(p);
 	if (p === "/favicon.ico") return servePublic("/public/favicon.png");
 	if (p === "/sw.js") return new Response(SERVICE_WORKER, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
-	if (p === "/manifest.json") return new Response(null, { status: 404 });
+	if (p === "/manifest.json") return manifest();
 
 	const viewer = await getViewer(req);
 	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();
