@@ -74,10 +74,9 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// stays on the element (and its tooltip), and the globe badge says where
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
-	// tag: where accounts are told apart by their handle (search, Who to
-	// follow, profiles), a small tag with the instance follows it, or five
-	// accounts would all read "@Roblox"
-	function shorten(box,tag){
+	// a small tag with the instance follows the short handle, or five accounts
+	// would all read "@Roblox"
+	function shorten(box){
 		var spans=[box].concat([].slice.call(box.querySelectorAll("span, a")));
 		for(var i=0;i<spans.length;i++){
 			var el=spans[i],t=el.firstChild;
@@ -87,7 +86,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			el.setAttribute("data-xitter-handle",(m[1]+"@"+m[2]).toLowerCase());
 			el.title="@"+m[1]+"@"+m[2];
 			t.nodeValue="@"+m[1];
-			if(tag&&!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
+			if(!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
 				var home=document.createElement("span");
 				home.setAttribute("data-xitter-home","");
 				home.textContent=m[2];
@@ -149,17 +148,17 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			// a box holding other accounts' boxes (the account switcher, a hover card
 			// with a list): each of those is an account of its own, this one isn't
 			if(box.querySelector(SEL))return;
-			shorten(box,!box.matches('[data-testid="User-Name"]'));
+			shorten(box);
 			var name=handle(box);
 			if(!name)return;
 			if(known[name]){draw(box,name);return}
 			if(known[name]===undefined&&!waiting[name]){waiting[name]=true;queue.push(name)}
 		});
 		// the accounts under the search box carry no badge, only the handle
-		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(function(b){shorten(b,true)});
+		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(shorten);
 		// "Replying to @name@example.org" on posts and in the reply composer: links
 		// to accounts from other instances, and the composer's button that names them
-		document.querySelectorAll('a[href*="@"]').forEach(function(a){shorten(a,false)});
+		document.querySelectorAll('a[href*="@"]').forEach(shorten);
 		document.querySelectorAll('[role="dialog"] [role="button"], [data-testid="primaryColumn"] [role="button"]').forEach(function(b){
 			if(b.textContent.indexOf("Replying to")===0&&b.textContent.indexOf("@",1)>=0)shortenText(b);
 		});
