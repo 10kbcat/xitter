@@ -74,16 +74,27 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// stays on the element (and its tooltip), and the globe badge says where
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
-	function shorten(box){
+	// `tag`: where accounts are told apart by their handle (search, Who to
+	// follow, profiles), a small tag with the instance follows it, or five
+	// accounts would all read "@Roblox"
+	function shorten(box,tag){
 		var spans=[box].concat([].slice.call(box.querySelectorAll("span, a")));
 		for(var i=0;i<spans.length;i++){
-			var t=spans[i].firstChild;
-			if(!t||t.nodeType!==3||spans[i].childNodes.length!==1)continue;
+			var el=spans[i],t=el.firstChild;
+			if(!t||t.nodeType!==3||el.childNodes.length!==1)continue;
 			var m=/^@([^\s\/\?#@%,:]{1,50})@([a-zA-Z0-9.-]{1,253}(?::\d{1,5})?)$/.exec(t.nodeValue);
 			if(!m)continue;
-			spans[i].setAttribute("data-xitter-handle",(m[1]+"@"+m[2]).toLowerCase());
-			spans[i].title="@"+m[1]+"@"+m[2];
+			el.setAttribute("data-xitter-handle",(m[1]+"@"+m[2]).toLowerCase());
+			el.title="@"+m[1]+"@"+m[2];
 			t.nodeValue="@"+m[1];
+			if(tag&&!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
+				var home=document.createElement("span");
+				home.setAttribute("data-xitter-home","");
+				home.textContent=m[2];
+				home.title="From "+m[2];
+				home.style.cssText="display:inline-block;margin-left:4px;padding:0 5px;border:1px solid rgb(13 148 136 / .5);border-radius:4px;color:#0d9488;font-size:12px;line-height:16px;vertical-align:1px;white-space:nowrap";
+				el.after(home);
+			}
 		}
 	}
 	// the same inside running text ("Replying to @a@x.org and @b@y.org")
@@ -131,17 +142,17 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			// a box holding other accounts' boxes (the account switcher, a hover card
 			// with a list): each of those is an account of its own, this one isn't
 			if(box.querySelector(SEL))return;
-			shorten(box);
+			shorten(box,!box.matches('[data-testid="User-Name"]'));
 			var name=handle(box);
 			if(!name)return;
 			if(known[name]){draw(box,name);return}
 			if(known[name]===undefined&&!waiting[name]){waiting[name]=true;queue.push(name)}
 		});
 		// the accounts under the search box carry no badge, only the handle
-		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(shorten);
+		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(function(b){shorten(b,true)});
 		// "Replying to @name@example.org" on posts and in the reply composer: links
 		// to accounts from other instances, and the composer's button that names them
-		document.querySelectorAll('a[href*="@"]').forEach(shorten);
+		document.querySelectorAll('a[href*="@"]').forEach(function(a){shorten(a,false)});
 		document.querySelectorAll('[role="dialog"] [role="button"], [data-testid="primaryColumn"] [role="button"]').forEach(function(b){
 			if(b.textContent.indexOf("Replying to")===0&&b.textContent.indexOf("@",1)>=0)shortenText(b);
 		});
