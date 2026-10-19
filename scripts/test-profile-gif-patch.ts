@@ -12,3 +12,8 @@ test("profile image pickers accept GIFs without changing other pickers", () => {
 	expect(patched).toContain("acceptGifs:!0,location:T.rz.ProfileBanner,mediaItem:banner");
 	expect(patched).toContain("{location:T.rz.Post,mediaItem:post");
 });
+
+test("the Edit media cropper takes GIFs, not only images", () => {
+	const patched = patchText("_getMedia=()=>{let{media:e}=this.props;return e&&e.mediaFile&&e.mediaFile.isImage?e:null}");
+	expect(patched).toContain("(e.mediaFile.isImage||e.mediaFile.isGif)?e:null");
+});
