@@ -2,19 +2,20 @@
 // instance at once, or from some of them (blocks.ts federatedHiddenFor).
 // Accounts the viewer follows stay, and searching a full handle
 // (@name@example.org) still finds anyone. Kept in users.preferences:
-// hide_federated (all of them) and hidden_instances (a list of instance ids).
+// hide_federated (all of them), hidden_instances (a list of instance ids) and
+// mute_hidden_notifications (no notifications from what's hidden either).
 
 import { accountPage, esc } from "./account-page";
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { ID_RE, INSTANCE_ID, listedInstance, peers } from "./federation";
 
-type Choice = { all: boolean; hidden: string[] };
+type Choice = { all: boolean; hidden: string[]; notifications: boolean };
 
 async function choice(userId: string): Promise<Choice> {
-	const [u] = await sql`select preferences->>'hide_federated' = 'true' as hide_all, coalesce(preferences->'hidden_instances', '[]'::jsonb) as hidden from users where id = ${userId}::bigint`;
+	const [u] = await sql`select preferences->>'hide_federated' = 'true' as hide_all, preferences->>'mute_hidden_notifications' = 'true' as mute, coalesce(preferences->'hidden_instances', '[]'::jsonb) as hidden from users where id = ${userId}::bigint`;
 	const hidden = Array.isArray(u?.hidden) ? u.hidden.filter((i: unknown): i is string => typeof i === "string") : [];
-	return { all: !!u?.hide_all, hidden };
+	return { all: !!u?.hide_all, hidden, notifications: !!u?.mute };
 }
 
 // the instances on the list, and any other this one has accounts from, with
@@ -56,6 +57,13 @@ async function page(req: Request, viewer: Viewer, c: Choice, error = "") {
 	<p class="dim">You can still find anyone by their full handle, like <b>@name@example.org</b>, in search.</p>
 	${error ? `<p class="error">${esc(error)}</p>` : ""}
 	${form(`<input type="hidden" name="all" value="${c.all ? "0" : "1"}">`, c.all ? "Show accounts from other instances" : "Hide all other instances")}
+	<h2>Notifications</h2>
+	<p class="dim">${
+		c.notifications
+			? "You get no notifications from accounts you hid (likes, reposts, follows, replies, mentions), except from accounts you follow."
+			: "Accounts you hid can still notify you when they like, repost, follow, reply to or mention you."
+	}</p>
+	${form(`<input type="hidden" name="notifications" value="${c.notifications ? "0" : "1"}">`, c.notifications ? "Get their notifications again" : "Mute their notifications", "secondary")}
 	${c.all ? "" : `<h2>Instances</h2>${list || '<p class="dim">No other instances yet.</p>'}`}`,
 	});
 }
@@ -66,7 +74,10 @@ export async function instancesRoute(req: Request, viewer: Viewer): Promise<Resp
 	const f = await req.formData().catch(() => undefined);
 	if (String(f?.get("csrf") ?? "") !== viewer.csrf) return page(req, viewer, c, "That form is out of date. Try again.");
 	const all = f?.get("all");
-	if (all !== null && all !== undefined) {
+	const notifications = f?.get("notifications");
+	if (notifications !== null && notifications !== undefined) {
+		await sql`update users set preferences = jsonb_set(coalesce(preferences, '{}'), '{mute_hidden_notifications}', ${String(notifications) === "1" ? "true" : "false"}::text::jsonb) where id = ${viewer.id}::bigint`;
+	} else if (all !== null && all !== undefined) {
 		await sql`update users set preferences = jsonb_set(coalesce(preferences, '{}'), '{hide_federated}', ${String(all) === "1" ? "true" : "false"}::text::jsonb) where id = ${viewer.id}::bigint`;
 	} else {
 		const id = String(f?.get("instance") ?? "").toLowerCase();

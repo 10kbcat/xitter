@@ -38,6 +38,12 @@ export const federatedHiddenFor = (viewerId: string) =>
 		and (me.preferences->>'hide_federated' = 'true' or coalesce(me.preferences->'hidden_instances', '[]'::jsonb) ? u.instance)
 		and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint))`;
 
+// the same accounts, for notifications: only when the viewer also chose to
+// mute notifications from what they hid (mute_hidden_notifications)
+export const federatedMutedFor = (viewerId: string) =>
+	sql`(select x.id from ${federatedHiddenFor(viewerId)} as x(id)
+		where exists (select 1 from users me where me.id = ${viewerId}::bigint and me.preferences->>'mute_hidden_notifications' = 'true'))`;
+
 // a search that names someone on another instance (@name@example.org, from:name@example.org)
 export const namesOtherInstance = (query: string) => /\w@[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(query);
 
