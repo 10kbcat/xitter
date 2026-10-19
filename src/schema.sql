@@ -244,6 +244,13 @@ create table if not exists media (
 	created_at timestamptz not null default now()
 );
 create index if not exists media_post_idx on media (post_id, position);
+alter table media add column if not exists detached boolean not null default false;
+create or replace function media_detached() returns trigger language plpgsql as $$
+begin
+	if old.post_id is not null and new.post_id is null then new.detached := true; end if;
+	return new;
+end $$;
+create or replace trigger media_detached before update of post_id on media for each row execute function media_detached();
 
 alter table users add column if not exists website text not null default '';
 

@@ -333,7 +333,7 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 	return uploadError("Unknown command.");
 }
 
-type Served = { mime: string; owner: string; post: string | null };
+type Served = { mime: string; owner: string; post: string | null; detached: boolean; at: number };
 const mimeCache = new Map<string, Served>();
 const MAX_MIME_CACHE = 4096;
 const ownerCache = new Map<string, { hidden: boolean; at: number }>();
@@ -343,18 +343,20 @@ const PRIVATE = "private, max-age=3600";
 
 async function servedOf(id: string): Promise<Served | undefined> {
 	const hit = mimeCache.get(id);
-	if (hit) {
+	if (hit && Date.now() - hit.at < 30_000) {
 		mimeCache.delete(id);
 		mimeCache.set(id, hit);
 		return hit;
 	}
-	const [row] = await sql`select mime, user_id::text as owner, post_id::text as post from media where id = ${id}::bigint`;
+	mimeCache.delete(id);
+	const [row] = await sql`select mime, user_id::text as owner, post_id::text as post, detached from media where id = ${id}::bigint`;
 	if (!row) return undefined;
-	if (row.post) {
+	const served = { ...row, at: Date.now() } as Served;
+	if (served.post) {
 		if (mimeCache.size >= MAX_MIME_CACHE) mimeCache.delete(mimeCache.keys().next().value!);
-		mimeCache.set(id, row as Served);
+		mimeCache.set(id, served);
 	}
-	return row as Served;
+	return served;
 }
 
 async function ownerHidden(owner: string) {
@@ -367,6 +369,7 @@ async function ownerHidden(owner: string) {
 }
 
 async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefined> {
+	if (served.detached) return served.owner === viewer?.id ? PRIVATE : undefined;
 	if (!served.post || !(await ownerHidden(served.owner))) return IMMUTABLE;
 	const [unseen] = await sql`select 1 where ${served.owner}::bigint in ${protectedFor(viewer.id)} or ${served.owner}::bigint in ${suspendedFor(viewer.id)}`;
 	return unseen ? undefined : PRIVATE;
