@@ -7,7 +7,9 @@
 
 import type { Viewer } from "./auth";
 import { sql } from "./db";
+import { protectedFor, suspendedFor } from "./blocks";
 import { mediaForPosts, mediaUrl, posterUrl } from "./media";
+import { staffViewer } from "./staff-access";
 import { userResult } from "./model";
 import { userById } from "./users";
 
@@ -259,7 +261,12 @@ export const analyticsHandlers = {
 		const p = await ownPost(v, vars.rest_id);
 		if (!p) return tweetWrap(String(vars.rest_id ?? ""), undefined);
 		const card = await postCard(v, p);
-		const parent = p.reply_to_id ? (await sql`select id::text, user_id::text, text, created_at from posts where id = ${p.reply_to_id}::bigint`)[0] : undefined;
+		// the post it answers, while the viewer may see it (the rules of posts.ts's select)
+		const parent = p.reply_to_id
+			? (await sql`select p.id::text, p.user_id::text, p.text, p.created_at from posts p where p.id = ${p.reply_to_id}::bigint
+				and (not p.hidden or ${staffViewer(v.id)}) and p.user_id not in ${protectedFor(v.id)} and p.user_id not in ${suspendedFor(v.id)}
+				and p.user_id not in (select blocker_id from blocks where blocked_id = ${v.id}::bigint)`)[0]
+			: undefined;
 		const parentUser = parent ? await userById(v.id, parent.user_id) : undefined;
 		return tweetWrap(p.id, {
 			...card,

@@ -13,9 +13,10 @@
 //   filter:follows                   authors the viewer follows
 //   lang:xx, near:, other operators  accepted and ignored
 
-import { blockedFor, outOfView } from "./blocks";
+import { blockedFor, outOfView, protectedFor } from "./blocks";
 import { sql } from "./db";
 import { settings } from "./settings";
+import { staffViewer } from "./staff-access";
 
 type Clause = ReturnType<typeof sql>;
 
@@ -102,8 +103,11 @@ export async function searchPosts(
 	const media = opts.media ? sql`and exists (select 1 from media fm where fm.post_id = p.id)` : sql``;
 	// "Visibility limited" posts (staff's Fosnr label) don't come up in search
 	// suspended accounts' posts stay out of search for staff too
+	// What the viewer can't open stays out here, not only when the posts are
+	// loaded: the paging cursor is made of these ids.
 	const hidden = sql`and p.user_id not in ${blockedFor(opts.viewerId)} and p.user_id not in ${outOfView(opts.viewerId)}
-		and p.user_id not in (select id from users where status = 'suspended') and p.notice->>'type' is distinct from 'Fosnr'`;
+		and p.user_id not in (select id from users where status = 'suspended') and p.notice->>'type' is distinct from 'Fosnr'
+		and p.user_id not in ${protectedFor(opts.viewerId)} and (not p.hidden or ${staffViewer(opts.viewerId)})`;
 	if (opts.top) {
 		const rows = await sql`select p.id from (select p.id from posts p where ${cond} ${media} ${hidden} order by p.id desc limit ${TOP_POOL}) p
 			order by ((select count(*) from likes x where x.post_id = p.id) + 2 * (select count(*) from reposts x where x.post_id = p.id)

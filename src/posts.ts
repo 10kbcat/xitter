@@ -416,7 +416,10 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	let conversationId = id;
 	let replyToUserId: string | null = null;
 	if (opts.replyToId) {
-		const [parent] = await sql`select conversation_id, user_id from posts where id = ${opts.replyToId}::bigint`;
+		// only a post the author can see: a reply's details show the post it answers
+		const [parent] = await sql`select p.conversation_id, p.user_id from posts p where p.id = ${opts.replyToId}::bigint
+			and (not p.hidden or p.user_id = ${userId}::bigint or ${staffViewer(userId)})
+			and p.user_id not in ${protectedFor(userId)} and p.user_id not in ${suspendedFor(userId)}`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
