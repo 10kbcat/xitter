@@ -78,6 +78,12 @@ try {
 	await bob.gql("FavoriteTweet", { tweet_id: mirror });
 	check("A sees bob's like", !!(await until(async () => (await A.db`select 1 from likes where user_id = ${bobOnA ?? "0"}::bigint and post_id = ${postId}::bigint`).length > 0)));
 
+	await A.db`update posts set count_overrides = '{"likes": 4242}'::jsonb where id = ${postId}::bigint`;
+	const shown = await until(async () => (await B.db`select remote_counts from posts where id = ${mirror ?? "0"}::bigint and (remote_counts->>'likes')::int = 4242`)[0]);
+	check("counts set at home show on the copy", !!shown);
+	await A.db`update users set count_overrides = '{"followers": 777}'::jsonb where id = ${alice.id}::bigint`;
+	check("and so do an account's", !!(await until(async () => (await B.db`select 1 from users where id = ${aliceOnB ?? "0"}::bigint and (remote_counts->>'followers')::int = 777`).length > 0)));
+
 	const reply = await bob.gql("CreateTweet", { tweet_text: `hi alice ${stamp}`, reply: { in_reply_to_tweet_id: mirror } });
 	const replyId = reply.data?.create_tweet?.tweet_results?.result?.rest_id as string;
 	check("bob replies on B", !!replyId, reply.errors);

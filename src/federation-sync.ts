@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
@@ -41,6 +41,36 @@ async function canonicalOf(kind: "user" | "post", localId: string): Promise<stri
 	return row.remote_id ? ref(row.remote_id, row.instance) : undefined;
 }
 
+const userCounts = async (id: string) => {
+	const [c] = await sql`select coalesce((u.count_overrides->>'followers')::int, s.followers, 0) as followers, coalesce((u.count_overrides->>'following')::int, s.following, 0) as following,
+		coalesce(s.posts, 0) as posts, coalesce(s.likes, 0) as likes from users u left join user_stats s on s.user_id = u.id where u.id = ${id}::bigint`;
+	return c ? { followers: c.followers, following: c.following, posts: c.posts, likes: c.likes } : undefined;
+};
+
+const postCounts = async (id: string) => {
+	const [c] = await sql`select
+		coalesce((p.count_overrides->>'likes')::int, (select count(*)::int from likes x where x.post_id = p.id)) as likes,
+		coalesce((p.count_overrides->>'reposts')::int, (select count(*)::int from reposts x where x.post_id = p.id)) as reposts,
+		coalesce((p.count_overrides->>'replies')::int, (select count(*)::int from posts x where x.reply_to_id = p.id)) as replies,
+		coalesce((p.count_overrides->>'quotes')::int, (select count(*)::int from posts x where x.quote_id = p.id)) as quotes,
+		coalesce((p.count_overrides->>'bookmarks')::int, (select count(*)::int from bookmarks x where x.post_id = p.id)) as bookmarks,
+		coalesce((p.count_overrides->>'views')::int, (select count(*)::int from post_views x where x.post_id = p.id)) as views
+		from posts p where p.id = ${id}::bigint`;
+	return c ? { likes: c.likes, reposts: c.reposts, replies: c.replies, quotes: c.quotes, bookmarks: c.bookmarks, views: c.views } : undefined;
+};
+
+const countsOf = (value: unknown, keys: string[]) => {
+	if (!value || typeof value !== "object") return null;
+	const out: Record<string, number> = {};
+	for (const k of keys) {
+		const n = (value as Record<string, unknown>)[k];
+		if (Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 1_000_000_000) out[k] = n as number;
+	}
+	return JSON.stringify(out);
+};
+const USER_COUNTS = ["followers", "following", "posts", "likes"];
+const POST_COUNTS = ["likes", "reposts", "replies", "quotes", "bookmarks", "views"];
+
 async function renderUser(id: string) {
 	const [u] = await sql`select id::text, screen_name, name, bio, location, website, avatar_url, banner_url, protected, created_at, verified_type, translator, flag, parody_label, ${badgesOf(sql`users.id`)} as badges from users
 		where id = ${id}::bigint and instance is null and status <> 'suspended' and deactivated_at is null`;
@@ -53,6 +83,7 @@ async function renderUser(id: string) {
 		bio: u.bio,
 		location: u.location,
 		website: u.website ?? null,
+		counts: await userCounts(id),
 		verified_type: u.verified_type ?? null,
 		translator: u.translator ?? null,
 		flag: u.flag ?? null,
@@ -90,6 +121,7 @@ async function renderPost(id: string) {
 		created_at: new Date(p.created_at).toISOString(),
 		edited_at: p.edited_at ? new Date(p.edited_at).toISOString() : null,
 		sensitive: p.sensitive,
+		counts: await postCounts(id),
 		reply_to: p.reply_to_id ? ((await canonicalOf("post", p.reply_to_id)) ?? null) : null,
 		quote: p.quote_id ? ((await canonicalOf("post", p.quote_id)) ?? null) : null,
 		media: media.map((m: any) => ({ id: m.id, kind: m.kind, mime: m.mime, width: m.width, height: m.height, alt_text: m.alt_text ?? null, duration_ms: m.duration_ms ?? null })),
@@ -100,12 +132,12 @@ async function renderPair(kind: "like" | "repost" | "follow", a: string, b: stri
 	if (kind === "follow") {
 		const [on] = await sql`select 1 from follows f join users u on u.id = f.followee_id where f.follower_id = ${a}::bigint and f.followee_id = ${b}::bigint and not u.protected`;
 		const target = await canonicalOf("user", b);
-		return target ? { kind, actor: a, target, on: !!on } : undefined;
+		return target ? { kind, actor: a, target, on: !!on, counts: target === ref(b) ? await userCounts(b) : null } : undefined;
 	}
 	const table = kind === "like" ? sql`likes` : sql`reposts`;
 	const [on] = await sql`select 1 from ${table} where user_id = ${a}::bigint and post_id = ${b}::bigint`;
 	const target = await canonicalOf("post", b);
-	return target ? { kind, actor: a, target, on: !!on } : undefined;
+	return target ? { kind, actor: a, target, on: !!on, counts: target === ref(b) ? await postCounts(b) : null } : undefined;
 }
 
 async function eventsAfter(after: string, limit: number) {
@@ -266,7 +298,7 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 	const avatar = await remoteMedia(instance, id, u.avatar, null, null);
 	const banner = await remoteMedia(instance, id, u.banner, null, null);
 	await sql`update users set avatar_url = ${avatar ? `/media/${avatar}` : null}, banner_url = ${banner ? `/media/banner/${banner}` : null},
-		verified_type = ${looks.verified_type}, translator = ${looks.translator}, flag = ${looks.flag}, parody_label = ${looks.parody_label}, remote_badges = ${looks.remote_badges}::text::jsonb
+		remote_counts = ${countsOf(u.counts, USER_COUNTS)}::text::jsonb, verified_type = ${looks.verified_type}, translator = ${looks.translator}, flag = ${looks.flag}, parody_label = ${looks.parody_label}, remote_badges = ${looks.remote_badges}::text::jsonb
 		where id = ${id}::bigint`;
 	if (u.protected) await sql`delete from posts where user_id = ${id}::bigint`;
 	return id;
@@ -289,6 +321,7 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 		if (old && old.text !== text)
 			await sql`insert into post_versions (version_id, post_id, seq, text, created_at)
 				values (${newId()}::bigint, ${local}::bigint, ${old.edit_count}, ${old.text}, ${old.edited_at ?? old.created_at})`;
+		await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${local}::bigint`;
 		await sql`update posts set text = ${text}, sensitive = ${!!p.sensitive}, edited_at = ${old && old.text !== text ? (editedAt ?? new Date()) : editedAt},
 			edit_count = edit_count + ${old && old.text !== text ? 1 : 0} where id = ${local}::bigint`;
 		if (old && !old.reply_to_id && p.reply_to) {
@@ -311,6 +344,7 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 		values (${id}::bigint, ${author}::bigint, ${text}, ${replyTo ?? null}::bigint, ${parent?.user_id ?? null}::bigint, ${parent?.conversation_id ?? id}::bigint,
 			${quote ?? null}::bigint, ${instance}, ${!!p.sensitive}, ${editedAt}, ${created})`;
 	await sql`insert into federated_objects (instance, kind, remote_id, local_id) values (${instance}, 'post', ${p.id}::bigint, ${id}::bigint) on conflict do nothing`;
+	await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${id}::bigint`;
 	await saveMentions(id, text, instance, lookupRemoteUser);
 	await attachMedia(instance, author, id, p.media);
 	return id;
@@ -332,23 +366,39 @@ const blockedBetween = async (a: string, b: string) =>
 async function applyPair(instance: string, e: any) {
 	const actor = await resolveUser(ref(String(e.actor ?? ""), instance));
 	if (!actor) return;
+	const home = parseRef(e.target);
+	if (home?.instance === instance && e.counts) {
+		const target = await mapped(instance, e.kind === "follow" ? "user" : "post", home.id);
+		if (target)
+			await (e.kind === "follow"
+				? sql`update users set remote_counts = ${countsOf(e.counts, USER_COUNTS)}::text::jsonb where id = ${target}::bigint`
+				: sql`update posts set remote_counts = ${countsOf(e.counts, POST_COUNTS)}::text::jsonb where id = ${target}::bigint`);
+	}
 	if (e.kind === "follow") {
 		const target = await resolveUser(e.target);
 		if (!target || target === actor) return;
-		if (!e.on) return void (await sql`delete from follows where follower_id = ${actor}::bigint and followee_id = ${target}::bigint`);
+		if (!e.on) {
+			await sql`delete from follows where follower_id = ${actor}::bigint and followee_id = ${target}::bigint`;
+			return void (await sql`insert into federation_outbox (kind, a) select 'user', id from users where id = ${target}::bigint and instance is null`);
+		}
 		const [t] = await sql`select protected from users where id = ${target}::bigint`;
 		if (t?.protected || (await blockedBetween(actor, target))) return;
 		await sql`insert into follows (follower_id, followee_id) values (${actor}::bigint, ${target}::bigint) on conflict do nothing`;
+		await sql`insert into federation_outbox (kind, a) select 'user', id from users where id = ${target}::bigint and instance is null`;
 		return;
 	}
 	const post = await resolvePost(e.target);
 	if (!post) return;
 	const table = e.kind === "like" ? sql`likes` : sql`reposts`;
-	if (!e.on) return void (await sql`delete from ${table} where user_id = ${actor}::bigint and post_id = ${post}::bigint`);
+	if (!e.on) {
+		await sql`delete from ${table} where user_id = ${actor}::bigint and post_id = ${post}::bigint`;
+		return void (await sql`insert into federation_outbox (kind, a) select 'post', p.id from posts p join users u on u.id = p.user_id where p.id = ${post}::bigint and u.instance is null`);
+	}
 	const [owner] = await sql`select user_id::text from posts where id = ${post}::bigint`;
 	if (owner && (await blockedBetween(actor, owner.user_id))) return;
 	if (e.kind === "like") await sql`insert into likes (user_id, post_id) values (${actor}::bigint, ${post}::bigint) on conflict do nothing`;
 	else await sql`insert into reposts (id, user_id, post_id) values (${newId()}::bigint, ${actor}::bigint, ${post}::bigint) on conflict do nothing`;
+	await sql`insert into federation_outbox (kind, a) select 'post', p.id from posts p join users u on u.id = p.user_id where p.id = ${post}::bigint and u.instance is null`;
 }
 
 async function applyEvent(instance: string, e: any) {
@@ -566,4 +616,28 @@ export function startFederationSync() {
 		if (tick % 200 === 10) void backfillMedia().catch((e) => console.error("federation: media backfill:", e instanceof Error ? e.message : e));
 		if (tick % 3600 === 0) void sql`delete from federation_outbox where created_at < now() - interval '60 days'`.catch(() => {});
 	}, 3000).unref();
+}
+
+export const storesRemoteMedia = () => STORE_MEDIA;
+
+export async function savedRemoteMedia(): Promise<{ files: number; bytes: number }> {
+	const [r] = await sql`select count(*) filter (where size > 0)::int as files, coalesce(sum(size), 0)::float8 as bytes from media where remote_instance is not null`;
+	return { files: r.files, bytes: r.bytes };
+}
+
+export async function dropRemoteMedia(): Promise<{ files: number; bytes: number }> {
+	let files = 0;
+	let bytes = 0;
+	for (const { id } of await sql`select id::text from media where remote_instance is not null`) {
+		for (const file of [join(MEDIA_DIR, id), posterFile(MEDIA_DIR, id)]) {
+			if (!existsSync(file)) continue;
+			bytes += statSync(file).size;
+			rmSync(file, { force: true });
+			files++;
+		}
+	}
+	await sql`update media set size = 0 where remote_instance is not null and size <> 0`;
+	memory.clear();
+	memoryBytes = 0;
+	return { files, bytes };
 }

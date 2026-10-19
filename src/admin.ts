@@ -11,7 +11,7 @@
 import { isSuperadminViewer } from "./superadmin";
 import { SUPERADMINS, isSuperadminHome, superadminNameHere, superadminOf } from "./superadmins";
 import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
-import { pullFrom } from "./federation-sync";
+import { dropRemoteMedia, pullFrom, savedRemoteMedia, storesRemoteMedia } from "./federation-sync";
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { isFlag } from "./flags";
@@ -123,6 +123,7 @@ const ACTIONS: Record<string, Action> = {
 			public_key: publicKey(),
 			entry: { id: INSTANCE_ID, name: settings().instance_name, source_url: settings().source_url || null, public_key: publicKey(), state: "active" },
 			listed_here: listedInstance(INSTANCE_ID) ?? null,
+			media: { stored: storesRemoteMedia(), ...(await savedRemoteMedia()) },
 			registry: { sequence: registrySequence(), checked_at: registryCheckedAt ? new Date(registryCheckedAt).toISOString() : null, error: registryError },
 			outbox_head: head,
 			superadmins: SUPERADMINS.map((x) => `${x.screen_name}@${x.instance}`),
@@ -182,6 +183,11 @@ const ACTIONS: Record<string, Action> = {
 		});
 		await audit(a, "federation_accept_key", id);
 		return {};
+	} },
+	federationDropMedia: { role: "admin", run: async (a) => {
+		const dropped = await dropRemoteMedia();
+		await audit(a, "federation_drop_media", INSTANCE_ID, dropped);
+		return dropped;
 	} },
 	federationPull: { role: "admin", run: async (a, b) => {
 		const id = instanceOf(b.instance);
