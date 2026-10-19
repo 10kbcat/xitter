@@ -1,11 +1,11 @@
 {
 	"version": 1,
-	"sequence": 5,
+	"sequence": 6,
 	"instances": [
 		{
 			"id": "social.opsex.best",
 			"name": "Xitter",
-			"source_url": null,
+			"source_url": "https://github.com/gabytz777/xitter",
 			"public_key": "aE7RikVEmC2lKQPAkfVtNk1GpJtx87H7PYaLxHxbZTM",
 			"state": "active"
 		},
