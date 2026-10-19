@@ -54,6 +54,8 @@ try {
 	check("B keeps a copy of alice", !!aliceOnB);
 	const [handle] = aliceOnB ? await B.db`select screen_name from users where id = ${aliceOnB}::bigint` : [];
 	check("named with her instance", handle?.screen_name === `${alice.name}@${idOf(A.origin)}`, handle?.screen_name);
+	const preview = await fetch(`${B.origin}/${alice.name}@${idOf(A.origin)}`, { redirect: "manual" });
+	check("B previews her for link fetchers by her full handle", preview.status === 200 && (await preview.text()).includes("og:title"), preview.status);
 	const mirror = await until(async () => (await B.db`select local_id::text from federated_objects where instance = ${idOf(A.origin)} and kind = 'post' and remote_id = ${postId}::bigint`)[0]?.local_id as string);
 	check("and her post", !!mirror);
 	const syncStatus = await until(async () => {
@@ -129,6 +131,8 @@ try {
 	const blocked = await adminApi(A, adminCookies, "federationBlock", { instance: idOf(B.origin), reason: "test" });
 	check("an admin defederates B", blocked.status === 200, blocked.body);
 	check("B's accounts drop out of view on A", (await A.db`select instance_blocked from users where id = ${bobOnA ?? "0"}::bigint`)[0]?.instance_blocked === true);
+	const hiddenPreview = await fetch(`${A.origin}/${bob.name}@${idOf(B.origin)}`, { redirect: "manual" });
+	check("and out of A's link previews", hiddenPreview.status === 302, hiddenPreview.status);
 	await bob.gql("CreateTweet", { tweet_text: `after the block ${stamp}` });
 	await Bun.sleep(20_000);
 	check("nothing new arrives from B", !(await A.db`select 1 from posts where user_id = ${bobOnA ?? "0"}::bigint and text like 'after the block%'`).length);
