@@ -1435,3 +1435,6 @@ create table if not exists archive_imports (
 	error text,
 	updated_at timestamptz not null default now()
 );
+
+-- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
+alter table users add column if not exists decor jsonb;

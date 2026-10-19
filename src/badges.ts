@@ -114,12 +114,19 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		// X's own badge: a square box sized to the text, after the name
 		var slot=box.querySelector('div[style*="height: calc(1.0625em)"]');
 		var holder,inside;
+		// this name's rows, not those of a name inside it (a hover card's)
+		var mine=[].filter.call(box.querySelectorAll("[data-xitter-badges]"),function(r){return r.closest(SEL)===box});
 		if(slot){
 			holder=slot.parentElement;
 			// anywhere in the row, not only right after: the client can draw its
 			// translator globe between X's badge and ours, and ours came twice
-			if(holder.parentElement&&holder.parentElement.querySelector(":scope > [data-xitter-badges]"))return;
+			var here=holder.parentElement&&holder.parentElement.querySelector(":scope > [data-xitter-badges]");
+			// a row put at the end of the name before X's badge box was drawn goes,
+			// or the badges show twice
+			mine.forEach(function(r){if(r!==here)r.remove()});
+			if(here)return;
 		}else{
+			if(mine.length)return;
 			// no check and the slot taken by a label (automated, parody, staff-made):
 			// X draws no badge box, so the badges go at the end of the name itself
 			var nameDiv=box.querySelector('div[dir="ltr"]');
