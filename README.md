@@ -169,6 +169,7 @@ scripts/fetch-client.ts --latest` re-pins the build.
 | `SOURCE_URL` | this repository | The source link shown to users |
 | `LOG_REQUESTS` | unset | `1` logs every API call, `errors` also prints the client's error reports |
 | `RATE_LIMITS` | on | `off` turns the rate limits off (for the test scripts; limits are in `src/ratelimit.ts`, `scripts/test-ratelimit.ts` checks them) |
+| `TRUSTED_PROXIES` | unset | Comma-separated addresses or ranges (`127.0.0.1`, `172.16.0.0/12`) whose `CF-Connecting-IP` header is believed, besides Cloudflare's own ranges: set it to a Cloudflare tunnel's address. A plain nginx or Caddy passes the visitor's header on, so leave it out of this list |
 | `EMBED_PROXY` | `https://cors.estrogen.delivery/` | where link previews are fetched from and their images served, as `<proxy>?url=<link>`, so neither the instance nor its readers reach the linked site |
 | `JUICEBOX_URL` | `http://localhost:8580` | Private address of the key-backup realm, proxied through `/juicebox/` |
 | `CHAT_TOKEN_SECRET` | saved in `data/chat-secrets.json` | Signing secret for chat socket tokens |
