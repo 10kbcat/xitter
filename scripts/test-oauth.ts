@@ -6,6 +6,7 @@ import { newId } from "../src/ids";
 import type { Viewer } from "../src/auth";
 import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken, validRedirect } from "../src/oauth";
 import { publicApi } from "../src/public-api";
+import { PUBLIC_ORIGIN } from "../src/config";
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://localhost/xitter");
 assert(["localhost", "127.0.0.1"].includes(database.hostname) && /test|codex/.test(database.pathname), "Use a disposable local test database.");
@@ -14,7 +15,7 @@ const developer = newId(), account = newId(), other = newId();
 const viewer = (id: string) => ({ id, screen_name: `oauth_${id}`, status: "active", role: null, csrf: `csrf-${id}`, token: `session-${id}` }) as Viewer;
 const appOwner = viewer(developer), user = viewer(account);
 const redirect = "https://example.org/callback?source=xitter";
-const origin = "http://localhost:3000";
+const origin = PUBLIC_ORIGIN;
 const postForm = (path: string, fields: Record<string, string>) => new Request(`${origin}${path}`, { method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 
 async function approve(clientId: string, scope: "read" | "write" = "read") {
