@@ -71,10 +71,11 @@ async function userRow(id: string) {
 const ownerId = async () => (await sql`select id::text from users where role = 'admin' order by created_at, id limit 1`)[0]?.id as string | undefined;
 const rankOf = (role: string | null, isOwner: boolean) => (isOwner ? 4 : role ? RANK[role as Role] : 0);
 
-export async function guard(actor: Viewer, targetId: string) {
+export async function guard(actor: Viewer, targetId: string, localOnly = false) {
 	const u = await userRow(targetId);
 	if (targetId === actor.id) return u;
 	const [t] = await sql`select instance from users where id = ${targetId}::bigint`;
+	if (localOnly && t?.instance) throw new AdminError(`That account lives on ${t.instance}, which manages it. Here you can only moderate it.`, 403);
 	if (isSuperadminViewer({ screen_name: u.screen_name, instance: t?.instance }) && !actor.superadmin) throw new AdminError("That account is a superadmin.", 403);
 	if (!u.role || actor.superadmin) return u;
 	const owner = await ownerId();
@@ -189,7 +190,7 @@ const ACTIONS: Record<string, Action> = {
 	} },
 	setNotesAccess: { role: "admin", run: async (a, b) => {
 		const id = idOf(b.id);
-		await guard(a, id);
+		await guard(a, id, true);
 		if (typeof b.enabled !== "boolean") throw new AdminError("Provide a boolean access setting.");
 		await sql`update users set notes_writer = ${b.enabled} where id = ${id}::bigint`;
 		await audit(a, "set_notes_access", id, { enabled: b.enabled });
@@ -352,7 +353,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.based_in_override, u.country, u.count_overrides, u.notes_writer, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text,
+			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.based_in_override, u.country, u.count_overrides, u.notes_writer, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text, u.instance,
 				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
@@ -377,7 +378,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			const limits: Record<string, [string, number]> = { name: ["name", 50], screen_name: ["screen_name", 50], bio: ["bio", 160], location: ["location", 30], website: ["website", 100], based_in: ["based_in_override", 50] };
 			const changes: Record<string, string | null> = {};
 			for (const [field, [column, max]] of Object.entries(limits)) {
@@ -410,7 +411,7 @@ const ACTIONS: Record<string, Action> = {
 			const id = idOf(b.id);
 			const kind = b.translator || null;
 			if (kind !== null && !["translator", "moderator", "approver"].includes(kind)) throw new AdminError("Unknown translator badge.");
-			await guard(a, id);
+			await guard(a, id, true);
 			await sql`update users set translator = ${kind} where id = ${id}::bigint`;
 			await audit(a, "set_translator", id, { translator: kind });
 			return {};
@@ -475,7 +476,7 @@ const ACTIONS: Record<string, Action> = {
 				if (n <= 1) throw new AdminError("You are the last admin.");
 			}
 			// nobody demotes staff at or above their own rank, the owner included
-			await guard(a, id);
+			await guard(a, id, true);
 			await sql`update users set role = ${role}, role_granted_by = ${role ? a.id : null}::bigint where id = ${id}::bigint`;
 			await audit(a, "set_role", id, { role });
 			return {};
@@ -487,7 +488,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			const password = randomPassword();
 			await sql`update users set password_hash = ${await Bun.password.hash(password)} where id = ${id}::bigint`;
 			await sql`delete from sessions where user_id = ${id}::bigint`;
@@ -500,7 +501,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			const rows = await sql`delete from sessions where user_id = ${id}::bigint returning token`;
 			await audit(a, "sign_out", id, { sessions: rows.length });
 			return { sessions: rows.length };
@@ -563,7 +564,7 @@ const ACTIONS: Record<string, Action> = {
 			const [u] = await sql`select id::text as id from users where lower(screen_name) = lower(${String(b.screen_name ?? "").replace(/^@/, "")})`;
 			if (!u) throw new AdminError("No account with that handle.");
 			if (u.id === orgId) throw new AdminError("An organisation can't be its own affiliate.");
-			await guard(a, u.id);
+			await guard(a, u.id, true);
 			// one organisation per person; adding moves them
 			await sql`insert into affiliations (org_id, user_id) values (${orgId}::bigint, ${u.id}::bigint)
 				on conflict (user_id) do update set org_id = excluded.org_id, created_at = now()`;

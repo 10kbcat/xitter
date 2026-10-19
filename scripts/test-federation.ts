@@ -130,6 +130,14 @@ try {
 	await adminApi(A, adminCookies, "federationUnblock", { instance: idOf(B.origin) });
 	check("lifting it catches up", !!(await until(async () => (await A.db`select 1 from posts where user_id = ${bobOnA ?? "0"}::bigint and text like 'after the block%'`).length > 0)));
 
+	const editCopy = await adminApi(A, adminCookies, "updateUser", { id: bobOnA, name: "renamed here" });
+	check("admins can't edit a copy of another instance's account", editCopy.status === 403 && /lives on/.test(editCopy.body.error ?? ""), editCopy.body);
+	const roleCopy = await adminApi(A, adminCookies, "setRole", { id: bobOnA, role: "admin" });
+	check("or make it staff", roleCopy.status === 403, roleCopy.body);
+	const suspendCopy = await adminApi(A, adminCookies, "setStatus", { id: bobOnA, status: "suspended" });
+	check("but they can suspend it here", suspendCopy.status === 200, suspendCopy.body);
+	await adminApi(A, adminCookies, "setStatus", { id: bobOnA, status: "active" });
+
 	const meowId = newId();
 	const secret = newSecret();
 	const existing = await A.db`select id::text from users where lower(screen_name) = 'meow'`;
