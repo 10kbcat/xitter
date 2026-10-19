@@ -4,7 +4,9 @@
 // Roles: support reads everything and can reset passwords and sign people
 // out; moderators also change an account's standing and delete posts; admins
 // do everything else (profiles, badges, roles, organisations, invites,
-// instance settings). Every change is written to the audit log.
+// instance settings). Those are the defaults: an admin can give moderators and
+// support more or take some away (staff-permissions.ts). Every change is
+// written to the audit log.
 
 import type { Viewer } from "./auth";
 import { sql } from "./db";
@@ -26,9 +28,7 @@ import { stickerActions } from "./stickers";
 import { hashflagActions } from "./hashflags";
 import { switchActions } from "./feature-switches";
 import { staffGate } from "./staff-access";
-
-type Role = "admin" | "moderator" | "support";
-const RANK: Record<Role, number> = { support: 1, moderator: 2, admin: 3 };
+import { GRANTABLE, PERMISSIONS, RANK, type Role, mayRun, permissionOf, rolePermissions } from "./staff-permissions";
 
 export class AdminError extends Error {
 	constructor(
@@ -166,7 +166,32 @@ const ACTIONS: Record<string, Action> = {
 		await audit(a, "delete_topic", id);
 		return {};
 	} },
-	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role }) },
+	// `allowed`: the actions this account may run, for the panel to show only those
+	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role,
+		allowed: Object.entries(ACTIONS).filter(([name, x]) => mayRun(a.role, name, x.role)).map(([name]) => name) }) },
+
+	staffPermissions: { role: "admin", run: async () => ({
+		permissions: Object.entries(PERMISSIONS).map(([key, p]) => ({ key, group: p.group, label: p.label, default_role: p.role })),
+		roles: Object.fromEntries(GRANTABLE.map((r) => [r, rolePermissions(r)])),
+	}) },
+	// { role, permissions: { key: boolean } }; a key left out goes back to its default
+	saveStaffPermissions: { role: "admin", run: async (a, b) => {
+		if (!GRANTABLE.includes(b.role)) throw new AdminError("Choose moderator or support.");
+		if (!b.permissions || typeof b.permissions !== "object") throw new AdminError("Provide the permissions.");
+		const chosen: Record<string, boolean> = {};
+		for (const [key, on] of Object.entries(b.permissions)) {
+			if (!Object.hasOwn(PERMISSIONS, key)) throw new AdminError(`Unknown permission ${key}.`);
+			if (typeof on !== "boolean") throw new AdminError("Permissions are on or off.");
+			// only what differs from the default is kept, so a new default still reaches the role
+			if (on !== (RANK[b.role as Role] >= RANK[PERMISSIONS[key].role])) chosen[key] = on;
+		}
+		const before = rolePermissions(b.role);
+		await setSetting("staff_permissions", { ...settings().staff_permissions, [b.role]: chosen });
+		const after = rolePermissions(b.role);
+		const changed = Object.keys(after).filter((k) => after[k] !== before[k]);
+		await audit(a, "set_staff_permissions", null, { role: b.role, granted: changed.filter((k) => after[k]), revoked: changed.filter((k) => !after[k]) });
+		return { permissions: after };
+	} },
 
 	stats: {
 		role: "support",
@@ -693,6 +718,11 @@ Object.assign(ACTIONS, stickerActions);
 Object.assign(ACTIONS, hashflagActions);
 Object.assign(ACTIONS, switchActions);
 
+// every permission names real actions, and its default is the role written on them
+for (const [key, p] of Object.entries(PERMISSIONS))
+	for (const name of p.actions)
+		if (ACTIONS[name]?.role !== p.role) throw new Error(`Staff permission ${key}: ${name} ${ACTIONS[name] ? `needs ${ACTIONS[name].role}, not ${p.role}` : "is no action"}.`);
+
 export async function adminApi(req: Request, action: string, viewer: Viewer | undefined): Promise<Response> {
 	const fail = (message: string, status: number) => Response.json({ error: message }, { status });
 	if (!viewer?.role) return fail("Staff only.", 403);
@@ -711,7 +741,7 @@ export async function adminApi(req: Request, action: string, viewer: Viewer | un
 	}
 	const a = ACTIONS[action];
 	if (!a) return fail("Unknown action.", 404);
-	if (RANK[viewer.role as Role] < RANK[a.role]) return fail(`Needs the ${a.role} role.`, 403);
+	if (!mayRun(viewer.role, action, a.role)) return fail(permissionOf(action) ? "An admin hasn't given your role permission to do that." : `Needs the ${a.role} role.`, 403);
 	const body = await req.json().catch(() => ({}));
 	try {
 		return Response.json((await a.run(viewer, body ?? {}, req)) ?? {});

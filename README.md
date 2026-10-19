@@ -70,6 +70,10 @@ copy during setup, and it stays on that machine.
   translator globes (blue translator, gold translator moderator, yellow approver),
   roles, organisations, posts, reports, invites, instance settings,
   feature switches, announcements, topics, Explore cards and an audit log
+- Staff roles (admin, moderator, support) whose powers an admin chooses: Admin >
+  Staff permissions turns each permission (changing standing, deleting posts,
+  editing profiles, resetting passwords…) on or off for moderators and support
+  (`src/staff-permissions.ts`; `bun scripts/test-staff-permissions.ts` checks it)
 
 Not built yet: Spaces and live video, Moments, signing in other apps (Connected
 apps stays empty). Email is sent through
