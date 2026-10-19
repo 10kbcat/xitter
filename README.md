@@ -28,8 +28,9 @@ copy during setup, and it stays on that machine.
 - Notifications with unread counts, browser push (with the instance's own VAPID
   key, made on first start in `data/push-vapid.json`); the profile bell (new posts from that
   account arrive as notifications) and turning an account's reposts off
-- Search with X's operators, trends, Explore; trends by location (Explore
-  settings: worldwide, a country, or yours with "Trends for you")
+- Search with X's operators, including full federated handles, trends, Explore;
+  trends by location (Explore settings: worldwide, a country, or yours with
+  "Trends for you")
 - News and sports cards at the top of Explore, written by staff (Admin >
   Explore cards); sports cards are scoreboards you update as the game goes
 - Topics: staff define them with keywords; people follow them from "Topics to
@@ -45,7 +46,8 @@ copy during setup, and it stays on that machine.
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
   (reactivates on sign-in within 30 days), data archive (including drafts,
-  scheduled posts, polls, media metadata and bookmark folders), email notification
+  scheduled posts, polls, media metadata, bookmark folders and visible encrypted
+  chat history without decryption keys), email notification
   settings (activity and new-message digests, sent while you're away), sessions
   list with revoke, account access history (each sign-in
   with its app and address), two-factor sign-in with an
