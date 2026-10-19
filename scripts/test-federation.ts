@@ -256,6 +256,8 @@ try {
 	check("B's accounts drop out of view on A", (await A.db`select instance_blocked from users where id = ${bobOnA ?? "0"}::bigint`)[0]?.instance_blocked === true);
 	const hiddenPreview = await fetch(`${A.origin}/${bob.name}@${idOf(B.origin)}`, { redirect: "manual" });
 	check("and out of A's link previews", hiddenPreview.status === 302, hiddenPreview.status);
+	const hiddenProfile = await alice.get("UserByScreenName", { screen_name: `${bob.name}@${idOf(B.origin)}`, withSafetyModeUserFields: true });
+	check("and alice can't open his profile", !hiddenProfile.data?.user, hiddenProfile.data);
 	await bob.gql("CreateTweet", { tweet_text: `after the block ${stamp}` });
 	await Bun.sleep(20_000);
 	check("nothing new arrives from B", !(await A.db`select 1 from posts where user_id = ${bobOnA ?? "0"}::bigint and text like 'after the block%'`).length);

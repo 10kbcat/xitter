@@ -20,7 +20,9 @@ export const userCols = (viewerId: string) => sql`
 	${badgesOf(sql`u.id`)} as a_badges, u.remote_badges as a_remote_badges,
 	greatest((u.remote_counts->>'posts')::int, ${stat("posts")}) as a_posts,
 	(select json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', case when o.org_badge_id is not null then '/public/badge-' || o.org_badge_id::text || '.png' else o.avatar_url end, 'since', af.created_at)
-		from affiliations af join users o on o.id = af.org_id where af.user_id = u.id) as a_org,
+		from affiliations af join users o on o.id = af.org_id where af.user_id = u.id order by af.created_at, af.org_id limit 1) as a_org,
+	(select json_agg(json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', case when o.org_badge_id is not null then '/public/badge-' || o.org_badge_id::text || '.png' else o.avatar_url end) order by af.created_at, af.org_id)
+		from (select * from affiliations x where x.user_id = u.id order by x.created_at, x.org_id offset 1) af join users o on o.id = af.org_id) as a_more_orgs,
 	(select count(*)::int from affiliations af where af.org_id = u.id) as a_affiliates,
 	(select m.screen_name from users m where m.id = u.automated_by) as a_automated_by, u.parody_label as a_parody_label,
 	(select json_build_object('text', l.text, 'badge_id', l.badge_id::text, 'url', l.url) from account_labels l where l.id = u.label_id) as a_label,
@@ -59,6 +61,7 @@ export function toUser(r: any): User {
 		remote_badges: r.a_remote_badges ?? [],
 		status: r.a_status,
 		org: r.a_org ?? null,
+		more_orgs: r.a_more_orgs ?? [],
 		affiliates: r.a_affiliates,
 		automated_by: r.a_automated_by ?? null,
 		parody_label: r.a_parody_label ?? "None",
@@ -88,12 +91,12 @@ export function toUser(r: any): User {
 export const localName = (name: string) => (name.toLowerCase().endsWith(`@${INSTANCE_ID}`) ? name.slice(0, -INSTANCE_ID.length - 1) : name);
 
 export async function userByName(viewerId: string, screenName: string): Promise<User | undefined> {
-	const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = lower(${localName(screenName)})`;
+	const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = lower(${localName(screenName)}) and not u.instance_blocked`;
 	return rows[0] && toUser(rows[0]);
 }
 
 export async function userById(viewerId: string, id: string): Promise<User | undefined> {
-	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = ${id}::bigint`;
+	const rows = await sql`select ${userCols(viewerId)} from users u where u.id = ${id}::bigint and not u.instance_blocked`;
 	return rows[0] && toUser(rows[0]);
 }
 

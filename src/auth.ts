@@ -31,6 +31,8 @@ export type User = {
 	verified_at?: Date | null;
 	// `since`: when the account joined the organisation
 	org?: { id: string; name: string; screen_name: string; avatar_url: string | null; since?: string } | null;
+	// the other organisations it is an affiliate of, up to three, after `org`
+	more_orgs?: { id: string; name: string; screen_name: string; avatar_url: string | null }[];
 	// for organisations: how many affiliates they have
 	affiliates?: number;
 	// the screen name of the account that runs this one (X's automated label)

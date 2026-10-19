@@ -2,13 +2,15 @@ import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } fr
 import { join } from "node:path";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
-import { isFlag } from "./flags";
+import { flagValue } from "./flags";
 import { badgesOf } from "./users";
 import { FederationError, INSTANCE_ID, type Incoming, isBlocked, isPeer, peers, signedAnswer, signedFetch, signedRawAnswer } from "./federation";
 import { newId } from "./ids";
 import { replyLimited } from "./blocks";
 import { STAFF_HANDLE } from "./invites";
 import { saveMentions } from "./mentions";
+import { cleanText, oneLine } from "./text-clean";
+import { parseDecoration } from "./decorations";
 import { posterFile } from "./video";
 
 const MEDIA_DIR = process.env.MEDIA_DIR ?? "media";
@@ -72,7 +74,7 @@ const USER_COUNTS = ["followers", "following", "posts", "likes"];
 const POST_COUNTS = ["likes", "reposts", "replies", "quotes", "bookmarks", "views"];
 
 async function renderUser(id: string) {
-	const [u] = await sql`select id::text, screen_name, name, bio, location, website, avatar_url, banner_url, protected, created_at, verified_type, translator, flag, parody_label, ${badgesOf(sql`users.id`)} as badges from users
+	const [u] = await sql`select id::text, screen_name, name, bio, location, website, avatar_url, banner_url, protected, created_at, verified_type, translator, flag, parody_label, decoration, ${badgesOf(sql`users.id`)} as badges from users
 		where id = ${id}::bigint and instance is null and status <> 'suspended' and deactivated_at is null`;
 	if (!u) return { kind: "user", id, gone: true };
 	return {
@@ -88,6 +90,7 @@ async function renderUser(id: string) {
 		translator: u.translator ?? null,
 		flag: u.flag ?? null,
 		parody_label: u.parody_label ?? "None",
+		decoration: parseDecoration(u.decoration),
 		badges: (u.badges ?? []).map((b: { id: string; name: string }) => ({ name: b.name, url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png` })),
 		protected: u.protected,
 		created_at: new Date(u.created_at).toISOString(),
@@ -286,9 +289,10 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 	const looks = {
 		verified_type: pick(u.verified_type, ["blue", "business", "government", "government_individual"]),
 		translator: pick(u.translator, ["translator", "moderator", "approver"]),
-		flag: isFlag(u.flag) ? u.flag : null,
+		flag: flagValue(u.flag),
 		parody_label: pick(u.parody_label, ["Parody", "Commentary", "Fan"]) ?? "None",
 		remote_badges: JSON.stringify(badges),
+		decoration: JSON.stringify(parseDecoration(u.decoration)),
 	};
 	const website = typeof u.website === "string" && /^https?:\/\/[^\s<>"]{1,200}$/.test(u.website) ? u.website : "";
 	const handle = `${u.screen_name}@${instance}`;
@@ -296,13 +300,13 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 	const created = typeof u.created_at === "string" && !Number.isNaN(Date.parse(u.created_at)) ? new Date(u.created_at) : new Date();
 	const id = local ?? newId();
 	if (local)
-		await sql`update users set screen_name = ${handle}, name = ${clip(u.name, 50)}, bio = ${clip(u.bio, 300)}, location = ${clip(u.location, 60)}, website = ${website}, protected = ${!!u.protected}
+		await sql`update users set screen_name = ${handle}, name = ${oneLine(clip(u.name, 50))}, bio = ${cleanText(clip(u.bio, 300), { lines: 6 })}, location = ${oneLine(clip(u.location, 60))}, website = ${website}, protected = ${!!u.protected}
 			where id = ${local}::bigint`;
 	else {
 		const [{ n }] = await sql`select count(*)::int as n from users where instance = ${instance}`;
 		if (n >= MAX_ACCOUNTS) throw new FederationError(`${instance} already has ${MAX_ACCOUNTS} accounts here`);
 		await sql`insert into users (id, screen_name, name, password_hash, bio, location, website, protected, instance, remote_id, created_at)
-			values (${id}::bigint, ${handle}, ${clip(u.name, 50)}, '!', ${clip(u.bio, 300)}, ${clip(u.location, 60)}, ${website}, ${!!u.protected}, ${instance}, ${u.id}::bigint, ${created})
+			values (${id}::bigint, ${handle}, ${oneLine(clip(u.name, 50))}, '!', ${cleanText(clip(u.bio, 300), { lines: 6 })}, ${oneLine(clip(u.location, 60))}, ${website}, ${!!u.protected}, ${instance}, ${u.id}::bigint, ${created})
 			on conflict (instance, remote_id) where instance is not null do nothing`;
 		const again = await mapped(instance, "user", u.id);
 		if (again) return again;
@@ -311,7 +315,7 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 	const avatar = await remoteMedia(instance, id, u.avatar, null, null);
 	const banner = await remoteMedia(instance, id, u.banner, null, null);
 	await sql`update users set avatar_url = ${avatar ? `/media/${avatar}` : null}, banner_url = ${banner ? `/media/banner/${banner}` : null},
-		remote_counts = ${countsOf(u.counts, USER_COUNTS)}::text::jsonb, verified_type = ${looks.verified_type}, translator = ${looks.translator}, flag = ${looks.flag}, parody_label = ${looks.parody_label}, remote_badges = ${looks.remote_badges}::text::jsonb
+		remote_counts = ${countsOf(u.counts, USER_COUNTS)}::text::jsonb, verified_type = ${looks.verified_type}, translator = ${looks.translator}, flag = ${looks.flag}, parody_label = ${looks.parody_label}, remote_badges = ${looks.remote_badges}::text::jsonb, decoration = nullif(${looks.decoration}, 'null')::jsonb
 		where id = ${id}::bigint`;
 	if (u.protected) await sql`delete from posts where user_id = ${id}::bigint`;
 	return id;
@@ -329,7 +333,7 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 	if (!author) return undefined;
 	const quote = p.quote ? await resolvePost(p.quote, depth) : undefined;
 	const homeLink = typeof p.quote_url === "string" && p.quote_url.length <= 300 && /^https?:\/\/[^\s<>"]+$/.test(p.quote_url) && new URL(p.quote_url).host === instance ? p.quote_url : undefined;
-	const raw = clip(p.text, 25_000);
+	const raw = cleanText(clip(p.text, 25_000), { blankLines: 2 });
 	const text = !quote && homeLink && !raw.includes(homeLink) ? `${raw} ${homeLink}` : raw;
 	const editedAt = typeof p.edited_at === "string" && !Number.isNaN(Date.parse(p.edited_at)) ? new Date(p.edited_at) : null;
 	// the app it was posted from on its home instance; older instances don't send it
@@ -646,10 +650,10 @@ export async function savedRemoteMedia(): Promise<{ files: number; bytes: number
 	return { files: r.files, bytes: r.bytes };
 }
 
-export async function dropRemoteMedia(): Promise<{ files: number; bytes: number }> {
+export async function dropRemoteMedia(instance?: string): Promise<{ files: number; bytes: number }> {
 	let files = 0;
 	let bytes = 0;
-	for (const { id } of await sql`select id::text from media where remote_instance is not null`) {
+	for (const { id } of await sql`select id::text from media where remote_instance is not null and (${instance ?? null}::text is null or remote_instance = ${instance ?? null})`) {
 		for (const file of [join(MEDIA_DIR, id), posterFile(MEDIA_DIR, id)]) {
 			if (!existsSync(file)) continue;
 			bytes += statSync(file).size;

@@ -19,12 +19,13 @@ import { pollCard, pollsByIds } from "./polls";
 import { toUser, userCols, usersByIds } from "./users";
 import { lookupRemoteUser } from "./federation-sync";
 import { saveMentions } from "./mentions";
+import { cleanText } from "./text-clean";
 import { noteStatus } from "./note-score";
 
 const NO_LIMIT = "9223372036854775807";
 
 // accounts whose likes, reposts and replies no longer count for anyone
-const SUSPENDED = sql`(select id from users where status = 'suspended')`;
+const SUSPENDED = sql`(select id from users where status = 'suspended' or instance_blocked)`;
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
@@ -201,7 +202,8 @@ export async function refuseHate(userId: string, text: string, where: Parameters
 	throw new PostError("Your post wasn't published: it contains a slur or hate speech this instance doesn't allow.", 186);
 }
 
-export async function editPost(userId: string, postId: string, text: string): Promise<void> {
+export async function editPost(userId: string, postId: string, input: string): Promise<void> {
+	const text = cleanText(input, { blankLines: 2 });
 	// the length first: the checks below scan the whole text
 	await checkLength(userId, text);
 	await refuseHate(userId, text);
@@ -437,8 +439,9 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 export const seenBy = (userId: string) =>
 	sql`(u.id = ${userId}::bigint or ((not p.hidden or ${staffViewer(userId)}) and u.id not in ${protectedFor(userId)} and u.id not in ${suspendedFor(userId)}))`;
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string; db?: typeof sql; skipPreview?: boolean } = {}): Promise<string> {
+export async function createPost(userId: string, input: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string; db?: typeof sql; skipPreview?: boolean } = {}): Promise<string> {
 	const db = opts.db ?? sql;
+	const text = cleanText(input, { blankLines: 2 });
 	const [author] = await db`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
 	await checkLength(userId, text, db);

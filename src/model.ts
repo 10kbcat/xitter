@@ -8,7 +8,7 @@ import type { User } from "./auth";
 import { CLIENT_DIR } from "./client-cache";
 import { PUBLIC_ORIGIN } from "./config";
 import type { ArticleEntity } from "./articles";
-import { FLAGS } from "./flags";
+import { FLAGS, flagList } from "./flags";
 import { homeOf, mentionsIn } from "./mentions";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 import { placeById } from "./places";
@@ -107,10 +107,10 @@ type Badge = { url: string; description: string; org?: string };
 // the first; the page script (badges.ts) draws the others after that one.
 export function badgeList(u: User): Badge[] {
 	const out: Badge[] = [];
-	if (u.org) out.push({ url: absolute(u.org.avatar_url) ?? DEFAULT_AVATAR, description: u.org.name, org: u.org.screen_name });
+	for (const o of [u.org, ...(u.more_orgs ?? [])]) if (o) out.push({ url: absolute(o.avatar_url) ?? DEFAULT_AVATAR, description: o.name, org: o.screen_name });
 	for (const b of u.badges ?? []) out.push({ url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png`, description: b.name });
 	for (const b of u.remote_badges ?? []) out.push({ url: b.url, description: b.name });
-	if (u.flag && FLAGS[u.flag]) out.push({ url: `${PUBLIC_ORIGIN}/public/flag-${u.flag}.svg`, description: `${FLAGS[u.flag].name} flag` });
+	for (const f of flagList(u.flag)) out.push({ url: `${PUBLIC_ORIGIN}/public/flag-${f}.svg`, description: `${FLAGS[f].name} flag` });
 	// an account from another instance, last so its own badges keep their place
 	// the address names the instance, for the card the page script opens on a click (badges.ts)
 	if (u.instance) out.push({ url: `${PUBLIC_ORIGIN}/public/globe.svg?from=${encodeURIComponent(u.instance)}`, description: `From ${u.instance}` });

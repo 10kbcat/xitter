@@ -11,6 +11,7 @@ import { POST_CONTEXT_SCRIPT } from "./post-context";
 import { ERROR_SCRIPT } from "./errors";
 import { BADGES_SCRIPT } from "./badges";
 import { DECOR_SCRIPT } from "./decor";
+import { DECORATIONS_SCRIPT } from "./decorations";
 import { NOTICE_SCRIPT } from "./automod-notice";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
@@ -291,6 +292,7 @@ ${user ? STICKER_PICKER_SCRIPT : ""}
 ${POST_CONTEXT_SCRIPT}
 ${BADGES_SCRIPT}
 ${user ? DECOR_SCRIPT : ""}
+${DECORATIONS_SCRIPT}
 ${user ? NOTICE_SCRIPT : ""}
 ${PWA_SCRIPT}</script>
 <script id="nonce-csp"></script>
