@@ -202,8 +202,8 @@ logos) is set in the admin panel.
 ## Federation
 
 Instances listed in `instances.json` share public accounts and posts with each
-other. [FEDERATION.md](FEDERATION.md) covers the list, the protocol,
-defederation and superadmins.
+other. [FEDERATION.md](FEDERATION.md) explains how to set up an instance and
+join the list.
 
 ## Encrypted chat and key backup
 
