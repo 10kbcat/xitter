@@ -268,10 +268,13 @@ own notes. Requests and ratings are deduplicated. Authors can delete their notes
 admins and moderators can remove notes, with staff removals recorded in the audit
 log. Blocked accounts cannot interact through notes.
 
-The current local scoring rule needs at least three ratings, with two thirds
-Helpful, before a misleading-post note is displayed as native context. Ratings
-from suspended accounts are excluded. This is not X's matrix-factorization scoring
-system. Media-match notes, automated translation and appeals are not implemented.
+The local scoring rule needs at least five active ratings and a 95% Wilson
+lower bound above 50% before a misleading-post note is displayed as native
+context. Ratings from suspended accounts are excluded. Authors can appeal a
+Not Helpful note at `/account/notes/appeals`; admins and moderators review
+appeals there, with decisions recorded in the audit log. A staff decision does
+not change the reader score. This is not X's matrix-factorization scoring
+system. Media-match notes and automated translation are not implemented.
 
 Run `bun scripts/test-notes.ts` against the development server with the existing
 `pozo`/`goldcorp` test accounts. It creates temporary posts, tokens and voters,

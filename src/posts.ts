@@ -17,6 +17,7 @@ import { pollCard, pollsByIds } from "./polls";
 import { toUser, userCols, usersByIds } from "./users";
 import { lookupRemoteUser } from "./federation-sync";
 import { saveMentions } from "./mentions";
+import { noteStatus } from "./note-score";
 
 const NO_LIMIT = "9223372036854775807";
 
@@ -95,11 +96,13 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	const media = await mediaForPosts(posts.map((p) => p.id));
 	for (const p of posts) p.media = (media.get(p.id) ?? []).map((m) => (p.never_sensitive ? { ...m, sensitive_warning: null } : m));
 	if (posts.length) {
-		const notes = await sql`select n.id::text, n.post_id::text, n.text from community_notes n join users author on author.id = n.author_id and author.status <> 'suspended'
+		const notes = await sql`select n.id::text, n.post_id::text, n.text, count(*)::int as ratings,
+			count(*) filter(where r.rating = 'Helpful')::int as helpful, count(*) filter(where r.rating = 'NotHelpful')::int as not_helpful
+			from community_notes n join users author on author.id = n.author_id and author.status <> 'suspended'
 			join community_note_ratings r on r.note_id = n.id join users voter on voter.id = r.user_id and voter.status = 'active'
 			where n.post_id = any(${sql.array(posts.map(p => p.id), "INT8")}) and n.classification = 'Misleading' and n.author_id not in ${blockedFor(viewerId)}
-			group by n.id having count(*) >= 3 and count(*) filter(where r.rating = 'Helpful') * 3 >= count(*) * 2 order by n.id desc`;
-		for (const p of posts) { const note = notes.find((n: any) => n.post_id === p.id); if (note) p.communityNote = { id: note.id, text: note.text }; }
+			group by n.id order by n.id desc`;
+		for (const p of posts) { const note = notes.find((n: any) => n.post_id === p.id && noteStatus(n.ratings, n.helpful, n.not_helpful) === "Helpful"); if (note) p.communityNote = { id: note.id, text: note.text }; }
 		const mentions = await sql`select m.post_id, u.id, u.screen_name, u.name from post_mentions m join users u on u.id = m.user_id
 			where m.post_id = any(${sql.array(posts.map((p) => p.id), "INT8")})`;
 		for (const p of posts) p.mentions = mentions.filter((m: any) => String(m.post_id) === p.id).map((m: any) => ({ id: String(m.id), screen_name: m.screen_name, name: m.name }));

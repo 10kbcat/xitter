@@ -47,6 +47,7 @@ import { SERVICE_WORKER, startPush } from "./push";
 import { manifest } from "./pwa";
 import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
+import { noteAppealsRoute } from "./note-appeals";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -367,6 +368,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/notices" && viewer) return noticesPage(req, viewer);
 	if (p === "/account/invites" && viewer) return memberInvitesRoute(req, viewer);
 	if (p === "/account/api" && viewer) return apiTokensRoute(req, viewer);
+	if (p === "/account/notes/appeals" && viewer) return noteAppealsRoute(req, viewer);
 	if (p === "/account/automation" && viewer) return automationRoute(req, viewer);
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);

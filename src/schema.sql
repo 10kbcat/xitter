@@ -183,6 +183,17 @@ create table if not exists community_note_ratings (
 );
 create index if not exists community_note_ratings_user_idx on community_note_ratings(user_id);
 alter table community_note_ratings add column if not exists data_v2 jsonb not null default '{}';
+create table if not exists community_note_appeals (
+	note_id bigint primary key references community_notes(id) on delete cascade,
+	author_id bigint not null references users(id) on delete cascade,
+	reason text not null check (char_length(reason) between 20 and 1000),
+	status text not null default 'open' check (status in ('open', 'accepted', 'rejected')),
+	created_at timestamptz not null default now(),
+	reviewed_by bigint references users(id) on delete set null,
+	reviewed_at timestamptz,
+	resolution text
+);
+create index if not exists community_note_appeals_open_idx on community_note_appeals (created_at) where status = 'open';
 create table if not exists community_note_requests (
 	post_id bigint not null references posts(id) on delete cascade,
 	user_id bigint not null references users(id) on delete cascade,
