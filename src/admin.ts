@@ -437,7 +437,7 @@ const ACTIONS: Record<string, Action> = {
 			const id = idOf(b.id);
 			const badge = b.badge || null;
 			if (badge !== null && !["blue", "business", "government", "government_individual"].includes(badge)) throw new AdminError("Unknown badge.");
-			await guard(a, id);
+			await guard(a, id, true);
 			// verified_at: "Verified since" on the About page; a new badge type starts it again
 			await sql`update users set verified_at = case when ${badge}::text is null then null when verified_type is distinct from ${badge}::text then now() else verified_at end,
 				verified_type = ${badge} where id = ${id}::bigint`;
@@ -452,7 +452,7 @@ const ACTIONS: Record<string, Action> = {
 			const id = idOf(b.id);
 			const flag = b.flag || null;
 			if (flag !== null && !isFlag(flag)) throw new AdminError("Unknown flag.");
-			await guard(a, id);
+			await guard(a, id, true);
 			await sql`update users set flag = ${flag} where id = ${id}::bigint`;
 			await audit(a, "set_flag", id, { flag });
 			return {};

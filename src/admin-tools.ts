@@ -124,7 +124,7 @@ export const toolActions: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			const pick = typeof b.label === "string" ? b.label : "None";
 			if (["None", "Parody", "Commentary", "Fan"].includes(pick)) {
 				await sql`update users set parody_label = ${pick}, label_id = null where id = ${id}::bigint`;
@@ -142,7 +142,7 @@ export const toolActions: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			if (!Array.isArray(b.badgeIds) || b.badgeIds.length > 10) throw new AdminError("Choose up to 10 badges.");
 			const badges = [...new Set(b.badgeIds.map((x: unknown) => idOf(x, "badge")))] as string[];
 			for (const badge of badges) await badgeExists(badge);
@@ -160,7 +160,7 @@ export const toolActions: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			await guard(a, id);
+			await guard(a, id, true);
 			const badge = b.badgeId ? idOf(b.badgeId) : null;
 			await badgeExists(badge);
 			const rows = await sql`update users set org_badge_id = ${badge}::bigint where id = ${id}::bigint returning id`;
