@@ -193,18 +193,29 @@ instance also reads every 60 seconds. An instance applies a notice only when
 the signature matches the superadmin's home key. A later notice from a
 superadmin can lift it.
 
-### Pinning keys after deploy
+### Superadmin home keys
 
-Until the entries below are filled in, a superadmin's home key comes from the
-list, so whoever can merge into `main` here could issue tickets. Once
-`xitter.opuadm.com` and `xit.chococat.lol` run with federation:
+Every instance looks up a superadmin's home key in this order:
+
+1. `instance_key` in `src/superadmins.ts`, when it is set;
+2. the key it pinned the first time it talked to that home, which happens at
+   start-up and every 10 minutes;
+3. the key in `instances.json`, or the one the home serves at
+   `/.well-known/xitter`, used only for that first contact.
+
+After the first contact, a list change can't replace the home's key. A
+different key shows up as a key change in the admin panel, and only a
+superadmin can accept it.
+
+The key of `xit.chococat.lol` is pinned in both places. A new instance still
+trusts the list or HTTPS on its first contact with `xitter.opuadm.com`. Once
+it runs with federation, close that gap:
 
 1. Put each instance's key from `/.well-known/xitter` in its `public_key` in
    `instances.json`.
 2. In `src/superadmins.ts`, set `instance_key` to the same key, and `user_id`
-   to the superadmin's account id on their home instance. A pinned key wins
-   over the list, and a pinned id stops a different account with the same
-   name from being accepted.
+   to the superadmin's account id on their home instance. A pinned id stops a
+   different account with the same name from being accepted.
 
 ## Configuration
 
@@ -213,6 +224,8 @@ list, so whoever can merge into `main` here could issue tickets. Once
 | `FEDERATION` | on | `off` turns federation off |
 | `FEDERATION_KEY_FILE` | `data/federation-key.json` | The instance's private key |
 | `FEDERATION_REGISTRY_URL` | `instances.json` on `main` | Where the list is read from (an absolute path works for testing) |
+| `FEDERATION_EVENTS_PER_HOUR` | `20000` | Changes applied from one instance per hour. Past it, syncing with that instance pauses until the hour is over |
+| `FEDERATION_MAX_ACCOUNTS` | `100000` | Accounts kept from one instance. New ones past it are refused |
 | `FEDERATION_ALLOW_HTTP` | unset | Lets instances talk over plain HTTP, for the local test setup only |
 
 `scripts/test-federation.ts` runs two instances against each other and checks
