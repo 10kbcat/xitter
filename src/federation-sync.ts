@@ -109,6 +109,16 @@ const publicPost = (id: string) =>
 			and not exists (select 1 from posts pp join users pu on pu.id = pp.user_id where pp.id = p.reply_to_id and pu.instance is null
 				and (pu.protected or pu.status in ('suspended', 'limited') or pu.deactivated_at is not null or pp.hidden or pp.community_id is not null or pp.article_id is not null))`;
 
+const quotable = async (id: string) => {
+	const [q] = await sql`select u.instance from posts p join users u on u.id = p.user_id where p.id = ${id}::bigint`;
+	return !!q && (q.instance !== null || (await publicPost(id)).length > 0);
+};
+
+const quoteUrl = async (id: string) => {
+	const [q] = await sql`select u.screen_name from posts p join users u on u.id = p.user_id where p.id = ${id}::bigint and u.instance is null`;
+	return q ? `${PUBLIC_ORIGIN}/${q.screen_name}/status/${id}` : undefined;
+};
+
 async function renderPost(id: string) {
 	const [p] = await publicPost(id);
 	if (!p) return { kind: "post", id, gone: true };
@@ -122,8 +132,10 @@ async function renderPost(id: string) {
 		edited_at: p.edited_at ? new Date(p.edited_at).toISOString() : null,
 		sensitive: p.sensitive,
 		counts: await postCounts(id),
+		is_reply: !!p.reply_to_id,
 		reply_to: p.reply_to_id ? ((await canonicalOf("post", p.reply_to_id)) ?? null) : null,
-		quote: p.quote_id ? ((await canonicalOf("post", p.quote_id)) ?? null) : null,
+		quote: p.quote_id && (await quotable(p.quote_id)) ? ((await canonicalOf("post", p.quote_id)) ?? null) : null,
+		quote_url: p.quote_id ? ((await quoteUrl(p.quote_id)) ?? null) : null,
 		media: media.map((m: any) => ({ id: m.id, kind: m.kind, mime: m.mime, width: m.width, height: m.height, alt_text: m.alt_text ?? null, duration_ms: m.duration_ms ?? null })),
 	};
 }
@@ -314,7 +326,10 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 	}
 	const author = await resolveUser(ref(String(p.author ?? ""), instance), depth);
 	if (!author) return undefined;
-	const text = clip(p.text, 25_000);
+	const quote = p.quote ? await resolvePost(p.quote, depth) : undefined;
+	const homeLink = typeof p.quote_url === "string" && p.quote_url.length <= 300 && /^https?:\/\/[^\s<>"]+$/.test(p.quote_url) && new URL(p.quote_url).host === instance ? p.quote_url : undefined;
+	const raw = clip(p.text, 25_000);
+	const text = !quote && homeLink && !raw.includes(homeLink) ? `${raw} ${homeLink}` : raw;
 	const editedAt = typeof p.edited_at === "string" && !Number.isNaN(Date.parse(p.edited_at)) ? new Date(p.edited_at) : null;
 	if (local) {
 		const [old] = await sql`select text, created_at, edited_at, edit_count, reply_to_id from posts where id = ${local}::bigint`;
@@ -324,7 +339,8 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 		await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${local}::bigint`;
 		await sql`update posts set text = ${text}, sensitive = ${!!p.sensitive}, edited_at = ${old && old.text !== text ? (editedAt ?? new Date()) : editedAt},
 			edit_count = edit_count + ${old && old.text !== text ? 1 : 0} where id = ${local}::bigint`;
-		if (old && !old.reply_to_id && p.reply_to) {
+		const orphaned = old?.reply_to_id && !(await sql`select 1 from posts where id = ${old.reply_to_id}::bigint`).length;
+		if (old && (!old.reply_to_id || orphaned) && p.reply_to) {
 			const replyTo = await resolvePost(p.reply_to, depth);
 			const [parent] = replyTo ? await sql`select conversation_id::text, user_id::text from posts where id = ${replyTo}::bigint` : [];
 			if (parent && !(await blockedBetween(author, parent.user_id)))
@@ -334,8 +350,7 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 		await attachMedia(instance, author, local, p.media);
 		return local;
 	}
-	const replyTo = p.reply_to ? await resolvePost(p.reply_to, depth) : undefined;
-	const quote = p.quote ? await resolvePost(p.quote, depth) : undefined;
+	const replyTo = (p.reply_to ? await resolvePost(p.reply_to, depth) : undefined) ?? (p.reply_to || p.is_reply === true ? newId() : undefined);
 	const [parent] = replyTo ? await sql`select conversation_id::text, user_id::text from posts where id = ${replyTo}::bigint` : [];
 	if (parent && ((await blockedBetween(author, parent.user_id)) || (await replyLimited(parent.conversation_id, author)))) return undefined;
 	const id = newId();
