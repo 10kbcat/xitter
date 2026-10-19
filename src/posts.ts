@@ -24,7 +24,7 @@ import { noteStatus } from "./note-score";
 const NO_LIMIT = "9223372036854775807";
 
 // accounts whose likes, reposts and replies no longer count for anyone
-const SUSPENDED = sql`(select id from users where status = 'suspended')`;
+const SUSPENDED = sql`(select id from users where status = 'suspended' or instance_blocked)`;
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`

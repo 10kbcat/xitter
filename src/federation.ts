@@ -136,7 +136,9 @@ export async function reloadBlocks() {
 }
 
 async function syncRegistryBlocks() {
-	const off = registry.instances.filter((i) => i.state !== "active").map((i) => i.id);
+	const active = registry.instances.filter((i) => i.state === "active").map((i) => i.id);
+	const known = (await sql`select distinct instance from users where instance is not null`).map((r: any) => r.instance as string);
+	const off = [...new Set([...registry.instances.filter((i) => i.state !== "active").map((i) => i.id), ...known.filter((i: string) => !active.includes(i))])];
 	await sql`delete from federation_blocks where source = 'registry' and not (instance = any(${sql.array(off, "TEXT")}))`;
 	if (off.length)
 		await sql`insert into federation_blocks (instance, source, reason)
@@ -166,7 +168,7 @@ export async function liftBlock(instance: string, source: "local" | "emergency")
 		await sql`update federation_blocks set source = 'local', reason = coalesce(kept_local->>'reason', ''), by_id = (kept_local->>'by_id')::bigint,
 			by_name = kept_local->>'by_name', kept_local = null, created_at = now() where instance = ${instance} and source = 'emergency' and kept_local is not null`;
 	await sql`delete from federation_blocks where instance = ${instance} and source = ${source}`;
-	await reloadBlocks();
+	await syncRegistryBlocks();
 }
 
 export const listBlocks = async () => (await sql`select instance, source, reason, by_name, created_at from federation_blocks order by created_at desc`) as Block[];
