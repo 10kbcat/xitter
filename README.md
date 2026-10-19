@@ -47,7 +47,8 @@ copy during setup, and it stays on that machine.
   when mail is set up; Settings > Email changes it by a confirmation link), pride flag badges, organisations
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
-  (reactivates on sign-in within 30 days), data archive (including drafts,
+  (reactivates on sign-in within 30 days), downloadable JSON and offline HTML
+  data archives (including drafts,
   scheduled posts, polls, media metadata, bookmark folders and visible encrypted
   chat history without decryption keys), email notification
   settings (activity and new-message digests, sent while you're away), sessions
