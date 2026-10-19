@@ -41,7 +41,9 @@ bundled in its image when GitHub can't be reached.
 2. Open the admin panel, then Federation. It shows the entry for this
    instance, key included.
 3. Open a pull request that adds the entry to `instances.json`, keeps the list
-   sorted by `id` and raises `sequence` by one.
+   sorted by `id` and raises `sequence` by one. Run
+   `bun scripts/check-instances.ts --write-md` to update `INSTANCES.md`, the
+   readable copy of the list.
 
 The `instances` workflow runs `scripts/check-instances.ts` on the pull
 request. It checks the format, refuses a sequence that doesn't go up, and
@@ -200,16 +202,19 @@ Every instance looks up a superadmin's home key in this order:
 1. `instance_key` in `src/superadmins.ts`, when it is set;
 2. the key it pinned the first time it talked to that home, which happens at
    start-up and every 10 minutes;
-3. the key in `instances.json`, or the one the home serves at
-   `/.well-known/xitter`, used only for that first contact.
+3. for that first contact, the key the home serves at `/.well-known/xitter`.
+   When `instances.json` lists a key for the home too, both must match, or
+   nothing is pinned and tickets and emergency notices from that home are
+   refused.
 
 After the first contact, a list change can't replace the home's key. A
 different key shows up as a key change in the admin panel, and only a
 superadmin can accept it.
 
-The key of `xit.chococat.lol` is pinned in both places. A new instance still
-trusts the list or HTTPS on its first contact with `xitter.opuadm.com`. Once
-it runs with federation, close that gap:
+The key of `xit.chococat.lol` is pinned in both places. For
+`xitter.opuadm.com`, a new instance trusts HTTPS on its first contact, and a
+forged list alone can't change that key. Once it runs with federation, pin it
+too:
 
 1. Put each instance's key from `/.well-known/xitter` in its `public_key` in
    `instances.json`.
