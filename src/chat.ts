@@ -388,7 +388,7 @@ async function conversationData(viewerId: string, conversationId: string) {
 		cross join lateral (select e.event from chat_events e where e.conversation_id = m.conversation_id and e.kind = ${KIND.read} and e.sender_id = m.user_id
 			order by e.seq desc limit 1) r
 		where m.conversation_id = ${conversationId} order by m.user_id`;
-	const [last] = await sql`select seq::text from chat_events where conversation_id = ${conversationId} order by seq desc limit 1`;
+	const [last] = await sql`select seq::text from chat_events where conversation_id = ${conversationId} order by chat_events.seq desc limit 1`;
 	const b64 = (r: { event: Buffer }) => Buffer.from(r.event).toString("base64");
 	const direct = !!directMembers(conversationId);
 	const [state] = await sql`select muted, archived from chat_members where conversation_id = ${conversationId} and user_id = ${viewerId}::bigint`;
