@@ -1298,3 +1298,23 @@ do $$ begin
 		insert into schema_steps (name) values ('federation_backfill');
 	end if;
 end $$;
+
+create or replace function blocks_spare_admins() returns trigger language plpgsql as $$
+begin
+	if exists (select 1 from users b join users t on t.id = new.blocked_id where b.id = new.blocker_id and b.instance is null and t.role = 'admin') then
+		return null;
+	end if;
+	return new;
+end $$;
+drop trigger if exists blocks_spare_admins on blocks;
+create trigger blocks_spare_admins before insert on blocks for each row execute function blocks_spare_admins();
+create or replace function admins_unblocked() returns trigger language plpgsql as $$
+begin
+	if new.role = 'admin' and old.role is distinct from 'admin' then
+		delete from blocks bl using users b where bl.blocked_id = new.id and b.id = bl.blocker_id and b.instance is null;
+	end if;
+	return new;
+end $$;
+drop trigger if exists users_admins_unblocked on users;
+create trigger users_admins_unblocked after update of role on users for each row execute function admins_unblocked();
+delete from blocks bl using users b, users t where b.id = bl.blocker_id and t.id = bl.blocked_id and b.instance is null and t.role = 'admin';

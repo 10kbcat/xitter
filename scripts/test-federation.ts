@@ -178,6 +178,22 @@ try {
 	const org = await adminApi(A, adminCookies, "createOrg", { screen_name: "MEOW", name: "meow" });
 	check("nobody makes an org with that handle", org.status !== 200 && /reserved/.test(org.body.error ?? ""), org.body);
 
+	const blockAdmin = await alice.form("/1.1/blocks/create.json", { user_id: admin.id });
+	check("alice can't block an admin of her own instance", blockAdmin.status === 403, blockAdmin.status);
+	await A.db`insert into blocks (blocker_id, blocked_id) values (${alice.id}::bigint, ${admin.id}::bigint) on conflict do nothing`;
+	check("not even by writing the row", !(await A.db`select 1 from blocks where blocker_id = ${alice.id}::bigint and blocked_id = ${admin.id}::bigint`).length);
+	const later = await account(A, `fl${stamp}`);
+	made.push({ side: A, id: later.id });
+	const blockLater = await alice.form("/1.1/blocks/create.json", { user_id: later.id });
+	check("alice blocks someone who isn't staff", blockLater.status === 200, blockLater.status);
+	await A.db`update users set role = 'admin' where id = ${later.id}::bigint`;
+	check("and the block goes when they become an admin", !(await A.db`select 1 from blocks where blocker_id = ${alice.id}::bigint and blocked_id = ${later.id}::bigint`).length);
+	const blockSuper = await bob.form("/1.1/blocks/create.json", { user_id: superOnB?.id ?? "0" });
+	check("bob can't block a superadmin, who admins B too", blockSuper.status === 403, blockSuper.status);
+	const adminOnB = await until(async () => (await B.db`select id::text from users where instance = ${idOf(A.origin)} and remote_id = ${admin.id}::bigint`)[0]?.id);
+	const blockRemoteAdmin = await bob.form("/1.1/blocks/create.json", { user_id: adminOnB ?? "0" });
+	check("bob can block A's admin, whose instance isn't his", blockRemoteAdmin.status === 200, { status: blockRemoteAdmin.status, adminOnB });
+
 	const bCookies = `auth_token=${bSession.token}; ct0=${bSession.csrf}`;
 	const acceptHome = await adminApi(B, bCookies, "federationAcceptKey", { instance: idOf(A.origin) });
 	check("B's admins can't accept a new key for the superadmin's home", acceptHome.status === 403, acceptHome.body);
