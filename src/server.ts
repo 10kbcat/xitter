@@ -28,7 +28,7 @@ import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 import { forgotRoute, resetRoute } from "./password-reset";
 import { twoFactorRoute } from "./two-factor";
-import { extraBadges } from "./badges";
+import { extraBadges, instanceCard } from "./badges";
 import { startScheduler } from "./scheduled";
 import { federationRoute, startFederation } from "./federation-routes";
 import { acceptTicket, superadminHomeRoute } from "./superadmin";
@@ -201,6 +201,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (limited) return limited;
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
+	if (path === "/xitter/instance") return instanceCard(viewer.id, url);
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);

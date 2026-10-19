@@ -29,13 +29,20 @@ export const suspendedFor = (viewerId: string) =>
 	sql`(select id from users where ${gone}
 		and not ${staffViewer(viewerId)})`;
 
-// Accounts from other instances, for a viewer who hid them (Settings > Other
-// instances): they stay out of timelines, replies, search and suggestions, except
-// the ones the viewer follows. A search naming a full handle still finds them.
+// Accounts from other instances the viewer hid, all of them or some instances
+// (Settings > Other instances): they stay out of timelines, replies, search and
+// suggestions, except the ones the viewer follows. A search naming a full
+// handle still finds them.
 export const federatedHiddenFor = (viewerId: string) =>
-	sql`(select u.id from users u where u.instance is not null
-		and exists (select 1 from users me where me.id = ${viewerId}::bigint and me.preferences->>'hide_federated' = 'true')
+	sql`(select u.id from users u join users me on me.id = ${viewerId}::bigint where u.instance is not null
+		and (me.preferences->>'hide_federated' = 'true' or coalesce(me.preferences->'hidden_instances', '[]'::jsonb) ? u.instance)
 		and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint))`;
+
+// the same accounts, for notifications: only when the viewer also chose to
+// mute notifications from what they hid (mute_hidden_notifications)
+export const federatedMutedFor = (viewerId: string) =>
+	sql`(select x.id from ${federatedHiddenFor(viewerId)} as x(id)
+		where exists (select 1 from users me where me.id = ${viewerId}::bigint and me.preferences->>'mute_hidden_notifications' = 'true'))`;
 
 // a search that names someone on another instance (@name@example.org, from:name@example.org)
 export const namesOtherInstance = (query: string) => /\w@[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(query);
