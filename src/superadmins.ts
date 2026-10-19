@@ -3,7 +3,7 @@ import { PUBLIC_ORIGIN } from "./config";
 export type Superadmin = { readonly instance: string; readonly screen_name: string; readonly user_id: string | null; readonly instance_key: string | null };
 
 const HARDCODED: readonly Superadmin[] = [
-	{ instance: "xitter.opuadm.com", screen_name: "meow", user_id: null, instance_key: null },
+	{ instance: "xitter.opuadm.com", screen_name: "meow", user_id: null, instance_key: "FDWBt_uXkSyKKyM2J_9bYLfryG5N0bHFseMprag-Qv8" },
 	{ instance: "xit.chococat.lol", screen_name: "pozo", user_id: null, instance_key: "C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w" },
 	{ instance: "xit.chococat.lol", screen_name: "tiago", user_id: null, instance_key: "C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w" },
 ];
