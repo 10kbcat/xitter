@@ -48,20 +48,23 @@ try {
 	check((await asM("setStatus", { id: u.id, status: "restricted" })).status === 200, "a moderator changes standing by default");
 	check((await asM("deleteUser", { id: u.id, confirm: u.name })).status === 403, "but can't delete accounts by default");
 	check((await asS("setStatus", { id: u.id, status: "active" })).status === 403, "support can't change standing by default");
+	check((await asM("resetPassword", { id: u.id })).status === 403 && (await asS("resetPassword", { id: u.id })).status === 403, "nor can moderators or support reset passwords");
 	check((await asM("staffPermissions")).status === 403, "only admins see the permissions");
 	check((await asM("saveStaffPermissions", { role: "moderator", permissions: { delete_accounts: true } })).status === 403, "and only admins change them");
 
 	const list = await asA("staffPermissions");
-	check(list.body.roles.moderator.standing === true && list.body.roles.support.standing === false, "the defaults follow the roles");
+	check(list.body.roles.moderator.standing === true && list.body.roles.support.standing === false && list.body.roles.support.sessions === true, "the defaults follow the roles");
 	check((await asA("saveStaffPermissions", { role: "moderator", permissions: { standing: false, delete_posts: true, profiles: true } })).status === 200, "an admin changes what moderators can do");
-	check((await asA("saveStaffPermissions", { role: "support", permissions: { standing: true, passwords: false } })).status === 200, "and what support can do");
+	check((await asA("saveStaffPermissions", { role: "support", permissions: { standing: true, passwords: true, sessions: false } })).status === 200, "and what support can do");
 	check((await asA("saveStaffPermissions", { role: "admin", permissions: {} })).status === 400, "admins' own permissions aren't for choosing");
 	check((await asA("saveStaffPermissions", { role: "moderator", permissions: { set_role: true } })).status === 400, "an unknown permission is refused");
 
 	check((await asM("setStatus", { id: u.id, status: "active" })).status === 403, "the moderator can't change standing any more");
 	check((await asM("updateUser", { id: u.id, bio: "edited by a moderator" })).status === 200, "but edits profiles now");
 	check((await asS("setStatus", { id: u.id, status: "active" })).status === 200, "support changes standing now");
-	check((await asS("resetPassword", { id: u.id })).status === 403, "and can't reset passwords any more");
+	check((await asS("resetPassword", { id: u.id })).status === 200, "and resets passwords once given them");
+	check((await asS("resetPassword", { id: a.id })).status === 403 && (await asS("resetPassword", { id: m.id })).status === 403, "but never an admin's or a moderator's");
+	check((await asS("signOut", { id: u.id })).status === 403, "and can't sign accounts out any more");
 	check((await asS("setStatus", { id: m.id, status: "restricted" })).status === 403, "a permission doesn't reach staff at or above the role");
 	check((await asM("setRole", { id: u.id, role: "moderator" })).status === 403, "roles stay with admins");
 

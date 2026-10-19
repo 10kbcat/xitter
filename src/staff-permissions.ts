@@ -27,7 +27,8 @@ export const PERMISSIONS: Record<string, Permission> = {
 	release_identities: { group: "Moderation", label: "Release held handles, emails and addresses", role: "admin", actions: ["releaseIdentity"] },
 
 	staff_notes: { group: "Accounts", label: "Write staff notes", role: "support", actions: ["addStaffNote"] },
-	passwords: { group: "Accounts", label: "Reset passwords", role: "support", actions: ["resetPassword"] },
+	// whoever resets a password sees the new one and can sign in as the account
+	passwords: { group: "Accounts", label: "Reset passwords (they see the new password, so they can sign in as the account)", role: "admin", actions: ["resetPassword"] },
 	sessions: { group: "Accounts", label: "Sign accounts out", role: "support", actions: ["signOut", "revokeSession"] },
 	profiles: { group: "Accounts", label: "Edit profiles and the counts shown on profiles and posts", role: "admin", actions: ["updateUser", "setUserCounts", "setPostCounts"] },
 	account_badges: { group: "Accounts", label: "Give badges, labels and flags", role: "admin", actions: ["setBadge", "setTranslator", "setFlag", "setBadges", "setProfileLabel", "setOrgBadge"] },

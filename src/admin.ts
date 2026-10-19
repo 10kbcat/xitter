@@ -1,10 +1,10 @@
 // The admin panel's API: POST /admin/api/<action> with a JSON body, from a
 // signed-in staff account, with the csrf header like every other write.
 //
-// Roles: support reads everything and can reset passwords and sign people
-// out; moderators also change an account's standing and delete posts; admins
-// do everything else (profiles, badges, roles, organisations, invites,
-// instance settings). Those are the defaults: an admin can give moderators and
+// Roles: support reads everything and can sign people out; moderators also
+// change an account's standing and delete posts; admins do everything else
+// (passwords, profiles, badges, roles, organisations, invites, instance
+// settings). Those are the defaults: an admin can give moderators and
 // support more or take some away (staff-permissions.ts). Every change is
 // written to the audit log.
 
@@ -384,8 +384,9 @@ const ACTIONS: Record<string, Action> = {
 		},
 	},
 
+	// admins only by default: the new password signs in as the account
 	resetPassword: {
-		role: "support",
+		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			await guard(a, id);
