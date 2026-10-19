@@ -21,11 +21,15 @@ const FILE_RE = /^[0-9a-f]{40}\.(png|jpg|gif|webm|mp4)$/;
 const MAX_FILE = 40 * 1024 * 1024;
 
 // community_item_class in the Points Shop
-const CLASSES = { background: 3, frame: 14 } as const;
+const CLASSES = { background: 3, frame: 14, profile: 8 } as const;
 type Kind = keyof typeof CLASSES;
 
-export type Item = { appid: number; defid: number; name: string; image: string; movie?: string; mp4?: string };
-export type Decor = { theme?: string; background?: Item; frame?: Item };
+// image is the still picture; an animated frame moves in anim (Steam's "small"
+// file, an animated PNG), an animated background in movie/mp4, and preview is
+// that video made small for the shop
+export type Item = { appid: number; defid: number; name: string; image: string; anim?: string; movie?: string; mp4?: string; preview?: string };
+// profile: the game profile the rest came from, if it did
+export type Decor = { theme?: string; background?: Item; frame?: Item; profile?: Item };
 
 // Steam's profile themes, with the colours its profile page gives them (profilev2.css)
 type Palette = { left: string; right: string; bgLeft: string; bgRight: string; bg: string; header: string; btn: string; btnHover: string; outline: string };
@@ -71,6 +75,9 @@ function toItem(d: any): Item | undefined {
 	const item: Item = { appid, defid, name: String(data.item_title || data.item_name || "").slice(0, 100), image };
 	if (typeof data.item_movie_webm === "string" && FILE_RE.test(data.item_movie_webm)) item.movie = data.item_movie_webm;
 	if (typeof data.item_movie_mp4 === "string" && FILE_RE.test(data.item_movie_mp4)) item.mp4 = data.item_movie_mp4;
+	if (typeof data.item_movie_webm_small === "string" && FILE_RE.test(data.item_movie_webm_small)) item.preview = data.item_movie_webm_small;
+	if (d.community_item_class === CLASSES.frame && data.animated && typeof data.item_image_small === "string" && FILE_RE.test(data.item_image_small) && data.item_image_small !== image)
+		item.anim = data.item_image_small;
 	return item;
 }
 
@@ -80,42 +87,137 @@ async function shop(params: URLSearchParams): Promise<any> {
 	return (await r.json())?.response ?? {};
 }
 
-// a page of the shop, newest first, or of the games a search finds; cached a
-// few minutes so browsing doesn't ask Steam for the same page again
+// Every app with items in the shop, named by the community API, for browsing
+// without a search: Steam's own events (sales, Lunar New Year, Steam 3000 and
+// the like, newest first) and games (A to Z). Built in the background, kept a
+// day, and on disk so a restart doesn't wait for it.
+type App = { appid: number; name: string };
+type Apps = { at: number; events: App[]; games: App[] };
+const APPS_FILE = join(STEAM_DIR, "apps.json");
+let apps: Apps | undefined;
+let building: Promise<Apps> | undefined;
+async function buildApps(): Promise<Apps> {
+	const r = await fetch("https://api.steampowered.com/ILoyaltyRewardsService/GetEligibleApps/v1/", { signal: AbortSignal.timeout(20_000) });
+	if (!r.ok) throw new Error(`Steam answered ${r.status}`);
+	const all: any[] = ((await r.json())?.response?.apps ?? []).filter((a: any) => Number.isSafeInteger(a?.appid));
+	const names = new Map<number, string>();
+	const chunks: number[][] = [];
+	for (let i = 0; i < all.length; i += 100) chunks.push(all.slice(i, i + 100).map((a) => a.appid as number));
+	// a few at a time: Steam answers each in under a second
+	for (let i = 0; i < chunks.length; i += 6)
+		await Promise.all(
+			chunks.slice(i, i + 6).map(async (chunk) => {
+				const params = new URLSearchParams({ language: "0" });
+				chunk.forEach((id, j) => params.set(`appids[${j}]`, String(id)));
+				const got: any = await fetch(`https://api.steampowered.com/ICommunityService/GetApps/v1/?${params}`, { signal: AbortSignal.timeout(20_000) })
+					.then((x) => (x.ok ? x.json() : {}))
+					.catch(() => ({}));
+				for (const a of got?.response?.apps ?? []) if (typeof a?.name === "string" && a.name.trim()) names.set(a.appid, a.name.trim().slice(0, 80));
+			}),
+		);
+	const named = (a: any): App => ({ appid: a.appid, name: names.get(a.appid) ?? "" });
+	const events = all
+		.filter((a) => a.event_app && a.has_items_anyone_can_purchase)
+		.map(named)
+		.map((e) => ({ ...e, name: e.name || `Steam event ${e.appid}` }))
+		.sort((a, b) => b.appid - a.appid);
+	const games = all
+		.filter((a) => !a.event_app)
+		.map(named)
+		.filter((g) => g.name)
+		.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+	const built = { at: Date.now(), events, games };
+	if (games.length) {
+		mkdirSync(STEAM_DIR, { recursive: true });
+		await Bun.write(APPS_FILE, JSON.stringify(built));
+	}
+	return built;
+}
+async function steamApps(): Promise<Apps> {
+	if (!apps && existsSync(APPS_FILE)) apps = await Bun.file(APPS_FILE).json().catch(() => undefined);
+	if ((!apps || Date.now() - apps.at > 24 * 3600_000) && !building)
+		building = buildApps()
+			.then((b) => (apps = b))
+			.finally(() => (building = undefined));
+	// an old list does while the new one is built
+	return apps ?? (await building!);
+}
+
+// GET /i/api/xitter/decor/catalog: { events: [{ appid, name }], games: [...] }
+export async function decorCatalog(): Promise<Response> {
+	try {
+		const { events, games } = await steamApps();
+		return Response.json({ events, games }, { headers: { "cache-control": "private, max-age=3600" } });
+	} catch {
+		return Response.json({ error: "Steam isn't answering. Try again in a minute." }, { status: 502 });
+	}
+}
+
+// a page of the shop, newest first: of one game (app), of Steam's events
+// (event: "all" or one event's appid), of the games a search finds, and only
+// what moves (animated). Cached a few minutes so browsing doesn't ask Steam
+// for the same page again.
+type Filter = { q: string; app: string; event: string; animated: boolean };
 const pages = new Map<string, { at: number; value: { items: Item[]; next: string | null } }>();
-async function catalogPage(kind: Kind, q: string, cursor: string): Promise<{ items: Item[]; next: string | null; games?: string[] }> {
-	const key = `${kind}|${q}|${cursor}`;
+async function catalogPage(kind: Kind, f: Filter, cursor: string): Promise<{ items: Item[]; next: string | null }> {
+	const key = `${kind}|${f.q}|${f.app}|${f.event}|${f.animated}|${cursor}`;
 	const hit = pages.get(key);
 	if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
 	const params = new URLSearchParams({ "community_item_classes[0]": String(CLASSES[kind]), count: "48" });
-	if (cursor) params.set("cursor", cursor);
-	if (q) {
+	if (f.app) params.set("appids[0]", f.app);
+	else if (f.event) {
+		const { events } = await steamApps();
+		const ids = f.event === "all" ? events.map((e) => e.appid) : events.filter((e) => String(e.appid) === f.event).map((e) => e.appid);
+		if (!ids.length) return { items: [], next: null };
+		ids.forEach((a, i) => params.set(`appids[${i}]`, String(a)));
+	} else if (f.q) {
 		// Steam's shop can't search names, but it filters by game: the store's
 		// search turns the words into games
-		const found = await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(q)}&cc=us&l=english`, { signal: AbortSignal.timeout(10_000) })
+		const found = await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(f.q)}&cc=us&l=english`, { signal: AbortSignal.timeout(10_000) })
 			.then((r) => (r.ok ? r.json() : { items: [] }))
 			.catch(() => ({ items: [] }));
-		const apps = (found.items ?? []).filter((a: any) => Number.isSafeInteger(a?.id)).slice(0, 10);
-		if (!apps.length) return { items: [], next: null };
-		apps.forEach((a: any, i: number) => params.set(`appids[${i}]`, String(a.id)));
+		const ids = (found.items ?? []).filter((a: any) => Number.isSafeInteger(a?.id)).slice(0, 10);
+		if (!ids.length) return { items: [], next: null };
+		ids.forEach((a: any, i: number) => params.set(`appids[${i}]`, String(a.id)));
 	}
-	const r = await shop(params);
-	const value = { items: (r.definitions ?? []).map(toItem).filter(Boolean) as Item[], next: (r.definitions?.length ?? 0) >= 48 && r.next_cursor ? String(r.next_cursor) : null };
+	// Steam can't filter what moves: up to six of its pages make one of ours
+	const found: any[] = [];
+	let next: string | null = cursor || null;
+	for (let i = 0; i < (f.animated ? 6 : 1); i++) {
+		if (next) params.set("cursor", next);
+		const r = await shop(params);
+		const defs: any[] = r.definitions ?? [];
+		found.push(...(f.animated ? defs.filter((d) => d?.community_item_data?.animated) : defs));
+		next = defs.length >= 48 && r.next_cursor ? String(r.next_cursor) : null;
+		if (!next || found.length >= 48) break;
+	}
+	const value = { items: found.map(toItem).filter(Boolean) as Item[], next };
 	if (pages.size > 500) pages.clear();
 	pages.set(key, { at: Date.now(), value });
 	return value;
 }
 
-// GET /i/api/xitter/decor/shop?kind=frame|background&q=&cursor=
+// GET /i/api/xitter/decor/shop?kind=frame|background|profile&app=&event=&animated=1&q=&cursor=
 export async function decorShop(url: URL): Promise<Response> {
 	const kind = url.searchParams.get("kind");
-	if (kind !== "frame" && kind !== "background") return Response.json({ error: "unknown kind" }, { status: 400 });
-	const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+	if (kind !== "frame" && kind !== "background" && kind !== "profile") return Response.json({ error: "unknown kind" }, { status: 400 });
+	const event = url.searchParams.get("event") ?? "";
+	const app = url.searchParams.get("app") ?? "";
+	if ((event && event !== "all" && !/^\d{1,10}$/.test(event)) || (app && !/^\d{1,10}$/.test(app))) return Response.json({ error: "unknown category" }, { status: 400 });
+	const f = { q: (url.searchParams.get("q") ?? "").trim().slice(0, 80), app, event, animated: url.searchParams.get("animated") === "1" };
 	const cursor = (url.searchParams.get("cursor") ?? "").slice(0, 200);
 	try {
-		const page = await catalogPage(kind, q, cursor);
+		const page = await catalogPage(kind, f, cursor);
 		return Response.json(
-			{ items: page.items.map((i) => ({ ...i, thumb: kind === "background" ? `${fileUrl(i.appid, i.image)}?thumb=1` : fileUrl(i.appid, i.image) })), next: page.next },
+			{
+				items: page.items.map((i) => ({
+					...i,
+					thumb: kind === "background" ? `${fileUrl(i.appid, i.image)}?thumb=1` : fileUrl(i.appid, i.image),
+					// what plays while the pointer is on the tile
+					moving: i.anim ? fileUrl(i.appid, i.anim) : i.preview ? fileUrl(i.appid, i.preview) : null,
+				})),
+				next: page.next,
+			},
 			{ headers: { "cache-control": "private, max-age=300" } },
 		);
 	} catch {
@@ -123,11 +225,32 @@ export async function decorShop(url: URL): Promise<Response> {
 	}
 }
 
-// the item as Steam has it now, so a pick can't name files of its own
+// items as Steam has them now, so a pick can't name files of its own; the
+// pieces of a game profile aren't sold alone, so those are asked for too
+async function steamDefs(defids: number[]): Promise<any[]> {
+	const params = new URLSearchParams({ include_direct_purchase_disabled: "true" });
+	defids.slice(0, 20).forEach((d, i) => params.set(`definitionids[${i}]`, String(d)));
+	return (await shop(params)).definitions ?? [];
+}
 async function steamItem(kind: Kind, defid: number): Promise<Item | undefined> {
-	const r = await shop(new URLSearchParams({ "definitionids[0]": String(defid) }));
-	const d = (r.definitions ?? [])[0];
+	const d = (await steamDefs([defid]))[0];
 	return d?.community_item_class === CLASSES[kind] ? toItem(d) : undefined;
+}
+
+// a game profile: Steam's bundle of a background and an avatar frame (and a
+// mini profile and an animated avatar, which have no place here), with its theme
+async function steamProfile(defid: number): Promise<{ profile: Item; theme?: string; background?: Item; frame?: Item } | undefined> {
+	const d = (await steamDefs([defid]))[0];
+	if (d?.community_item_class !== CLASSES.profile) return undefined;
+	const profile = toItem(d);
+	if (!profile) return undefined;
+	const parts = Array.isArray(d.bundle_defids) ? await steamDefs(d.bundle_defids.filter((x: unknown) => Number.isSafeInteger(x))) : [];
+	const of = (kind: Kind) => {
+		const part = parts.find((x) => x.community_item_class === CLASSES[kind]);
+		return part ? toItem(part) : undefined;
+	};
+	const id = d.community_item_data?.profile_theme_id;
+	return { profile, theme: typeof id === "string" && THEMES[id] ? id : undefined, background: of("background"), frame: of("frame") };
 }
 
 // /public/steam/<appid>/<file>: a Steam item's file. Worn items are seen by
@@ -142,10 +265,17 @@ export async function steamFile(req: Request, appid: string, file: string, thumb
 	const path = join(STEAM_DIR, appid, file);
 	const worn = async () => (await sql`select 1 from users where decor is not null and strpos(decor::text, ${`${file}"`}) > 0 limit 1`).length > 0;
 	if (thumb || (!existsSync(path) && !(await worn()))) {
-		if (!signedIn || type.startsWith("video/")) return new Response("not found", { status: 404 });
-		const r = await fetch(thumb && file.endsWith(".jpg") ? `${THUMBS}/${appid}/${file}?size=320x140` : `${FILES}/${appid}/${file}`, { signal: AbortSignal.timeout(15_000) }).catch(() => undefined);
+		if (!signedIn) return new Response("not found", { status: 404 });
+		// a shop preview video plays in pieces, so the range goes along
+		const range = type.startsWith("video/") ? req.headers.get("range") : null;
+		const r = await fetch(thumb && file.endsWith(".jpg") ? `${THUMBS}/${appid}/${file}?size=320x140` : `${FILES}/${appid}/${file}`, {
+			headers: range ? { range } : {},
+			signal: AbortSignal.timeout(15_000),
+		}).catch(() => undefined);
 		if (!r?.ok || Number(r.headers.get("content-length") ?? 0) > MAX_FILE) return new Response("not found", { status: 404 });
-		return new Response(r.body, { headers: { "content-type": type, "cache-control": "private, max-age=86400" } });
+		const headers: Record<string, string> = { "content-type": type, "cache-control": "private, max-age=86400" };
+		for (const h of ["content-length", "content-range", "accept-ranges"]) if (r.headers.get(h)) headers[h] = r.headers.get(h)!;
+		return new Response(r.body, { status: r.status, headers });
 	}
 	if (!existsSync(path)) {
 		const key = `${appid}/${file}`;
@@ -188,6 +318,7 @@ const clean = (d: unknown): Decor => {
 	if (typeof o.theme === "string" && THEMES[o.theme]) out.theme = o.theme;
 	if (o.background && typeof o.background === "object") out.background = o.background;
 	if (o.frame && typeof o.frame === "object") out.frame = o.frame;
+	if (o.profile && typeof o.profile === "object") out.profile = o.profile;
 	return out;
 };
 
@@ -197,7 +328,8 @@ const forClient = (d: Decor) => ({
 	background: d.background
 		? { image: fileUrl(d.background.appid, d.background.image), movie: d.background.movie ? fileUrl(d.background.appid, d.background.movie) : null, mp4: d.background.mp4 ? fileUrl(d.background.appid, d.background.mp4) : null }
 		: null,
-	frame: d.frame ? fileUrl(d.frame.appid, d.frame.image) : null,
+	frame: d.frame ? fileUrl(d.frame.appid, d.frame.anim ?? d.frame.image) : null,
+	frameStill: d.frame ? fileUrl(d.frame.appid, d.frame.image) : null,
 });
 
 // GET /i/api/xitter/decor?names=a,b: { a: { theme, background, frame }, ... },
@@ -227,7 +359,7 @@ async function page(req: Request, viewer: Viewer, d: Decor, error = "") {
 		const i = d[kind];
 		const preview = i
 			? kind === "frame"
-				? `<div class="framed"><img class="pfp" src="${esc(viewer.avatar_url ?? "/public/default-avatar.png")}" alt=""><img class="ring" src="${fileUrl(i.appid, i.image)}" alt=""></div>`
+				? `<div class="framed"><img class="pfp" src="${esc(viewer.avatar_url ?? "/public/default-avatar.png")}" alt=""><img class="ring" src="${fileUrl(i.appid, i.anim ?? i.image)}" alt=""></div>`
 				: `<img class="bgpreview" src="${fileUrl(i.appid, i.image)}" alt="">`
 			: "";
 		return `<div class="card split"><div><b>${label}</b><div class="meta">${i ? esc(i.name) : "None"}</div></div>${preview}${
@@ -248,13 +380,17 @@ async function page(req: Request, viewer: Viewer, d: Decor, error = "") {
 	<div class="card split"><div><b>Theme</b><div class="meta">${d.theme ? esc(THEMES[d.theme]!.name) : "None"}</div></div>${d.theme ? swatch(d.theme) : ""}${
 		d.theme ? form('<input type="hidden" name="theme" value="">', "Remove", "small secondary") : ""
 	}</div>
+	${d.profile ? `<div class="card split"><div><b>Game profile</b><div class="meta">${esc(d.profile.name)}</div></div><img class="bgpreview" src="${fileUrl(d.profile.appid, d.profile.image)}" alt=""></div>` : ""}
 	${worn("background", "Background")}
 	${worn("frame", "Avatar frame")}
 	<h2>Themes</h2>
 	<form method="post" action="/account/decor" class="themes"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}">${themes}</form>
 	<h2>Steam items</h2>
-	<div class="row tabsel"><button type="button" class="small" data-kind="frame">Avatar frames</button><button type="button" class="small secondary" data-kind="background">Backgrounds</button></div>
-	<form class="row" id="search"><input name="q" placeholder="Search by game, like Portal 2" autocomplete="off"><button type="submit" class="small">Search</button></form>
+	<div class="row tabsel"><button type="button" class="small" data-kind="frame">Avatar frames</button><button type="button" class="small secondary" data-kind="background">Backgrounds</button><button type="button" class="small secondary" data-kind="profile">Game profiles</button></div>
+	<p class="dim">A game profile is Steam's set for one game: its background, avatar frame and theme, worn together.</p>
+	<div class="row" id="cats"></div>
+	<div class="row" id="sub"></div>
+	<form class="row" id="search"><input name="q" placeholder="Or search by game, like Portal 2" autocomplete="off"><button type="submit" class="small">Search</button></form>
 	<div id="shop" class="shop" data-csrf="${esc(viewer.csrf)}" data-avatar="${esc(viewer.avatar_url ?? "")}"></div>
 	<button type="button" id="more" class="secondary" hidden>Load more</button>
 	<p class="dim">Items and art belong to Valve and the games' makers, shown from Steam.</p>
@@ -281,23 +417,46 @@ const PAGE_CSS = `
 .shop .framed{width:72px;height:72px;margin:10px auto}
 .shop .bg{width:100%;aspect-ratio:320/140;object-fit:cover;border-radius:8px}
 .tabsel button[aria-pressed="true"]{pointer-events:none}
+#cats:empty,#sub:empty{display:none}
+#sub select{width:auto;max-width:100%}
+#sub button{min-width:32px;padding:0 10px}
+.games{display:flex;flex-wrap:wrap;gap:6px}
+.shop>p{grid-column:1/-1}
+.games button{font-weight:500}
 `;
 
 const SHOP_SCRIPT = String.raw`(function(){
 	var shop=document.getElementById("shop"),more=document.getElementById("more"),search=document.getElementById("search");
-	var kind="frame",q="",next=null,busy=false;
+	var cats=document.getElementById("cats"),sub=document.getElementById("sub");
 	var avatar=shop.getAttribute("data-avatar")||"/public/default-avatar.png";
+	// what's shown: a kind of item, and a category (new, animated, Steam events,
+	// one event, one game, or a search)
+	var kind="frame",cat="new",app="",event="",q="",next=null,busy=0,catalog=null,letter="A";
+	function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
+	function chip(label,on,click){var b=el("button","small"+(on?"":" secondary"),label);b.type="button";b.setAttribute("aria-pressed",String(!!on));b.addEventListener("click",click);return b}
 	function tile(i){
-		var b=document.createElement("button");b.type="button";b.title=i.name;
+		var b=el("button");b.type="button";b.title=i.name;
 		if(kind==="frame"){
-			var f=document.createElement("div");f.className="framed";
-			var a=document.createElement("img");a.className="pfp";a.src=avatar;a.alt="";
-			var r=document.createElement("img");r.className="ring";r.src=i.thumb;r.alt="";r.loading="lazy";
+			var f=el("div","framed"),a=el("img","pfp"),r=el("img","ring");
+			a.src=avatar;a.alt="";r.src=i.thumb;r.alt="";r.loading="lazy";
 			f.appendChild(a);f.appendChild(r);b.appendChild(f);
-		}else{
-			var g=document.createElement("img");g.className="bg";g.src=i.thumb;g.alt="";g.loading="lazy";b.appendChild(g);
+		}else{var g=el("img","bg");g.src=i.thumb;g.alt="";g.loading="lazy";b.appendChild(g)}
+		b.appendChild(el("span","",i.name+(i.moving?" · animated":"")));
+		if(i.moving){
+			var still=b.querySelector(".ring,.bg"),clip;
+			var play=function(){
+				if(kind==="frame"){still.src=i.moving;return}
+				if(clip)return;
+				clip=el("video","bg");clip.muted=true;clip.loop=true;clip.autoplay=true;clip.playsInline=true;clip.src=i.moving;
+				still.replaceWith(clip);
+			};
+			var stop=function(){
+				if(kind==="frame"){still.src=i.thumb;return}
+				if(clip){clip.replaceWith(still);clip=null}
+			};
+			b.addEventListener("mouseenter",play);b.addEventListener("focus",play);
+			b.addEventListener("mouseleave",stop);b.addEventListener("blur",stop);
 		}
-		var n=document.createElement("span");n.textContent=i.name+(i.movie?" · animated":"");b.appendChild(n);
 		b.addEventListener("click",function(){
 			var f=document.createElement("form");f.method="post";f.action="/account/decor";
 			[["csrf",shop.getAttribute("data-csrf")],["kind",kind],["defid",String(i.defid)]].forEach(function(p){var x=document.createElement("input");x.type="hidden";x.name=p[0];x.value=p[1];f.appendChild(x)});
@@ -306,30 +465,68 @@ const SHOP_SCRIPT = String.raw`(function(){
 		return b;
 	}
 	function load(reset){
-		if(busy)return;busy=true;
+		var ticket=++busy;
 		if(reset){shop.textContent="";next=null}
-		shop.className="shop"+(kind==="background"?" wide":"");
+		shop.className="shop"+(kind==="frame"?"":" wide");
 		more.hidden=true;
-		var url="/i/api/xitter/decor/shop?kind="+kind+"&q="+encodeURIComponent(q)+(next?"&cursor="+encodeURIComponent(next):"");
+		var url="/i/api/xitter/decor/shop?kind="+kind+
+			(cat==="animated"?"&animated=1":"")+(cat==="events"&&event?"&event="+event:"")+(cat==="game"&&app?"&app="+app:"")+(cat==="search"?"&q="+encodeURIComponent(q):"")+
+			(next?"&cursor="+encodeURIComponent(next):"");
 		fetch(url,{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(d){
-			busy=false;
-			if(d.error){var e=document.createElement("p");e.className="error";e.textContent=d.error;shop.appendChild(e);return}
+			if(ticket!==busy)return;
+			if(d.error){shop.appendChild(el("p","error",d.error));return}
 			d.items.forEach(function(i){shop.appendChild(tile(i))});
-			if(!shop.children.length){var p=document.createElement("p");p.className="dim";p.textContent="Nothing found. Steam searches by game name.";shop.appendChild(p)}
+			if(!shop.children.length)shop.appendChild(el("p","dim",{frame:"No avatar frames here. Try Backgrounds.",background:"No backgrounds here. Try Avatar frames.",profile:"No game profiles here."}[kind]));
 			next=d.next;more.hidden=!next;
-		}).catch(function(){busy=false});
+		}).catch(function(){});
+	}
+	// the games, by first letter: picking one lists its items
+	function games(){
+		shop.textContent="";more.hidden=true;shop.className="games";
+		if(!catalog){shop.appendChild(el("p","dim","Loading games…"));return}
+		var list=catalog.games.filter(function(g){var c=g.name.charAt(0).toUpperCase();return letter==="#"?!/[A-Z]/.test(c):c===letter});
+		list.forEach(function(g){shop.appendChild(chip(g.name,false,function(){app=String(g.appid);sub.querySelectorAll("[data-game]").forEach(function(x){x.remove()});var back=chip("← "+g.name,true,function(){app="";draw()});back.setAttribute("data-game","");sub.prepend(back);load(true)}))});
+		if(!list.length)shop.appendChild(el("p","dim","No games under "+letter+"."));
+	}
+	function draw(){
+		cats.textContent="";sub.textContent="";
+		search.hidden=kind==="profile";
+		// game profiles are few: no categories
+		if(kind==="profile"){cat="new";load(true);return}
+		[["new","New"],["animated","Animated"],["events","Steam events"],["game","Games A–Z"]].forEach(function(c){
+			cats.appendChild(chip(c[1],cat===c[0],function(){cat=c[0];app="";event=cat==="events"?"all":"";draw()}));
+		});
+		if(cat==="search")cats.appendChild(chip("Search: "+q,true,function(){}));
+		if(cat==="events"){
+			var pick=el("select");pick.setAttribute("aria-label","Event");
+			var all=el("option","","All events");all.value="all";pick.appendChild(all);
+			(catalog?catalog.events:[]).forEach(function(e){var o=el("option","",e.name);o.value=String(e.appid);pick.appendChild(o)});
+			pick.value=event||"all";
+			pick.addEventListener("change",function(){event=pick.value;load(true)});
+			sub.appendChild(pick);
+			load(true);
+		}else if(cat==="game"){
+			"#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(function(l){sub.appendChild(chip(l,letter===l&&!app,function(){letter=l;app="";draw()}))});
+			if(app)load(true);else games();
+		}else load(true);
 	}
 	document.querySelectorAll(".tabsel button").forEach(function(b){
 		b.setAttribute("aria-pressed",String(b.getAttribute("data-kind")===kind));
 		b.addEventListener("click",function(){
 			kind=b.getAttribute("data-kind");
 			document.querySelectorAll(".tabsel button").forEach(function(o){var on=o===b;o.className="small"+(on?"":" secondary");o.setAttribute("aria-pressed",String(on))});
-			load(true);
+			if(cat==="game"&&!app)cat="new";
+			draw();
 		});
 	});
-	search.addEventListener("submit",function(e){e.preventDefault();q=search.q.value.trim();load(true)});
+	search.addEventListener("submit",function(e){e.preventDefault();q=search.q.value.trim();cat=q?"search":"new";app="";event="";draw()});
 	more.addEventListener("click",function(){load(false)});
-	load(true);
+	fetch("/i/api/xitter/decor/catalog",{credentials:"same-origin"}).then(function(r){return r.json()}).then(function(d){
+		if(!d||!Array.isArray(d.games))return;
+		catalog=d;
+		if(cat==="events"||(cat==="game"&&!app))draw();
+	}).catch(function(){});
+	draw();
 })();`;
 
 export async function decorRoute(req: Request, viewer: Viewer): Promise<Response> {
@@ -347,8 +544,21 @@ export async function decorRoute(req: Request, viewer: Viewer): Promise<Response
 		else delete d.theme;
 	} else {
 		const kind = String(f?.get("kind") ?? "");
+		if (kind === "profile") {
+			const defid = String(f?.get("defid") ?? "");
+			if (!/^\d{1,12}$/.test(defid)) return page(req, viewer, d, "That isn't a Steam item.");
+			const set = await steamProfile(Number(defid)).catch(() => undefined);
+			if (!set) return page(req, viewer, d, "Steam doesn't have that game profile.");
+			d.profile = set.profile;
+			if (set.background) d.background = set.background;
+			if (set.frame) d.frame = set.frame;
+			if (set.theme) d.theme = set.theme;
+			await sql`update users set decor = ${JSON.stringify(d)}::text::jsonb where id = ${viewer.id}::bigint`;
+			return new Response(null, { status: 303, headers: { location: "/account/decor" } });
+		}
 		if (kind !== "frame" && kind !== "background") return page(req, viewer, d, "That isn't a decor slot.");
 		const defid = String(f?.get("defid") ?? "");
+		delete d.profile;
 		if (!defid) delete d[kind];
 		else {
 			if (!/^\d{1,12}$/.test(defid)) return page(req, viewer, d, "That isn't a Steam item.");
@@ -366,6 +576,7 @@ export async function decorRoute(req: Request, viewer: Viewer): Promise<Response
 // background behind the page and its theme on the column.
 export const DECOR_SCRIPT = String.raw`(function(){
 	var known={},waiting={},queue=[],timer,current=null;
+	var still=matchMedia("(prefers-reduced-motion: reduce)").matches;
 	var RESERVED=/^(home|explore|notifications|messages|i|settings|search|compose|account|admin|login|logout|signup|tos|privacy|jobs|bookmarks|lists|communities|premium|verified-choose|public|abs|hashtag|intent)$/;
 	function profileName(){
 		var m=/^\/([A-Za-z0-9_]{1,15})(?:\/(?:with_replies|media|likes|highlights|articles|superfollows|affiliates))?\/?$/.exec(location.pathname);
@@ -379,7 +590,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			var k=known[n];
 			if(k===undefined){want(n);return}
 			var ring=box.querySelector(":scope > [data-xitter-frame]");
-			var src=k&&k.frame;
+			var src=k&&(still?k.frameStill:k.frame);
 			if(!src){if(ring)ring.remove();return}
 			if(ring&&ring.getAttribute("src")===src)return;
 			if(ring)ring.remove();
@@ -390,21 +601,37 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			box.appendChild(ring);
 		});
 	}
+	// X's muted text, dark and dim, is a class of its own; found by its colour
+	function greyRules(){
+		var out=[];
+		[].forEach.call(document.styleSheets,function(sheet){
+			var rules;try{rules=sheet.cssRules}catch(e){return}
+			[].forEach.call(rules||[],function(r){
+				if(r.selectorText&&r.style&&/^rgba?\((113, 118, 123|139, 152, 165)(, 1)?\)$/.test(r.style.color)&&/^\.[\w-]+$/.test(r.selectorText))out.push(r.selectorText);
+			});
+		});
+		return out;
+	}
 	var layer,style;
 	function clearProfile(){
 		if(layer){layer.remove();layer=null}
 		if(style){style.remove();style=null}
+		greys.textContent="";greyKey="";greyAt=0;
 		document.documentElement.removeAttribute("data-xitter-decor");
 		current=null;
 	}
 	function profile(){
 		var n=profileName();
+		// a dialog opened over the profile (Edit profile, a photo) has an address of
+		// its own, but the profile stays behind it, and so does its decor
+		if(!n&&current&&(document.querySelector('[aria-modal="true"]')||document.querySelector('[data-testid="primaryColumn"] [data-testid="UserName"]')))return;
 		if(!n){if(current)clearProfile();return}
 		var k=known[n];
 		if(k===undefined){want(n);return}
 		if(!k||(!k.background&&!k.theme)){if(current)clearProfile();return}
 		if(current===n)return;
 		clearProfile();current=n;
+		var light=/^rgb\(255, 255, 255/.test(getComputedStyle(document.body).backgroundColor);
 		document.documentElement.setAttribute("data-xitter-decor","");
 		var css="";
 		if(k.background){
@@ -421,18 +648,38 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			}else layer.style.backgroundImage='url("'+bg.image+'")';
 			document.body.prepend(layer);
 			// the page's own black goes, so the background shows around the columns
+			// the menu on the left sits on the background: blurred under it, so it reads
+			css+='html[data-xitter-decor] header[role="banner"]>div>div{-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);background:'+(light?"rgba(255,255,255,.45)":"rgba(0,0,0,.35)")+'!important}';
 			css+='html[data-xitter-decor],html[data-xitter-decor] body{background:transparent!important}'+
 				'html[data-xitter-decor] #react-root>div>div,html[data-xitter-decor] #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
 		}
 		// Steam's themes are dark: on X's light look they only tint a white column
-		var t=k.theme,light=/^rgb\(255, 255, 255/.test(getComputedStyle(document.body).backgroundColor);
-		var col=light?(t?"linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),"+t.background:"rgba(255,255,255,.88)"):(t?t.background:"rgba(0,0,0,.72)");
+		var t=k.theme;
+		// and the bright ones (Lunar, Winter) drown X's grey text: a dark veil goes
+		// over the theme, and the grey turns lighter
+		var col=light?(t?"linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),"+t.background:"rgba(255,255,255,.88)"):(t?"linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),"+t.background:"rgba(0,0,0,.72)");
 		css+='html[data-xitter-decor] [data-testid="primaryColumn"]{background:'+col+'!important;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}';
+		dark=!light;
 		if(t&&!light)css+='html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] button,html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]{background:'+t.button+'!important;border-color:'+t.outline+'!important}';
 		style=document.createElement("style");style.setAttribute("data-xitter-decor-css","");style.textContent=css;document.head.appendChild(style);
+		greys.textContent="";greyKey="";lighten();
+	}
+	// X adds its classes as it first uses them: the grey ones are looked for again
+	// while a decorated profile is up, a second apart at most
+	var greys=document.createElement("style"),greyKey="",greyAt=0,dark=false;
+	greys.setAttribute("data-xitter-decor-grey","");
+	function lighten(){
+		if(!current||!dark||Date.now()-greyAt<1000)return;
+		greyAt=Date.now();
+		// some of it is coloured inline instead
+		var found=greyRules().concat(['[style*="color: rgb(113, 118, 123)"]','[style*="color: rgb(139, 152, 165)"]']),key=found.join(",");
+		if(key===greyKey)return;
+		greyKey=key;
+		greys.textContent=found.map(function(sel){return 'html[data-xitter-decor] [data-testid="primaryColumn"] '+sel+'{color:rgb(206,211,216)!important}'}).join("");
+		if(!greys.isConnected)document.head.appendChild(greys);
 	}
 	function scan(){
-		frames();profile();
+		frames();profile();lighten();
 		if(queue.length)load();
 	}
 	function load(){

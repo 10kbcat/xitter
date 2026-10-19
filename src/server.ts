@@ -50,7 +50,7 @@ import { manifest } from "./pwa";
 import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 import { noteAppealsRoute } from "./note-appeals";
-import { decorFor, decorRoute, decorShop, steamFile } from "./decor";
+import { decorCatalog, decorFor, decorRoute, decorShop, steamFile } from "./decor";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -205,6 +205,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/instance") return instanceCard(viewer.id, url);
 	if (path === "/xitter/decor") return decorFor(url);
 	if (path === "/xitter/decor/shop") return decorShop(url);
+	if (path === "/xitter/decor/catalog") return decorCatalog();
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);

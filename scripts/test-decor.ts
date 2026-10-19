@@ -71,7 +71,40 @@ try {
 	check((await fetch(`${origin}${unworn.thumb}`)).status === 404, "a signed-out visitor can't fetch an item nobody wears");
 	check((await gold.api(`/../../public/steam/${unworn.appid}/${unworn.image}`)).ok, "a signed-in account browsing the shop can");
 	const video = animated.items?.find((i: any) => i.movie && i.defid !== moving?.defid);
-	if (video) check((await gold.api(`/../../public/steam/${video.appid}/${video.movie}`)).status === 404, "but never a video nobody wears");
+	if (video) {
+		check((await fetch(`${origin}/public/steam/${video.appid}/${video.preview}`)).status === 404, "a signed-out visitor can't play a shop preview");
+		const clip = await gold.api(`/../../public/steam/${video.appid}/${video.preview}`);
+		check(clip.ok && clip.headers.get("content-type") === "video/webm", `a signed-in account plays it (${clip.status})`);
+		await clip.body?.cancel();
+		check(!(await Bun.file(`media/steam/${video.appid}/${video.preview}`).exists()), "and it isn't kept on the server");
+	}
+
+	// animated frames move, and Steam's events are a category of their own
+	const still = frames.items.find((i: any) => i.anim);
+	check(!!still?.moving && still.moving.endsWith(still.anim), "an animated frame has its moving file");
+	const catalog = await gold.api("/xitter/decor/catalog").then((r) => r.json());
+	const events = catalog.events;
+	check(Array.isArray(events) && events.length > 10 && events.every((e: any) => e.name), `Steam's events are listed with names (${events?.length})`);
+	check(catalog.games?.length > 1000 && catalog.games.some((g: any) => g.appid === 620 && g.name === "Portal 2"), `games are listed A to Z (${catalog.games?.length})`);
+	const portalFrames = await gold.api("/xitter/decor/shop?kind=background&app=620").then((r) => r.json());
+	check(portalFrames.items?.length > 0 && portalFrames.items.every((i: any) => i.appid === 620), "one game shows only its items");
+	const onlyMoving = await gold.api("/xitter/decor/shop?kind=background&animated=1").then((r) => r.json());
+	check(onlyMoving.items?.length > 0 && onlyMoving.items.every((i: any) => i.movie), `"Animated" shows only what moves (${onlyMoving.items?.length})`);
+
+	// a game profile puts its background and frame on, and says where they came from
+	const profiles = await gold.api("/xitter/decor/shop?kind=profile").then((r) => r.json());
+	check(profiles.items?.length > 0, `game profiles are listed (${profiles.items?.length})`);
+	check((await gold.post({ kind: "profile", defid: "198096" })).status === 303, "a gold-check account wears Dying Light 2's game profile");
+	const [dl2] = await sql`select decor from users where lower(screen_name) = lower(${goldName})`;
+	check(dl2.decor?.profile?.defid === 198096 && dl2.decor?.background?.appid === 534380 && dl2.decor?.frame?.appid === 534380, "its background and frame are on");
+	check((await gold.post({ kind: "profile", defid: String(frames.items[0].defid) })).status === 400, "a frame isn't a game profile");
+	const eventIds = new Set(events.map((e: any) => e.appid));
+	const fromEvents = await gold.api("/xitter/decor/shop?kind=frame&event=all").then((r) => r.json());
+	check(fromEvents.items?.length > 0 && fromEvents.items.every((i: any) => eventIds.has(i.appid)), `"Steam events" shows only event items (${fromEvents.items?.length})`);
+	const one = fromEvents.items[0].appid;
+	const single = await gold.api(`/xitter/decor/shop?kind=frame&event=${one}`).then((r) => r.json());
+	check(single.items?.length > 0 && single.items.every((i: any) => i.appid === one), "one event shows only its own items");
+	check((await gold.api("/xitter/decor/shop?kind=frame&event=nope")).status === 400, "a made-up event is refused");
 
 	// losing the gold check hides it, without forgetting it
 	await sql`update users set verified_type = 'blue' where lower(screen_name) = lower(${goldName})`;
