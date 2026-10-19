@@ -1,5 +1,5 @@
 import type { User } from "./auth";
-import { blockedFor, isBlockedEitherWay, mutedFor, outOfView } from "./blocks";
+import { blockedFor, federatedHiddenFor, isBlockedEitherWay, mutedFor, outOfView } from "./blocks";
 import { staffViewer } from "./staff-access";
 import { sql } from "./db";
 import { INSTANCE_ID } from "./federation";
@@ -16,7 +16,7 @@ const stat = (name: string) => sql`coalesce((select s.${sql(name)} from user_sta
 // same account never reaches the client in two different states.
 export const userCols = (viewerId: string) => sql`
 	u.id as a_id, u.screen_name as a_screen_name, u.name as a_name, u.bio as a_bio, u.location as a_location,
-	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.protected as a_protected, u.verified_type as a_verified_type, u.verified_at as a_verified_at, u.translator as a_translator, u.flag as a_flag, u.status as a_status, u.created_at as a_created_at,
+	u.website as a_website, u.avatar_url as a_avatar_url, u.banner_url as a_banner_url, u.pinned_post_id as a_pinned_post_id, u.protected as a_protected, u.verified_type as a_verified_type, u.verified_at as a_verified_at, u.translator as a_translator, u.flag as a_flag, u.status as a_status, u.instance as a_instance, u.created_at as a_created_at,
 	${badgesOf(sql`u.id`)} as a_badges, u.remote_badges as a_remote_badges,
 	greatest((u.remote_counts->>'posts')::int, ${stat("posts")}) as a_posts,
 	(select json_build_object('id', o.id::text, 'name', o.name, 'screen_name', o.screen_name, 'avatar_url', case when o.org_badge_id is not null then '/public/badge-' || o.org_badge_id::text || '.png' else o.avatar_url end, 'since', af.created_at)
@@ -63,6 +63,7 @@ export function toUser(r: any): User {
 		automated_by: r.a_automated_by ?? null,
 		parody_label: r.a_parody_label ?? "None",
 		label: r.a_label ?? null,
+		instance: r.a_instance ?? null,
 		created_at: r.a_created_at,
 		stats: {
 			posts: r.a_posts,
@@ -184,6 +185,7 @@ export async function suggestedUsers(viewerId: string, limit = 20, exclude: stri
 		where u.id <> ${viewerId}::bigint and u.status = 'active'
 			and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)
 			and u.id not in ${blockedFor(viewerId)} and u.id not in ${mutedFor(viewerId)} and u.id not in ${outOfView(viewerId)}
+			and u.id not in ${federatedHiddenFor(viewerId)}
 			${exclude.length ? sql`and u.id <> all(${sql.array(exclude, "INT8")})` : sql``}
 			${similarTo ? sql`and u.id <> ${similarTo}::bigint` : sql``}
 		order by exists (select 1 from contacts c where c.user_id = ${viewerId}::bigint and lower(u.email) = any(c.emails)

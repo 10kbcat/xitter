@@ -7,7 +7,7 @@ import { hasBlockedPhrase } from "./settings";
 import { postLimitFor, weightedLength } from "./textlen";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
-import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, suspendedFor } from "./blocks";
+import { blockedFor, federatedHiddenFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
 import { fetchPreview, linkCard, linksIn, previewable, previewsFor } from "./links";
 import { mediaForPosts } from "./media";
@@ -248,6 +248,7 @@ export const homeHidden = (viewerId: string) => sql`f.author_id not in ${blocked
 	and f.author_id not in ${outOfView(viewerId)} and ${originalAuthor()} not in ${outOfView(viewerId)}
 	and f.author_id not in ${protectedFor(viewerId)} and ${originalAuthor()} not in ${protectedFor(viewerId)}
 	and f.author_id not in ${mutedFor(viewerId)} and ${originalAuthor()} not in ${mutedFor(viewerId)}
+	and f.author_id not in ${federatedHiddenFor(viewerId)} and ${originalAuthor()} not in ${federatedHiddenFor(viewerId)}
 	and not ${hasMutedWord(viewerId, "home_timeline", sql`f.post_id`)}
 	and (f.reposter_id is null or f.reposter_id not in (select target_id from repost_mutes where user_id = ${viewerId}::bigint))`;
 // posts of a community show outside it only to its members (f is feed_items)
@@ -325,7 +326,7 @@ export async function ancestors(viewerId: string, replyToId: string): Promise<Po
 
 export async function replies(viewerId: string, id: string, limit = 100): Promise<PostRow[]> {
 	const rows = await sql`${select(viewerId)} where p.reply_to_id = ${id}::bigint and p.reply_hidden_at is null
-		and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
+		and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)} and p.user_id not in ${federatedHiddenFor(viewerId)}
 		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)} order by p.id asc limit ${limit}`;
 	return hydrate(viewerId, rows.map(toRow));
 }
@@ -338,7 +339,7 @@ export async function repliesBelow(viewerId: string, id: string, limit = 1000): 
 				select x.id, t.depth + 1 from posts x join tree t on x.reply_to_id = t.id where t.depth < 40
 			) select id from tree limit ${limit})
 		and p.reply_hidden_at is null and p.user_id not in ${blockedFor(viewerId)} and p.user_id not in ${outOfView(viewerId)}
-		and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)}`;
+		and p.user_id not in ${federatedHiddenFor(viewerId)} and not ${hasMutedWord(viewerId, "tweet_replies", sql`p.id`)}`;
 	return rows.map(toRow);
 }
 

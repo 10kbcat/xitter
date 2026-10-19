@@ -3,6 +3,7 @@
 // screens, and the announcement banner. CSS where an element has a stable link
 // or test id, a small script where only its text tells it apart.
 
+import { FEDERATION_ON } from "./federation";
 import { sql } from "./db";
 import { type Feature, feature, settings } from "./settings";
 
@@ -64,6 +65,8 @@ const CODE = "M320-240 80-480l240-240 57 57-184 184 183 183-56 56Zm320 0-57-57 1
 const BUILDING = "M4 21V3h11v4h5v14H4zm2-2h3v-3h2v3h2V5H6v14zm9 0h3V9h-3v10zM8 7h3v2H8V7zm0 4h3v2H8v-2z";
 const SHIELD = "M12 1.5 3.5 5v6c0 5.2 3.6 10 8.5 11.5 4.9-1.5 8.5-6.3 8.5-11.5V5L12 1.5zm0 2.2 6.5 2.7V11c0 4.2-2.8 8.2-6.5 9.4-3.7-1.2-6.5-5.2-6.5-9.4V6.4L12 3.7zM11 7h2v6h-2V7zm0 8h2v2h-2v-2z";
 const ROBOT = "M11 2h2v3h5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5V2zM6 7v11h12V7H6zm3 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm-6 5h6v1.5H9V15z";
+// Material Symbols "public"
+const GLOBE = "M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q41-45 62.5-100.5T800-480q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z";
 export type MenuLink = { href: string; text: string; description: string; icon: string; viewBox?: string; menuOnly?: boolean };
 export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const links: MenuLink[] = [];
@@ -78,6 +81,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	if (u?.org) links.push({ href: "/account/organisation", text: "Organisation", description: "Manage affiliates, or answer an organisation that asked to add you.", icon: BUILDING });
 	links.push({ href: "/account/automation", text: "Automation", description: "Name the account that runs this one.", icon: ROBOT, menuOnly: true });
 	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD });
+	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960" });
 	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960" });
 	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD });
 	return links;

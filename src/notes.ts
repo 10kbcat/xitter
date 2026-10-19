@@ -1,4 +1,5 @@
 import type { Viewer } from "./auth";
+import { shownSource } from "./platforms";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { blockedFor, isBlockedEitherWay, outOfView, protectedFor } from "./blocks";
@@ -107,13 +108,14 @@ export const noteHandlers = {
 	XitterPostContext: async (v: Viewer, vars: any) => {
 		const ids = [...new Set((Array.isArray(vars.ids) ? vars.ids : []).filter(isId))].slice(0, 20) as string[];
 		if (!ids.length) return { data: { xitter_post_context: [] } };
-		const posts = await sql`select id::text, source from posts where id = any(${sql.array(ids, "INT8")}) and (not hidden or ${staffViewer(v.id)}) and user_id not in ${blockedFor(v.id)} and user_id not in ${outOfView(v.id)} and user_id not in ${protectedFor(v.id)}`;
+		const posts = await sql`select p.id::text, p.source, u.instance from posts p join users u on u.id = p.user_id where p.id = any(${sql.array(ids, "INT8")}) and (not p.hidden or ${staffViewer(v.id)}) and p.user_id not in ${blockedFor(v.id)} and p.user_id not in ${outOfView(v.id)} and p.user_id not in ${protectedFor(v.id)}`;
+		for (const p of posts) p.source = shownSource(p.source, p.instance);
 		const visibleIds = posts.map((p: any) => p.id);
 		const notes = await notesMany(v, visibleIds);
 		const requests = visibleIds.length ? await sql`select post_id::text, count(*)::int as count, bool_or(user_id = ${v.id}::bigint) as own from community_note_requests where post_id = any(${sql.array(visibleIds, "INT8")}) group by post_id` : [];
 		const byPost = new Map(requests.map((r: any) => [r.post_id, r]));
 		const canWrite = await membership(v);
-		return { data: { xitter_post_context: posts.map((p: any) => ({ ...p, can_write_notes: canWrite, notes: (notes.get(p.id) ?? []).map(({ author_id, ...n }: any) => n), requests: byPost.get(p.id)?.count ?? 0, requested: !!byPost.get(p.id)?.own })) } };
+		return { data: { xitter_post_context: posts.map(({ instance, ...p }: any) => ({ ...p, can_write_notes: canWrite, notes: (notes.get(p.id) ?? []).map(({ author_id, ...n }: any) => n), requests: byPost.get(p.id)?.count ?? 0, requested: !!byPost.get(p.id)?.own })) } };
 	},
 	BirdwatchCreateNote: async (v: Viewer, vars: any) => {
 		await visible(v, vars.tweet_id, true);

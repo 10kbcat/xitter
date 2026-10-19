@@ -12,7 +12,7 @@ import { FLAGS } from "./flags";
 import { homeOf, mentionsIn } from "./mentions";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 import { placeById } from "./places";
-import { webSource } from "./platforms";
+import { shownSource } from "./platforms";
 import { settings } from "./settings";
 import { SHORT_POST, previewOf, weightedLength } from "./textlen";
 
@@ -498,7 +498,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 			full_text: shown,
 			possibly_sensitive: !!p.sensitive,
 			...(placeById(p.place_id) ? { place: placeById(p.place_id) } : {}),
-			source: (p.source ?? webSource()).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
+			source: shownSource(p.source, p.author.instance).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
 			id_str: p.id,
 			...(p.reply_to_id
 				? {

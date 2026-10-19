@@ -38,6 +38,7 @@ import { rememberIp, requestIp } from "./login-history";
 import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
 import { actingViewer, delegateMay } from "./delegation";
 import { automationRoute } from "./automation";
+import { instancesRoute } from "./federation-settings";
 import { stickerImage, stickerPacks } from "./stickers";
 import { apiTokensRoute, publicApi } from "./public-api";
 import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken } from "./oauth";
@@ -375,6 +376,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/api" && viewer) return apiTokensRoute(req, viewer);
 	if (p === "/account/notes/appeals" && viewer) return noteAppealsRoute(req, viewer);
 	if (p === "/account/automation" && viewer) return automationRoute(req, viewer);
+	if (p === "/account/instances" && viewer) return instancesRoute(req, viewer);
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
