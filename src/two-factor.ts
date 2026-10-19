@@ -3,6 +3,7 @@
 import { createHash, randomInt } from "node:crypto";
 import { accountPage, esc } from "./account-page";
 import { sql } from "./db";
+import { hit } from "./ratelimit";
 import { settings } from "./settings";
 import { newSecret, otpauthUrl, verifyCode } from "./totp";
 import type { Viewer } from "./auth";
@@ -50,6 +51,8 @@ export async function answerChallenge(token: string, code: string): Promise<{ us
 		await sql`delete from login_challenges where token = ${token}::uuid`;
 		return { error: "Too many wrong codes. Start signing in again." };
 	}
+	// counted before the code is checked, so parallel guesses can't all slip in
+	if (!hit("code", c.user_id).ok) return { error: "Too many codes tried for this account. Wait an hour." };
 	if (!(await codeAccepted(c.user_id, code))) {
 		await sql`update login_challenges set attempts = attempts + 1 where token = ${token}::uuid`;
 		return { error: "That code isn't right. Check your authenticator app and try again." };
