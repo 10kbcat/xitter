@@ -4,6 +4,7 @@ import { createUser } from "../src/auth";
 import { setBlock } from "../src/blocks";
 import { sql } from "../src/db";
 import { newId } from "../src/ids";
+import { hashtagsLike } from "../src/search";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const stamp = Date.now() % 1e7;
@@ -66,6 +67,18 @@ try {
 	await sql`insert into follows (follower_id, followee_id) values (${stranger}::bigint, ${fan}::bigint) on conflict do nothing`;
 	const suggested = JSON.stringify(await s.get("ListCreationRecommendedUsers", { listId: hiddenList }));
 	check("someone else's private list doesn't change who is suggested", suggested.includes(`"rest_id":"${fan}"`));
+
+	await sql`insert into likes (user_id, post_id) values (${fan}::bigint, ${secret}::bigint)`;
+	const likers = async (who: Awaited<ReturnType<typeof session>>) => JSON.stringify(await who.get("Favoriters", { tweetId: secret, count: 20 }));
+	check("a stranger can't see who liked a protected post", !(await likers(s)).includes(`"rest_id":"${fan}"`));
+	check("a follower can", (await likers(f)).includes(`"rest_id":"${fan}"`));
+	await setBlock(fan, stranger, true);
+	const follows = JSON.stringify(await s.get("Following", { userId: fan, count: 20 }));
+	check("someone who blocked you hides who they follow", !follows.includes(`"rest_id":"${locked}"`));
+
+	const tag = `offsite${stamp}`;
+	await sql`insert into posts (id, user_id, text, conversation_id) values (${(BigInt(secret) + 1n).toString()}::bigint, ${locked}::bigint, ${`planning #${tag}`}, ${(BigInt(secret) + 1n).toString()}::bigint)`;
+	check("a protected account's hashtags aren't suggested", !(await hashtagsLike(tag.slice(0, 9), 10)).includes(`#${tag}`));
 } finally {
 	await sql`delete from users where id = any(${sql.array(ids, "INT8")})`;
 }
