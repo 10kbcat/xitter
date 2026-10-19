@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - instances.json
+      - INSTANCES.md
       - scripts/check-instances.ts
   push:
     branches: [main]

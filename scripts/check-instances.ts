@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -8,6 +9,7 @@ const flag = (name: string) => {
 const file = flag("--file") ?? "instances.json";
 const baseFile = flag("--base");
 const online = args.includes("--online");
+const writeMd = args.includes("--write-md");
 
 const ID_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -100,6 +102,25 @@ if (online && !errors.length) {
 			errors.push(`${i.id}/.well-known/xitter could not be read: ${(e as Error).message}`);
 		}
 	}
+}
+
+if (data && !errors.length) {
+	const cell = (v: string) => v.replace(/[|\\`<>[\]]/g, (c) => `\\${c}`);
+	const states: Record<string, string> = { active: "federating", suspended: "suspended, defederated everywhere", blocked: "blocked, defederated everywhere" };
+	const md = `# Instances
+
+Generated from [instances.json](instances.json), sequence ${data.sequence}. Edit that file, then run
+\`bun scripts/check-instances.ts --write-md\` to update this one.
+
+| Instance | Name | State | Key | Source |
+| --- | --- | --- | --- | --- |
+${instances.map((i) => `| [${i.id}](https://${i.id}) | ${cell(i.name)} | ${states[i.state]} | ${i.public_key ? `\`${i.public_key}\`` : "pinned on first contact"} | ${i.source_url ? `[code](${i.source_url})` : ""} |`).join("\n")}
+
+[FEDERATION.md](FEDERATION.md) explains how to add an instance.
+`;
+	const mdFile = join(dirname(file), "INSTANCES.md");
+	if (writeMd) writeFileSync(mdFile, md);
+	else if (!existsSync(mdFile) || readFileSync(mdFile, "utf8") !== md) errors.push(`${mdFile} is out of date. Run bun scripts/check-instances.ts --write-md`);
 }
 
 for (const n of notes) console.log(`note: ${n}`);

@@ -204,12 +204,21 @@ try {
 		list.sequence += 1;
 		for (const i of list.instances) if (i.id === idOf(A.origin)) i.public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 		await Bun.write(forgedList, JSON.stringify(list));
-		const probe = Bun.spawnSync(["bun", "-e", `import { refreshRegistry, keyFor, pendingKeyChange } from "./src/federation"; await refreshRegistry(); console.log(JSON.stringify({ key: await keyFor(${JSON.stringify(idOf(A.origin))}), pending: await pendingKeyChange(${JSON.stringify(idOf(A.origin))}) })); process.exit(0);`], {
-			env: { ...process.env, DATABASE_URL: process.env.FED_B_DB ?? "postgres://tiago@127.0.0.1:5432/fed_b", PUBLIC_ORIGIN: B.origin, FEDERATION_REGISTRY_URL: forgedList, FEDERATION_KEY_FILE: process.env.FED_B_KEY_FILE, FEDERATION_ALLOW_HTTP: "1", XITTER_TEST_SUPERADMINS: `meow@${idOf(A.origin)}` },
-		});
+		const probe = () => {
+			const run = Bun.spawnSync(["bun", "-e", `import { refreshRegistry, keyFor, pendingKeyChange } from "./src/federation"; await refreshRegistry(); console.log(JSON.stringify({ key: await keyFor(${JSON.stringify(idOf(A.origin))}), pending: await pendingKeyChange(${JSON.stringify(idOf(A.origin))}) })); process.exit(0);`], {
+				env: { ...process.env, DATABASE_URL: process.env.FED_B_DB ?? "postgres://tiago@127.0.0.1:5432/fed_b", PUBLIC_ORIGIN: B.origin, FEDERATION_REGISTRY_URL: forgedList, FEDERATION_KEY_FILE: process.env.FED_B_KEY_FILE, FEDERATION_ALLOW_HTTP: "1", XITTER_TEST_SUPERADMINS: `meow@${idOf(A.origin)}` },
+			});
+			return { stdout: run.stdout, stderr: run.stderr };
+		};
+		const firstProbe = probe();
+		await B.db`update federation_peers set key = null where instance = ${idOf(A.origin)}`;
+		const fresh = JSON.parse(probe().stdout.toString().trim().split("\n").pop() || "{}");
+		const [afterFresh] = await B.db`select key from federation_peers where instance = ${idOf(A.origin)}`;
+		await B.db`update federation_peers set key = ${pinnedOnB?.key ?? null} where instance = ${idOf(A.origin)}`;
 		await B.db`delete from federation_state where key = 'registry'`;
-		const seen = JSON.parse(probe.stdout.toString().trim().split("\n").pop() || "{}");
-		check("a list that swaps the home's key doesn't replace the pinned one", !!pinnedOnB?.key && seen.key === pinnedOnB.key, { seen, pinned: pinnedOnB?.key, err: probe.stderr.toString().slice(0, 300) });
+		check("on first contact, a home key the list and the home disagree on is refused", !fresh.key && !afterFresh?.key, { fresh, stored: afterFresh?.key });
+		const seen = JSON.parse(firstProbe.stdout.toString().trim().split("\n").pop() || "{}");
+		check("a list that swaps the home's key doesn't replace the pinned one", !!pinnedOnB?.key && seen.key === pinnedOnB.key, { seen, pinned: pinnedOnB?.key, err: firstProbe.stderr.toString().slice(0, 300) });
 		check("and shows up as a key change", seen.pending === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", seen);
 	}
 

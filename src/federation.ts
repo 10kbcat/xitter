@@ -207,7 +207,8 @@ export async function keyFor(id: string): Promise<string | undefined> {
 	if (listedKey && !home) return listedKey;
 	const [pinned] = await sql`select key from federation_peers where instance = ${id}`;
 	if (pinned?.key) return pinned.key;
-	const seen = listedKey ?? (await wellKnownKey(id).catch(() => undefined));
+	const live = await wellKnownKey(id).catch(() => undefined);
+	const seen = home ? (listedKey && live !== listedKey ? undefined : live) : (listedKey ?? live);
 	if (!seen) return undefined;
 	await sql`insert into federation_peers (instance, key) values (${id}, ${seen}) on conflict (instance) do update set key = coalesce(federation_peers.key, excluded.key)`;
 	const [kept] = await sql`select key from federation_peers where instance = ${id}`;
