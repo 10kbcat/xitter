@@ -45,6 +45,12 @@ try {
 	await sql`insert into posts (id, user_id, text, reply_to_id, reply_to_user_id, conversation_id) values (${early}::bigint, ${stranger}::bigint, 'from before', ${secret}::bigint, ${locked}::bigint, ${secret}::bigint)`;
 	check("analytics on a reply don't show a parent its author can't see", !JSON.stringify(await s.get("postDetailsProviderQuery", { rest_id: early })).includes("followers only"));
 	if (fanReply) check("but show it to someone who can", JSON.stringify(await f.get("postDetailsProviderQuery", { rest_id: fanReply })).includes("followers only"));
+
+	await sql`insert into articles (id, user_id, title, plain_text, state, first_published_at) values (${newId()}::bigint, ${locked}::bigint, 'locked article', 'followers only article', 'Published', now())`;
+	const articlesOf = async (who: Awaited<ReturnType<typeof session>>) =>
+		(await who.get("ArticleEntitiesSlice", { userId: locked, lifecycle: "Published" })).data?.user?.result?.articles_article_mixer_slice?.items?.length ?? 0;
+	check("a stranger can't list a protected account's articles", (await articlesOf(s)) === 0);
+	check("a follower can", (await articlesOf(f)) === 1);
 } finally {
 	await sql`delete from users where id = any(${sql.array(ids, "INT8")})`;
 }
