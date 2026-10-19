@@ -82,6 +82,15 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			t.nodeValue="@"+m[1];
 		}
 	}
+	// the same inside running text ("Replying to @a@x.org and @b@y.org")
+	function shortenText(box){
+		var walk=document.createTreeWalker(box,NodeFilter.SHOW_TEXT),t,full=[];
+		while((t=walk.nextNode())){
+			var v=t.nodeValue,next=v.replace(/@([^\s\/\?#@%,:]{1,50})@([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?::\d{1,5})?)/g,function(all,name){full.push(all);return "@"+name});
+			if(next!==v)t.nodeValue=next;
+		}
+		if(full.length)box.title=full.join(", ");
+	}
 	function draw(box,name){
 		var k=known[name];
 		// the translator globe X draws (its label is the client's "Translator account")
@@ -123,8 +132,12 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		});
 		// the accounts under the search box carry no badge, only the handle
 		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(shorten);
-		// "Replying to @name@example.org" on posts: links to accounts from other instances
-		document.querySelectorAll('article[data-testid="tweet"] a[href*="@"]').forEach(shorten);
+		// "Replying to @name@example.org" on posts and in the reply composer: links
+		// to accounts from other instances, and the composer's button that names them
+		document.querySelectorAll('a[href*="@"]').forEach(shorten);
+		document.querySelectorAll('[role="dialog"] [role="button"], [data-testid="primaryColumn"] [role="button"]').forEach(function(b){
+			if(b.textContent.indexOf("Replying to")===0&&b.textContent.indexOf("@",1)>=0)shortenText(b);
+		});
 		if(queue.length)load();
 	}
 	function load(){
