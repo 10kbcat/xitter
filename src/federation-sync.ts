@@ -103,7 +103,7 @@ async function renderMedia(id: string | undefined) {
 }
 
 const publicPost = (id: string) =>
-	sql`select p.id::text, p.user_id::text, p.text, p.created_at, p.reply_to_id::text, p.quote_id::text, p.sensitive and not u.never_sensitive as sensitive, p.edited_at from posts p join users u on u.id = p.user_id
+	sql`select p.id::text, p.user_id::text, p.text, p.source, p.created_at, p.reply_to_id::text, p.quote_id::text, p.sensitive and not u.never_sensitive as sensitive, p.edited_at from posts p join users u on u.id = p.user_id
 		where p.id = ${id}::bigint and u.instance is null and not u.protected and u.status not in ('suspended', 'limited') and u.deactivated_at is null
 			and not p.hidden and p.community_id is null and p.article_id is null
 			and not exists (select 1 from posts pp join users pu on pu.id = pp.user_id where pp.id = p.reply_to_id and pu.instance is null
@@ -132,6 +132,7 @@ async function renderPost(id: string) {
 		edited_at: p.edited_at ? new Date(p.edited_at).toISOString() : null,
 		sensitive: p.sensitive,
 		counts: await postCounts(id),
+		source: p.source ?? null,
 		is_reply: !!p.reply_to_id,
 		reply_to: p.reply_to_id ? ((await canonicalOf("post", p.reply_to_id)) ?? null) : null,
 		quote: p.quote_id && (await quotable(p.quote_id)) ? ((await canonicalOf("post", p.quote_id)) ?? null) : null,
@@ -331,13 +332,15 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 	const raw = clip(p.text, 25_000);
 	const text = !quote && homeLink && !raw.includes(homeLink) ? `${raw} ${homeLink}` : raw;
 	const editedAt = typeof p.edited_at === "string" && !Number.isNaN(Date.parse(p.edited_at)) ? new Date(p.edited_at) : null;
+	// the app it was posted from on its home instance; older instances don't send it
+	const source = typeof p.source === "string" && /^[^\p{Cc}]{1,60}$/u.test(p.source.trim()) ? p.source.trim() : instance;
 	if (local) {
 		const [old] = await sql`select text, created_at, edited_at, edit_count, reply_to_id from posts where id = ${local}::bigint`;
 		if (old && old.text !== text)
 			await sql`insert into post_versions (version_id, post_id, seq, text, created_at)
 				values (${newId()}::bigint, ${local}::bigint, ${old.edit_count}, ${old.text}, ${old.edited_at ?? old.created_at})`;
 		await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${local}::bigint`;
-		await sql`update posts set text = ${text}, sensitive = ${!!p.sensitive}, edited_at = ${old && old.text !== text ? (editedAt ?? new Date()) : editedAt},
+		await sql`update posts set text = ${text}, source = ${source}, sensitive = ${!!p.sensitive}, edited_at = ${old && old.text !== text ? (editedAt ?? new Date()) : editedAt},
 			edit_count = edit_count + ${old && old.text !== text ? 1 : 0} where id = ${local}::bigint`;
 		const orphaned = old?.reply_to_id && !(await sql`select 1 from posts where id = ${old.reply_to_id}::bigint`).length;
 		if (old && (!old.reply_to_id || orphaned) && p.reply_to) {
@@ -357,7 +360,7 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 	const created = typeof p.created_at === "string" && !Number.isNaN(Date.parse(p.created_at)) ? new Date(Math.min(Date.parse(p.created_at), Date.now())) : new Date();
 	await sql`insert into posts (id, user_id, text, reply_to_id, reply_to_user_id, conversation_id, quote_id, source, sensitive, edited_at, created_at)
 		values (${id}::bigint, ${author}::bigint, ${text}, ${replyTo ?? null}::bigint, ${parent?.user_id ?? null}::bigint, ${parent?.conversation_id ?? id}::bigint,
-			${quote ?? null}::bigint, ${instance}, ${!!p.sensitive}, ${editedAt}, ${created})`;
+			${quote ?? null}::bigint, ${source}, ${!!p.sensitive}, ${editedAt}, ${created})`;
 	await sql`insert into federated_objects (instance, kind, remote_id, local_id) values (${instance}, 'post', ${p.id}::bigint, ${id}::bigint) on conflict do nothing`;
 	await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${id}::bigint`;
 	await saveMentions(id, text, instance, lookupRemoteUser);

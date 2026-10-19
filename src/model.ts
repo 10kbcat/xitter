@@ -12,7 +12,7 @@ import { FLAGS } from "./flags";
 import { homeOf, mentionsIn } from "./mentions";
 import { type MediaRow, absolute, mediaEntity } from "./media";
 import { placeById } from "./places";
-import { webSource } from "./platforms";
+import { shownSource } from "./platforms";
 import { settings } from "./settings";
 import { SHORT_POST, previewOf, weightedLength } from "./textlen";
 
@@ -102,7 +102,8 @@ function urlEntities(u: User) {
 type Badge = { url: string; description: string; org?: string };
 
 // Everything an account wears after its name, in order: its organisation's
-// badge, its custom badges, its pride flag. X has one slot for it, which gets
+// badge, its custom badges, its pride flag, and a globe for an account from
+// another instance. X has one slot for it, which gets
 // the first; the page script (badges.ts) draws the others after that one.
 export function badgeList(u: User): Badge[] {
 	const out: Badge[] = [];
@@ -110,6 +111,8 @@ export function badgeList(u: User): Badge[] {
 	for (const b of u.badges ?? []) out.push({ url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png`, description: b.name });
 	for (const b of u.remote_badges ?? []) out.push({ url: b.url, description: b.name });
 	if (u.flag && FLAGS[u.flag]) out.push({ url: `${PUBLIC_ORIGIN}/public/flag-${u.flag}.svg`, description: `${FLAGS[u.flag].name} flag` });
+	// an account from another instance, last so its own badges keep their place
+	if (u.instance) out.push({ url: `${PUBLIC_ORIGIN}/public/globe.svg`, description: `From ${u.instance}` });
 	return out;
 }
 
@@ -500,7 +503,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 			full_text: shown,
 			possibly_sensitive: !!p.sensitive,
 			...(placeById(p.place_id) ? { place: placeById(p.place_id) } : {}),
-			source: (p.source ?? webSource()).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
+			source: shownSource(p.source, p.author.instance).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!),
 			id_str: p.id,
 			...(p.reply_to_id
 				? {

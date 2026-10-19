@@ -29,6 +29,17 @@ export const suspendedFor = (viewerId: string) =>
 	sql`(select id from users where ${gone}
 		and not ${staffViewer(viewerId)})`;
 
+// Accounts from other instances, for a viewer who hid them (Settings > Other
+// instances): they stay out of timelines, replies, search and suggestions, except
+// the ones the viewer follows. A search naming a full handle still finds them.
+export const federatedHiddenFor = (viewerId: string) =>
+	sql`(select u.id from users u where u.instance is not null
+		and exists (select 1 from users me where me.id = ${viewerId}::bigint and me.preferences->>'hide_federated' = 'true')
+		and u.id not in (select followee_id from follows where follower_id = ${viewerId}::bigint))`;
+
+// a search that names someone on another instance (@name@example.org, from:name@example.org)
+export const namesOtherInstance = (query: string) => /\w@[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(query);
+
 export const mutedFor = (viewerId: string) => sql`(select muted_id from mutes where muter_id = ${viewerId}::bigint)`;
 
 export type Surface = "home_timeline" | "notifications";

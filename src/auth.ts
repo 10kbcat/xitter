@@ -42,6 +42,8 @@ export type User = {
 	// posts only for approved followers
 	protected?: boolean;
 	language?: string;
+	// the instance the account lives on; null for this one
+	instance?: string | null;
 	created_at: Date;
 	// present when the row was loaded through users.ts
 	stats?: {
