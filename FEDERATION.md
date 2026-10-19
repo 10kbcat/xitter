@@ -85,6 +85,11 @@ bun scripts/drop-remote-media.ts
 A post from another instance names it after its time, for example
 `Xitter for Web - xit.example.org`.
 
+Accounts from other instances wear a globe after their name. Clicking it opens a
+card about their instance: its name, whether it's on the list, how many of its
+accounts are here, and links to its rules, its source code and the setting that
+hides it.
+
 Anyone can hide accounts and organisations from all other instances, or only
 from the instances they pick, for themselves in Settings > Other instances
 (`/account/instances`). They then stay
