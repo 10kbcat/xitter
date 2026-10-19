@@ -39,7 +39,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		// a profile's top bar has the name but no handle: the page's address does
 		if(box.tagName==="H2"&&box.querySelector('div[style*="height: calc(1.0625em)"]')){var p=/^\/([^\/?#]{1,150})(?:\/|$)/.exec(location.pathname);if(p)try{return decodeURIComponent(p[1]).toLowerCase()}catch(e){}}
 	}
-	// a post shows "@name" for someone from another instance; the whole handle
+	// names show "@name" for someone from another instance; the whole handle
 	// stays on the element (and its tooltip), and the globe badge says where
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
@@ -88,12 +88,14 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	}
 	function scan(){
 		document.querySelectorAll(SEL).forEach(function(box){
-			if(box.matches('[data-testid="User-Name"]'))shorten(box);
+			shorten(box);
 			var name=handle(box);
 			if(!name)return;
 			if(known[name]){draw(box,name);return}
 			if(known[name]===undefined&&!waiting[name]){waiting[name]=true;queue.push(name)}
 		});
+		// the accounts under the search box carry no badge, only the handle
+		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(shorten);
 		if(queue.length)load();
 	}
 	function load(){
