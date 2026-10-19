@@ -5,6 +5,7 @@ import { newId } from "../src/ids";
 import type { Viewer } from "../src/auth";
 import { noteAppealsRoute } from "../src/note-appeals";
 import { settings } from "../src/settings";
+import { PUBLIC_ORIGIN } from "../src/config";
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://localhost/xitter");
 assert(["localhost", "127.0.0.1"].includes(database.hostname) && /test|codex/.test(database.pathname), "Use a disposable local test database.");
@@ -13,8 +14,8 @@ const ids = Array.from({ length: 8 }, () => newId());
 const [author, postAuthor, staff, ...voters] = ids;
 const post = newId(), note = newId();
 const viewer = (id: string, role: Viewer["role"] = null) => ({ id, screen_name: `notes_${id}`, status: "active", role, csrf: `csrf-${id}` }) as Viewer;
-const form = async (who: Viewer, fields: Record<string, string>) => noteAppealsRoute(new Request("http://localhost:3000/account/notes/appeals", {
-	method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/x-www-form-urlencoded" },
+const form = async (who: Viewer, fields: Record<string, string>) => noteAppealsRoute(new Request(`${PUBLIC_ORIGIN}/account/notes/appeals`, {
+	method: "POST", headers: { origin: PUBLIC_ORIGIN, "content-type": "application/x-www-form-urlencoded" },
 	body: new URLSearchParams({ csrf: who.csrf, note_id: note, ...fields }),
 }), who);
 
