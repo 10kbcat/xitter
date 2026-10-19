@@ -112,6 +112,16 @@ try {
 		return m.includes(bob.id) && m.includes(aliceOnB) ? m : undefined;
 	}, 10)) ?? (await mentionsOf());
 	check("on B it mentions bob himself and alice's copy", mentionsThere.includes(bob.id) && mentionsThere.includes(aliceOnB), mentionsThere);
+	const copyShown = (await bob.get("TweetResultByRestId", { tweetId: mentionOnB ?? "0" })).data?.tweetResult?.result;
+	const copyText = copyShown?.legacy?.full_text ?? "";
+	const spans = (copyShown?.legacy?.entities?.user_mentions ?? []).map((m: any) => ({ id: m.id_str, text: [...copyText].slice(m.indices[0], m.indices[1]).join("") }));
+	check("on B the whole @bob@host in the copy links to bob", spans.some((m: any) => m.id === bob.id && m.text === `@${bob.name}@${idOf(B.origin)}`), spans);
+	check("and a bare @alice links to alice's copy, not a namesake on B", spans.some((m: any) => m.id === aliceOnB && m.text === `@${alice.name}`), spans);
+	const quoter = await bob.gql("CreateTweet", { tweet_text: `quoting the mention ${stamp}`, attachment_url: `${B.origin}/${alice.name}@${idOf(A.origin)}/status/${mentionOnB}` });
+	const inQuote = quoter.data?.create_tweet?.tweet_results?.result?.quoted_status_result?.result;
+	const quoteText = inQuote?.legacy?.full_text ?? "";
+	const quoteSpans = (inQuote?.legacy?.entities?.user_mentions ?? []).map((m: any) => ({ id: m.id_str, text: [...quoteText].slice(m.indices[0], m.indices[1]).join("") }));
+	check("and so do the mentions inside a quote of it", quoteSpans.some((m: any) => m.id === bob.id && m.text === `@${bob.name}@${idOf(B.origin)}`) && quoteSpans.some((m: any) => m.id === aliceOnB), quoteSpans);
 	const bobNotified = await until(async () => {
 		const n = await bob.get("NotificationsTimeline", { timeline_type: "Mentions", count: 20 });
 		return JSON.stringify(n).includes(mentionOnB ?? "none");

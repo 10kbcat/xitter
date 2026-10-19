@@ -335,13 +335,16 @@ async function applyPost(instance: string, p: any, depth = 0): Promise<string | 
 	// the app it was posted from on its home instance; older instances don't send it
 	const source = typeof p.source === "string" && /^[^\p{Cc}]{1,60}$/u.test(p.source.trim()) ? p.source.trim() : instance;
 	if (local) {
-		const [old] = await sql`select text, created_at, edited_at, edit_count, reply_to_id from posts where id = ${local}::bigint`;
-		if (old && old.text !== text)
-			await sql`insert into post_versions (version_id, post_id, seq, text, created_at)
-				values (${newId()}::bigint, ${local}::bigint, ${old.edit_count}, ${old.text}, ${old.edited_at ?? old.created_at})`;
-		await sql`update posts set remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${local}::bigint`;
-		await sql`update posts set text = ${text}, source = ${source}, sensitive = ${!!p.sensitive}, edited_at = ${old && old.text !== text ? (editedAt ?? new Date()) : editedAt},
-			edit_count = edit_count + ${old && old.text !== text ? 1 : 0} where id = ${local}::bigint`;
+		const old = await sql.begin(async (tx) => {
+			const [row] = await tx`select text, created_at, edited_at, edit_count, reply_to_id from posts where id = ${local}::bigint for update`;
+			const changed = !!row && row.text !== text;
+			if (changed)
+				await tx`insert into post_versions (version_id, post_id, seq, text, created_at)
+					values (${newId()}::bigint, ${local}::bigint, ${row.edit_count}, ${row.text}, ${row.edited_at ?? row.created_at})`;
+			await tx`update posts set text = ${text}, source = ${source}, sensitive = ${!!p.sensitive}, edited_at = ${changed ? (editedAt ?? new Date()) : editedAt},
+				edit_count = edit_count + ${changed ? 1 : 0}, remote_counts = ${countsOf(p.counts, POST_COUNTS)}::text::jsonb where id = ${local}::bigint`;
+			return row;
+		});
 		const orphaned = old?.reply_to_id && !(await sql`select 1 from posts where id = ${old.reply_to_id}::bigint`).length;
 		if (old && (!old.reply_to_id || orphaned) && p.reply_to) {
 			const replyTo = await resolvePost(p.reply_to, depth);
