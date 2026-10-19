@@ -5,12 +5,13 @@
 // (blocks, protected accounts, suspensions). The rate limits are the
 // client's. /api is the documentation.
 
+import { BodyTooLarge, boundedBody } from "./api-input";
 import { accountPage, esc } from "./account-page";
 import { type User, type Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { callOperation } from "./graphql";
-import { newId } from "./ids";
+import { isId, newId } from "./ids";
 import { absolute, mediaUpload, mediaUrl, posterUrl } from "./media";
 import type { PostRow } from "./model";
 import { PostError, feed, getPost, postsByIds, replies, type FeedItem } from "./posts";
@@ -21,7 +22,6 @@ import { followList, setFollow, userByName, usersByIds } from "./users";
 
 const hash = (token: string) => new Bun.CryptoHasher("sha256").update(token).digest("hex");
 const MAX_TOKENS = 10;
-const isId = (x: unknown): x is string => typeof x === "string" && /^\d{1,19}$/.test(x);
 
 class ApiError extends Error {
 	constructor(public status: number, message: string) {
@@ -31,11 +31,23 @@ class ApiError extends Error {
 
 // ---- tokens
 
-export async function createToken(userId: string, name: string, scope: "read" | "write") {
-	const [{ n }] = await sql`select count(*)::int as n from api_tokens where user_id = ${userId}::bigint`;
-	if (n >= MAX_TOKENS) throw new ApiError(400, `You can have up to ${MAX_TOKENS} tokens. Delete one first.`);
+export async function createToken(userId: string, name: string, scope: "read" | "write", issuingSession?: string) {
 	const token = `xit_${Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex")}`;
-	await sql`insert into api_tokens (id, user_id, name, token_hash, scope) values (${newId()}::bigint, ${userId}::bigint, ${name}, ${hash(token)}, ${scope})`;
+	await sql.begin(async (tx) => {
+		// Password recovery and token creation take the same account lock. A
+		// request authenticated before recovery must not mint a credential after it.
+		const [account] = await tx`select id from users where id = ${userId}::bigint
+			and status <> 'suspended' and deactivated_at is null and instance is null for update`;
+		if (!account) throw new ApiError(401, "Sign in again to make an API token.");
+		if (issuingSession !== undefined) {
+			const [session] = await tx`select token from sessions where token = ${issuingSession} and user_id = ${userId}::bigint
+				and (expires_at is null or expires_at > clock_timestamp())`;
+			if (!session) throw new ApiError(401, "Sign in again to make an API token.");
+		}
+		const [{ n }] = await tx`select count(*)::int as n from api_tokens where user_id = ${userId}::bigint`;
+		if (n >= MAX_TOKENS) throw new ApiError(400, `You can have up to ${MAX_TOKENS} tokens. Delete one first.`);
+		await tx`insert into api_tokens (id, user_id, name, token_hash, scope) values (${newId()}::bigint, ${userId}::bigint, ${name}, ${hash(token)}, ${scope})`;
+	});
 	return token;
 }
 
@@ -121,7 +133,7 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 	Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 const fail = (status: number, message: string) => json({ error: message }, status);
 
-const limitOf = (url: URL, max = 100) => Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), max);
+const limitOf = (url: URL, max = 100) => Math.min(Math.max(Math.floor(Number(url.searchParams.get("limit"))) || 20, 1), max);
 const cursorOf = (url: URL) => {
 	const c = url.searchParams.get("cursor");
 	return isId(c) ? c : undefined;
@@ -129,9 +141,13 @@ const cursorOf = (url: URL) => {
 
 async function body(req: Request): Promise<Record<string, any>> {
 	const type = req.headers.get("content-type") ?? "";
-	if (Number(req.headers.get("content-length") ?? 0) > 2 * 1024 * 1024) throw new ApiError(413, "That request is too large.");
-	if (type.includes("application/json")) return (await req.json().catch(() => ({}))) ?? {};
-	if (type.includes("form")) return Object.fromEntries((await req.formData().catch(() => new FormData())).entries());
+	const bytes = await boundedBody(req, 2 * 1024 * 1024);
+	const parsed = new Response(bytes, { headers: { "content-type": type } });
+	if (type.includes("application/json")) {
+		const value = await parsed.json().catch(() => ({}));
+		return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+	}
+	if (type.includes("form")) return Object.fromEntries((await parsed.formData().catch(() => new FormData())).entries());
 	return {};
 }
 
@@ -147,27 +163,72 @@ async function postOr404(v: Viewer, id: string) {
 	return p;
 }
 
-// one image or video sent as the whole request body, through the client's own
-// chunked upload so the same checks and video conversion apply
+const MAX_MEDIA_SEGMENT = 5 * 1024 * 1024;
+const mediaLimit = (type: string) => type.startsWith("video/") ? settings().limits.video_mb * 1024 * 1024 : type === "image/gif" ? 15 * 1024 * 1024 : settings().limits.image_mb * 1024 * 1024;
+
+async function callMedia(v: Viewer, query: Record<string, string>, form?: FormData) {
+	const url = new URL(`${PUBLIC_ORIGIN}/i/media/upload.json?${new URLSearchParams(query)}`);
+	const res = await mediaUpload(new Request(url, { method: "POST", body: form }), url, v);
+	const out = res.status === 204 ? {} : await res.json().catch(() => ({}));
+	if (res.status >= 400) throw new ApiError(res.status, out?.errors?.[0]?.message ?? out?.error ?? "Upload failed.");
+	return out;
+}
+
+const mediaResult = (id: string, out: any) => ({
+	media_id: id,
+	processing: out.processing_info?.state ?? "succeeded",
+	...(out.processing_info?.check_after_secs !== undefined ? { check_after_secs: out.processing_info.check_after_secs } : {}),
+	...(out.processing_info?.progress_percent !== undefined ? { progress_percent: out.processing_info.progress_percent } : {}),
+	...(out.processing_info?.error ? { error: out.processing_info.error } : {}),
+	...(out.expires_after_secs !== undefined ? { expires_after_secs: out.expires_after_secs } : {}),
+	...(out.total_bytes !== undefined ? { total_bytes: out.total_bytes, received_bytes: out.received_bytes, segments: out.segments } : {}),
+});
+
+async function beginMedia(req: Request, v: Viewer) {
+	const b = await body(req);
+	const type = typeof b.media_type === "string" ? b.media_type.trim().toLowerCase() : "";
+	if (!/^(image|video)\/[a-z0-9.+-]+$/.test(type)) throw new ApiError(415, "Give the file's image/* or video/* media_type.");
+	const total = typeof b.total_bytes === "number" || typeof b.total_bytes === "string" ? Number(b.total_bytes) : NaN;
+	if (!Number.isSafeInteger(total) || total <= 0) throw new ApiError(400, "total_bytes must be the file's positive byte length.");
+	if (total > mediaLimit(type)) throw new ApiError(413, "That file is too large.");
+	const out = await callMedia(v, { command: "INIT", total_bytes: String(total), media_type: type, media_category: type.startsWith("video/") ? "tweet_video" : type === "image/gif" ? "tweet_gif" : "tweet_image" });
+	return { media_id: out.media_id_string, max_segment_bytes: MAX_MEDIA_SEGMENT, expires_after_secs: 3600 };
+}
+
+async function appendMedia(req: Request, v: Viewer, id: string, segment: string) {
+	if (!isId(id)) throw new ApiError(404, "Unknown upload.");
+	const index = Number(segment);
+	if (!Number.isInteger(index) || index < 0 || index > 10_000) throw new ApiError(400, "segment_index must be between 0 and 10000.");
+	const data = await boundedBody(req, MAX_MEDIA_SEGMENT);
+	if (!data.length) throw new ApiError(400, "The segment is empty.");
+	const form = new FormData();
+	form.set("media", new Blob([data], { type: "application/octet-stream" }));
+	await callMedia(v, { command: "APPEND", media_id: id, segment_index: String(index) }, form);
+	return { media_id: id, segment_index: index };
+}
+
+async function finishMedia(v: Viewer, id: string) {
+	if (!isId(id)) throw new ApiError(404, "Unknown upload.");
+	const status = await callMedia(v, { command: "STATUS", media_id: id });
+	if (status.processing_info?.state !== "uploading") return mediaResult(id, status);
+	if (status.received_bytes !== status.total_bytes) throw new ApiError(400, "Upload all segments before finalizing.");
+	return mediaResult(id, await callMedia(v, { command: "FINALIZE", media_id: id }));
+}
+
+// The simple whole-body endpoint remains useful for small files. Larger files
+// use the same uploader through bounded segments below the server's body cap.
 async function uploadMedia(req: Request, v: Viewer) {
 	const type = (req.headers.get("content-type") ?? "").split(";")[0].trim();
 	if (!/^(image|video)\//.test(type)) throw new ApiError(415, "Send the file as the body with its image/* or video/* content type.");
-	const data = new Uint8Array(await req.arrayBuffer());
+	const data = await boundedBody(req, mediaLimit(type));
 	if (!data.length) throw new ApiError(400, "The body is empty.");
-	const call = async (query: Record<string, string>, form?: FormData) => {
-		const url = new URL(`${PUBLIC_ORIGIN}/i/media/upload.json?${new URLSearchParams(query)}`);
-		const res = await mediaUpload(new Request(url, { method: "POST", body: form }), url, v);
-		const out = res.status === 204 ? {} : await res.json().catch(() => ({}));
-		if (res.status >= 400) throw new ApiError(res.status, out?.errors?.[0]?.message ?? out?.error ?? "Upload failed.");
-		return out;
-	};
 	const video = type.startsWith("video/");
-	const init = await call({ command: "INIT", total_bytes: String(data.length), media_type: type, media_category: video ? "tweet_video" : type === "image/gif" ? "tweet_gif" : "tweet_image" });
+	const init = await callMedia(v, { command: "INIT", total_bytes: String(data.length), media_type: type, media_category: video ? "tweet_video" : type === "image/gif" ? "tweet_gif" : "tweet_image" });
 	const id = init.media_id_string;
 	const form = new FormData();
 	form.set("media", new Blob([data], { type }));
-	await call({ command: "APPEND", media_id: id, segment_index: "0" }, form);
-	const done = await call({ command: "FINALIZE", media_id: id });
+	await callMedia(v, { command: "APPEND", media_id: id, segment_index: "0" }, form);
+	const done = await callMedia(v, { command: "FINALIZE", media_id: id });
 	return { media_id: id, processing: done.processing_info?.state ?? "succeeded" };
 }
 
@@ -287,6 +348,16 @@ const ROUTES: Route[] = [
 		},
 	})),
 	{ method: "POST", pattern: /^\/media$/, scope: "write", bucket: "upload", run: async (v, _m, req) => ({ data: await uploadMedia(req, v), status: 201 }) },
+	{ method: "POST", pattern: /^\/media\/uploads$/, scope: "write", bucket: "upload", run: async (v, _m, req) => ({ data: await beginMedia(req, v), status: 201 }) },
+	{ method: "POST", pattern: /^\/media\/(\d{1,19})\/segments\/(\d+)$/, scope: "write", bucket: "write", run: async (v, m, req) => ({ data: await appendMedia(req, v, m[1], m[2]) }) },
+	{ method: "POST", pattern: /^\/media\/(\d{1,19})\/finalize$/, scope: "write", bucket: "write", run: async (v, m) => {
+		if (!isId(m[1])) throw new ApiError(404, "Unknown upload.");
+		return { data: await finishMedia(v, m[1]) };
+	} },
+	{ method: "GET", pattern: /^\/media\/(\d{1,19})$/, scope: "read", run: async (v, m) => {
+		if (!isId(m[1])) throw new ApiError(404, "Unknown upload.");
+		return { data: mediaResult(m[1], await callMedia(v, { command: "STATUS", media_id: m[1] })) };
+	} },
 ];
 
 export async function publicApi(req: Request, url: URL): Promise<Response> {
@@ -320,6 +391,7 @@ export async function publicApi(req: Request, url: URL): Promise<Response> {
 		const { status, ...rest } = out ?? {};
 		return withCors(json(rest, status ?? 200, limitHeaders(last)));
 	} catch (e) {
+		if (e instanceof BodyTooLarge) return withCors(fail(413, "That request is too large."));
 		if (e instanceof ApiError) return withCors(fail(e.status, e.message));
 		console.error(e);
 		return withCors(fail(500, "Something went wrong on our side."));
@@ -335,17 +407,19 @@ function withCors(res: Response) {
 
 // ---- /account/api: the account's tokens
 
-async function tokensView(req: Request, v: Viewer, fresh = "", error = "") {
+async function tokensView(req: Request, v: Viewer, fresh = "", error = "", status = 200) {
 	const tokens = await sql`select id::text, name, scope, created_at, last_used_at from api_tokens where user_id = ${v.id}::bigint order by created_at desc`;
 	const when = (d: Date | null) => (d ? new Date(d).toUTCString().replace(/:\d\d GMT$/, " UTC") : "never");
 	return accountPage({
 		req,
 		viewer: v,
 		title: "API tokens",
+		status,
 		// same-origin, not no-referrer: under no-referrer the form posts with "Origin: null"
 		referrer: "same-origin",
 		body: `<h1>API tokens</h1>
 <p>A token lets a script or bot use your account through the <a href="/api">API</a>. Anyone holding it can act as you, so keep it secret and delete it when you stop using it.</p>
+<p>Changing or resetting your password revokes all API tokens. Your scripts and bots will need new tokens afterward.</p>
 ${fresh ? `<div class="card success"><b>Your new token.</b> Copy it now; it won't be shown again.<p class="code">${esc(fresh)}</p></div>` : ""}
 ${error ? `<p class="error">${esc(error)}</p>` : ""}
 <form method="post"><input type="hidden" name="do" value="create">
@@ -375,9 +449,9 @@ export async function apiTokensRoute(req: Request, v: Viewer): Promise<Response>
 	if (!name || [...name].length > 40) return tokensView(req, v, "", "Name the token (up to 40 characters).");
 	const scope = f.get("scope") === "write" ? "write" : "read";
 	try {
-		return tokensView(req, v, await createToken(v.id, name, scope));
+		return tokensView(req, v, await createToken(v.id, name, scope, v.token));
 	} catch (e) {
-		if (e instanceof ApiError) return tokensView(req, v, "", e.message);
+		if (e instanceof ApiError) return tokensView(req, v, "", e.message, e.status);
 		throw e;
 	}
 }

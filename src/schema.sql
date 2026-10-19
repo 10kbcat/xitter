@@ -105,6 +105,7 @@ create unique index if not exists users_email_idx on users (lower(email));
 alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
 alter table posts add column if not exists sensitive boolean not null default false;
+alter table users add column if not exists never_sensitive boolean not null default false;
 alter table sessions add column if not exists id uuid not null default gen_random_uuid();
 create unique index if not exists sessions_id_key on sessions(id);
 alter table sessions add column if not exists last_seen_at timestamptz not null default now();
@@ -609,6 +610,7 @@ create table if not exists polls (
 );
 -- an image poll: one uploaded photo per choice, in choice order
 alter table polls add column if not exists choice_media bigint[];
+create index if not exists polls_choice_media_idx on polls using gin (choice_media) where choice_media is not null;
 
 create table if not exists poll_votes (
 	poll_id bigint not null references polls (id) on delete cascade,
@@ -619,6 +621,7 @@ create table if not exists poll_votes (
 );
 
 alter table posts add column if not exists poll_id bigint references polls (id) on delete set null;
+create index if not exists posts_poll_idx on posts (poll_id) where poll_id is not null;
 
 -- scheduled posts and drafts, kept as the composer sent them
 create table if not exists scheduled_posts (
@@ -632,6 +635,7 @@ create table if not exists scheduled_posts (
 create index if not exists scheduled_posts_due_idx on scheduled_posts (execute_at) where kind = 'scheduled';
 create index if not exists scheduled_posts_user_idx on scheduled_posts (user_id, kind);
 alter table scheduled_posts add column if not exists attempts int not null default 0;
+alter table scheduled_posts add column if not exists last_error text;
 
 alter table posts add column if not exists place_id text;
 
@@ -674,6 +678,7 @@ create table if not exists bookmark_folder_posts (
 	created_at timestamptz not null default now(),
 	primary key (folder_id, post_id)
 );
+create index if not exists bookmark_folder_posts_page_idx on bookmark_folder_posts (folder_id, created_at desc, post_id desc);
 
 -- the reply the conversation's author pinned under their post
 alter table posts add column if not exists pinned_reply_id bigint references posts (id) on delete set null;
@@ -1298,6 +1303,23 @@ do $$ begin
 		insert into federation_outbox (kind, a) select 'post', p.id from posts p join users u on u.id = p.user_id
 			where u.instance is null and not u.protected and p.created_at > now() - interval '30 days' order by p.id;
 		insert into schema_steps (name) values ('federation_backfill');
+	end if;
+end $$;
+
+create or replace function federated_object_gone() returns trigger language plpgsql as $$
+begin
+	delete from federated_objects where kind = tg_argv[0] and local_id = old.id;
+	return old;
+end $$;
+create or replace trigger federated_user_gone after delete on users for each row when (old.instance is not null) execute function federated_object_gone('user');
+create or replace trigger federated_post_gone after delete on posts for each row execute function federated_object_gone('post');
+create or replace trigger federated_media_gone after delete on media for each row when (old.remote_instance is not null) execute function federated_object_gone('media');
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'federated_objects_prune') then
+		delete from federated_objects f where kind = 'user' and not exists (select 1 from users where id = f.local_id);
+		delete from federated_objects f where kind = 'post' and not exists (select 1 from posts where id = f.local_id);
+		delete from federated_objects f where kind = 'media' and not exists (select 1 from media where id = f.local_id);
+		insert into schema_steps (name) values ('federated_objects_prune');
 	end if;
 end $$;
 

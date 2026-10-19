@@ -15,9 +15,9 @@ import { communityObjects } from "./community-model";
 import { webSource } from "./platforms";
 import { pollCard, pollsByIds } from "./polls";
 import { toUser, userCols, usersByIds } from "./users";
+import { lookupRemoteUser } from "./federation-sync";
+import { saveMentions } from "./mentions";
 
-// @name, not preceded by a word character (so e-mail addresses do not count)
-export const MENTION = /(?<![\w@])@(\w{1,15})/g;
 const NO_LIMIT = "9223372036854775807";
 
 // accounts whose likes, reposts and replies no longer count for anyone
@@ -25,7 +25,7 @@ const SUSPENDED = sql`(select id from users where status = 'suspended')`;
 
 // every post query starts from this; callers append where/order/limit
 const select = (viewerId: string) => sql`
-	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id, p.edit_count, p.edited_at, p.reply_policy,
+	select p.id, p.text, p.reply_to_id, p.conversation_id, p.quote_id, p.article_id, p.created_at, p.source, p.sensitive and not u.never_sensitive as sensitive, u.never_sensitive, p.community_id::text as community_id, p.poll_id::text as poll_id, p.place_id, p.edit_count, p.edited_at, p.reply_policy,
 		exists (select 1 from posts r where r.id = p.conversation_id and r.reply_policy is not null and r.user_id <> ${viewerId}::bigint and not (
 			(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${viewerId}::bigint))
 			or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${viewerId}::bigint))
@@ -59,6 +59,7 @@ function toRow(r: any): PostRow {
 		text: r.text,
 		source: r.source,
 		sensitive: r.sensitive,
+		never_sensitive: r.never_sensitive,
 		reply_to_id: r.reply_to_id,
 		conversation_id: r.conversation_id,
 		quote_id: r.quote_id,
@@ -92,7 +93,7 @@ function toRow(r: any): PostRow {
 // media, articles, and the post each one quotes (one level: a quote inside a quote is not expanded)
 async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promise<PostRow[]> {
 	const media = await mediaForPosts(posts.map((p) => p.id));
-	for (const p of posts) p.media = media.get(p.id) ?? [];
+	for (const p of posts) p.media = (media.get(p.id) ?? []).map((m) => (p.never_sensitive ? { ...m, sensitive_warning: null } : m));
 	if (posts.length) {
 		const notes = await sql`select n.id::text, n.post_id::text, n.text from community_notes n join users author on author.id = n.author_id and author.status <> 'suspended'
 			join community_note_ratings r on r.note_id = n.id join users voter on voter.id = r.user_id and voter.status = 'active'
@@ -165,8 +166,8 @@ const MAX_EDITS = 5;
 // Text changes only; media, replies and quotes stay as posted. The post keeps its
 // id and what it said before goes to post_versions.
 // the author's limit goes by their badge (textlen.ts, Admin > Settings)
-export async function checkLength(userId: string, text: string) {
-	const [u] = await sql`select verified_type from users where id = ${userId}::bigint`;
+export async function checkLength(userId: string, text: string, db: typeof sql = sql) {
+	const [u] = await db`select verified_type from users where id = ${userId}::bigint`;
 	const limit = postLimitFor(u?.verified_type);
 	if (weightedLength(text) > limit) throw new PostError(`Posts are limited to ${limit.toLocaleString("en-US")} characters.`, 186);
 }
@@ -196,11 +197,7 @@ export async function editPost(userId: string, postId: string, text: string): Pr
 	await sql`insert into post_versions (version_id, post_id, seq, text, created_at)
 		values (${newId()}::bigint, ${postId}::bigint, ${post.edit_count}, ${post.text}, ${post.edited_at ?? post.created_at})`;
 	await sql`update posts set text = ${text}, edit_count = edit_count + 1, edited_at = now() where id = ${postId}::bigint`;
-	await sql`delete from post_mentions where post_id = ${postId}::bigint`;
-	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
-	if (names.length)
-		await sql`insert into post_mentions (post_id, user_id)
-			select ${postId}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")}) on conflict do nothing`;
+	await saveMentions(postId, text, undefined, lookupRemoteUser);
 }
 
 export async function getPost(viewerId: string, id: string): Promise<PostRow | undefined> {
@@ -391,12 +388,19 @@ export async function setHighlight(userId: string, postId: string, on: boolean):
 	return true;
 }
 
-export async function folderPosts(viewerId: string, folderId: string, limit = 100): Promise<PostRow[]> {
-	const rows = await sql`${select(viewerId)}
+export async function folderPosts(viewerId: string, folderId: string, limit = 100, before?: { at: string; id: string }): Promise<{ posts: PostRow[]; next?: { at: string; id: string } }> {
+	const rows = await sql`with page as (${select(viewerId)}
 		join bookmark_folder_posts f on f.post_id = p.id and f.folder_id = ${folderId}::bigint
 		join bookmark_folders bf on bf.id = f.folder_id and bf.user_id = ${viewerId}::bigint
-		order by f.created_at desc limit ${limit}`;
-	return hydrate(viewerId, rows.map(toRow));
+		${before ? sql`where (f.created_at, f.post_id) < (${before.at}::timestamptz, ${before.id}::bigint)` : sql``}
+		order by f.created_at desc, f.post_id desc limit ${limit + 1})
+		select page.*, f.created_at::text as folder_created_at from page
+		join bookmark_folder_posts f on f.post_id = page.id and f.folder_id = ${folderId}::bigint
+		order by f.created_at desc, f.post_id desc`;
+	const more = rows.length > limit;
+	const page = rows.slice(0, limit);
+	const last = page.at(-1);
+	return { posts: await hydrate(viewerId, page.map(toRow)), ...(more && last ? { next: { at: last.folder_created_at, id: String(last.id) } } : {}) };
 }
 
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {
@@ -410,52 +414,52 @@ export async function likedPosts(viewerId: string, userId: string, limit = 100):
 export const seenBy = (userId: string) =>
 	sql`(u.id = ${userId}::bigint or ((not p.hidden or ${staffViewer(userId)}) and u.id not in ${protectedFor(userId)} and u.id not in ${suspendedFor(userId)}))`;
 
-export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string } = {}): Promise<string> {
-	const [author] = await sql`select status, deactivated_at from users where id = ${userId}::bigint`;
+export async function createPost(userId: string, text: string, opts: { replyToId?: string; quoteId?: string; articleId?: string; source?: string; communityId?: string; placeId?: string; replyPolicy?: string; db?: typeof sql; skipPreview?: boolean } = {}): Promise<string> {
+	const db = opts.db ?? sql;
+	const [author] = await db`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
-	await checkLength(userId, text);
+	await checkLength(userId, text, db);
 	await refuseHate(userId, text);
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	const id = newId();
 	let conversationId = id;
 	let replyToUserId: string | null = null;
 	if (opts.replyToId) {
-		const [parent] = await sql`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
+		const [parent] = await db`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
-		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
+		if (await isBlockedEitherWay(userId, String(parent.user_id), db)) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
 		replyToUserId = String(parent.user_id);
 		// a public reply inside a protected thread still belongs to that thread
 		// (GHSA-m9x2-9x93-6879): its root must be one the author may see too; a
 		// deleted root leaves the thread open
-		const [unseenRoot] = await sql`select 1 from posts p join users u on u.id = p.user_id
+		const [unseenRoot] = await db`select 1 from posts p join users u on u.id = p.user_id
 			where p.id = ${conversationId}::bigint and not ${seenBy(userId)}`;
 		if (unseenRoot) throw new PostError("The post you are replying to no longer exists.", 385);
-		const [limited] = await sql`select exists (select 1 from posts r where r.id = ${conversationId}::bigint and r.reply_policy is not null and r.user_id <> ${userId}::bigint and not (
+		const [limited] = await db`select exists (select 1 from posts r where r.id = ${conversationId}::bigint and r.reply_policy is not null and r.user_id <> ${userId}::bigint and not (
 				(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${userId}::bigint))
 				or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${userId}::bigint))
 				or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${userId}::bigint and (x.verified_type is not null or exists (select 1 from affiliations af where af.user_id = x.id)))))) as no`;
 		if (limited.no) throw new PostError("The author of the original post limited who can reply to it.", 433);
 	}
 	if (opts.quoteId) {
-		const [quoted] = await sql`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
+		const [quoted] = await db`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
-		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
-		const [owner] = await sql`select protected from users where id = ${quoted.user_id}::bigint`;
+		if (await isBlockedEitherWay(userId, String(quoted.user_id), db)) throw new PostError("You can't quote this post.", 433);
+		const [owner] = await db`select protected from users where id = ${quoted.user_id}::bigint`;
 		if (owner?.protected && String(quoted.user_id) !== userId) throw new PostError("Posts from protected accounts can't be quoted.", 433);
 	}
 	if (opts.communityId) {
-		const [m] = await sql`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
+		const [m] = await db`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
 		if (!m) throw new PostError("Only members can post in this community.", 187);
 	}
-	await sql`insert into posts (id, user_id, text, reply_to_id, reply_to_user_id, conversation_id, quote_id, article_id, source, community_id, place_id, reply_policy)
+	await db`insert into posts (id, user_id, text, reply_to_id, reply_to_user_id, conversation_id, quote_id, article_id, source, community_id, place_id, reply_policy)
 		values (${id}::bigint, ${userId}::bigint, ${text}, ${opts.replyToId ?? null}::bigint, ${replyToUserId}::bigint, ${conversationId}::bigint, ${opts.quoteId ?? null}::bigint, ${opts.articleId ?? null}::bigint, ${opts.source ?? webSource()}, ${opts.communityId ?? null}::bigint, ${opts.placeId ?? null}, ${opts.replyToId ? null : opts.replyPolicy ?? null})`;
-	const names = [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))].slice(0, 20);
-	if (names.length)
-		await sql`insert into post_mentions (post_id, user_id)
-			select ${id}::bigint, u.id from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")}) on conflict do nothing`;
+	// Transactional callers resolve unknown remote handles before publication;
+	// only database writes belong inside the transaction and its row locks.
+	await saveMentions(id, text, undefined, opts.db ? undefined : lookupRemoteUser, db);
 	const link = opts.quoteId || opts.articleId ? undefined : linksIn(text).filter((l) => previewable(l.url)).at(-1);
-	if (link && !(await sql`select 1 from link_previews where url = ${link.url}`).length) await Promise.race([fetchPreview(link.url), Bun.sleep(4000)]);
+	if (!opts.skipPreview && link && !(await db`select 1 from link_previews where url = ${link.url}`).length) await Promise.race([fetchPreview(link.url), Bun.sleep(4000)]);
 	return id;
 }
 

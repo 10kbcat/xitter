@@ -7,10 +7,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
+import type { SQL } from "bun";
 import type { Viewer } from "./auth";
 import { fetchRemoteMedia } from "./federation-sync";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
-import { protectedFor, suspendedFor } from "./blocks";
+import { blockedFor, protectedFor, suspendedFor } from "./blocks";
+import { staffViewer } from "./staff-access";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { settings } from "./settings";
@@ -24,7 +26,10 @@ const MAX_PENDING_MS = 60 * 60 * 1000;
 
 type Pending = { userId: string; total: number; category: string; video: boolean; chunks: Map<number, number>; received: number; started: number };
 const pending = new Map<string, Pending>();
-const finalizing = new Set<string>();
+const finalizing = new Map<string, Pending>();
+// Reserve source-URL downloads before their first await, then keep the slot
+// through assembly. They must share the same per-account work limit.
+const sourceUploads = new Map<string, string>();
 const pendingDir = (id: string) => join(MEDIA_DIR, ".pending", id);
 const segmentFile = (id: string, index: number) => join(pendingDir(id), String(index));
 
@@ -100,6 +105,15 @@ export const absolute = (path: string | null) => (path?.startsWith("/") ? PUBLIC
 
 const MAX_PENDING_PER_USER = 8;
 const MAX_SEGMENTS = 10_000;
+
+function activeUploadCount(userId: string): number {
+	const ids = new Set<string>();
+	for (const [id, p] of pending) if (p.userId === userId) ids.add(id);
+	for (const [id, p] of finalizing) if (p.userId === userId) ids.add(id);
+	for (const [id, owner] of sourceUploads) if (owner === userId) ids.add(id);
+	return ids.size;
+}
+
 const uploadError = (message: string, status = 400) => Response.json({ error: message, errors: [{ code: 324, message }] }, { status });
 
 async function params(req: Request, url: URL): Promise<{ fields: Record<string, string>; file?: Buffer }> {
@@ -149,7 +163,7 @@ async function croppedGif(id: string, data: Buffer, image: Image): Promise<{ dat
 
 async function finalize(id: string, p: Pending): Promise<Response> {
 	pending.delete(id);
-	finalizing.add(id);
+	finalizing.set(id, p);
 	try {
 		if (p.received !== p.total) return uploadError("File size does not match the size announced at INIT.");
 		const parts = [...p.chunks.keys()].sort((a, b) => a - b);
@@ -233,52 +247,58 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 				if (source.origin !== ownOrigin || source.pathname !== "/i/api/xitter/gif" || !source.searchParams.get("u")) {
 					return uploadError("GIF uploads must use this instance's GIF proxy.", 403);
 				}
-				const response = await gifProxy(source);
-				if (!response.ok || !response.body) return uploadError("Could not download the selected GIF.");
-				const announcedSize = Number(response.headers.get("content-length"));
-				if (Number.isFinite(announcedSize) && announcedSize > MAX_GIF) {
-					await response.body.cancel();
-					return uploadError("File is too large.");
-				}
-				const reader = response.body.getReader();
-				const chunks: Buffer[] = [];
-				let size = 0;
-				try {
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						size += value.byteLength;
-						if (size > MAX_GIF) {
-							await reader.cancel();
-							return uploadError("File is too large.");
-						}
-						chunks.push(Buffer.from(value));
-					}
-				} finally {
-					reader.releaseLock();
-				}
-				const data = Buffer.concat(chunks, size);
-				const image = sniffImage(data);
-				if (!image || image.mime !== "image/gif") return uploadError("The selected source is not a valid GIF.");
+				if (activeUploadCount(viewer.id) >= MAX_PENDING_PER_USER) return uploadError("Finish your other uploads first.", 429);
 				const newMedia = newId();
-				mkdirSync(pendingDir(newMedia), { recursive: true });
-				writeFileSync(segmentFile(newMedia, 0), data);
-				return finalize(newMedia, {
-					userId: viewer.id,
-					total: data.length,
-					category: fields.media_category ?? "tweet_gif",
-					video: false,
-					chunks: new Map([[0, data.length]]),
-					received: data.length,
-					started: Date.now(),
-				});
+				sourceUploads.set(newMedia, viewer.id);
+				try {
+					const response = await gifProxy(source);
+					if (!response.ok || !response.body) return uploadError("Could not download the selected GIF.");
+					const announcedSize = Number(response.headers.get("content-length"));
+					if (Number.isFinite(announcedSize) && announcedSize > MAX_GIF) {
+						await response.body.cancel();
+						return uploadError("File is too large.");
+					}
+					const reader = response.body.getReader();
+					const chunks: Buffer[] = [];
+					let size = 0;
+					try {
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) break;
+							size += value.byteLength;
+							if (size > MAX_GIF) {
+								await reader.cancel();
+								return uploadError("File is too large.");
+							}
+							chunks.push(Buffer.from(value));
+						}
+					} finally {
+						reader.releaseLock();
+					}
+					const data = Buffer.concat(chunks, size);
+					const image = sniffImage(data);
+					if (!image || image.mime !== "image/gif") return uploadError("The selected source is not a valid GIF.");
+					mkdirSync(pendingDir(newMedia), { recursive: true });
+					writeFileSync(segmentFile(newMedia, 0), data);
+					return await finalize(newMedia, {
+						userId: viewer.id,
+						total: data.length,
+						category: fields.media_category ?? "tweet_gif",
+						video: false,
+						chunks: new Map([[0, data.length]]),
+						received: data.length,
+						started: Date.now(),
+					});
+				} finally {
+					sourceUploads.delete(newMedia);
+				}
 			}
 			const total = Number(fields.total_bytes);
 			const video = /^video\//.test(fields.media_type ?? "") || /video/.test(fields.media_category ?? "");
 			if (video && !(await videoSupported())) return uploadError("Video uploads are not available on this server.");
 			if (!video && fields.media_type && !/^image\//.test(fields.media_type)) return uploadError("Only images and videos can be uploaded.");
 			if (!Number.isInteger(total) || total <= 0 || total > (video ? maxVideoBytes() : MAX_GIF)) return uploadError("File is too large or empty.");
-			if ([...pending.values()].filter((p) => p.userId === viewer.id).length >= MAX_PENDING_PER_USER) return uploadError("Finish your other uploads first.", 429);
+			if (activeUploadCount(viewer.id) >= MAX_PENDING_PER_USER) return uploadError("Finish your other uploads first.", 429);
 			const newMedia = newId();
 			pending.set(newMedia, { userId: viewer.id, total, category: fields.media_category ?? "", video, chunks: new Map(), received: 0, started: Date.now() });
 			return Response.json({ ...idFields(newMedia), expires_after_secs: 86400 }, { status: 202 });
@@ -316,12 +336,25 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 			return new Response(null, { status: 204 });
 		}
 		case "FINALIZE": {
+			if (id && finalizing.get(id)?.userId === viewer.id) return Response.json({
+				...idFields(id), processing_info: { state: "pending", check_after_secs: 1 },
+			});
 			const p = id ? pending.get(id) : undefined;
 			if (!p || p.userId !== viewer.id) return uploadError("Unknown upload.", 404);
 			return finalize(id!, p);
 		}
 		case "STATUS": {
 			if (!isId(id)) return uploadError("Unknown upload.", 404);
+			const uploading = pending.get(id);
+			if (uploading?.userId === viewer.id) return Response.json({
+				...idFields(id), processing_info: { state: "uploading" },
+				total_bytes: uploading.total, received_bytes: uploading.received,
+				segments: [...uploading.chunks].sort(([a], [b]) => a - b).map(([segment_index, bytes]) => ({ segment_index, bytes })),
+				expires_after_secs: Math.max(0, Math.ceil((uploading.started + MAX_PENDING_MS - Date.now()) / 1000)),
+			});
+			if (finalizing.get(id)?.userId === viewer.id) return Response.json({
+				...idFields(id), processing_info: { state: "pending", check_after_secs: 1 },
+			});
 			const [row] = await sql`select state from media where id = ${id}::bigint and user_id = ${viewer.id}::bigint`;
 			if (!row) return uploadError("Unknown upload.", 404);
 			if (row.state === "processing")
@@ -334,46 +367,35 @@ export async function mediaUpload(req: Request, url: URL, viewer: Viewer): Promi
 	return uploadError("Unknown command.");
 }
 
-type Served = { mime: string; owner: string; post: string | null; detached: boolean; at: number };
-const mimeCache = new Map<string, Served>();
-const MAX_MIME_CACHE = 4096;
-const ownerCache = new Map<string, { hidden: boolean; at: number }>();
-
-const IMMUTABLE = "public, max-age=31536000, immutable";
-const PRIVATE = "private, max-age=3600";
+type Served = { id: string; mime: string; owner: string; post: string | null; detached: boolean };
+// Visibility changes, blocks and deletion must apply on the next request, and
+// authorized private bytes must not persist in browser or shared caches.
+const PRIVATE = "private, no-store";
 
 async function servedOf(id: string): Promise<Served | undefined> {
-	const hit = mimeCache.get(id);
-	if (hit && Date.now() - hit.at < 30_000) {
-		mimeCache.delete(id);
-		mimeCache.set(id, hit);
-		return hit;
-	}
-	mimeCache.delete(id);
-	const [row] = await sql`select mime, user_id::text as owner, post_id::text as post, detached from media where id = ${id}::bigint`;
-	if (!row) return undefined;
-	const served = { ...row, at: Date.now() } as Served;
-	if (served.post) {
-		if (mimeCache.size >= MAX_MIME_CACHE) mimeCache.delete(mimeCache.keys().next().value!);
-		mimeCache.set(id, served);
-	}
-	return served;
-}
-
-async function ownerHidden(owner: string) {
-	const hit = ownerCache.get(owner);
-	if (hit && Date.now() - hit.at < 30_000) return hit.hidden;
-	const [row] = await sql`select protected or status = 'suspended' or deactivated_at is not null as hidden from users where id = ${owner}::bigint`;
-	if (ownerCache.size >= MAX_MIME_CACHE) ownerCache.delete(ownerCache.keys().next().value!);
-	ownerCache.set(owner, { hidden: !!row?.hidden, at: Date.now() });
-	return !!row?.hidden;
+	const [row] = await sql`select id::text, mime, user_id::text as owner, post_id::text as post, detached from media where id = ${id}::bigint`;
+	return row as Served | undefined;
 }
 
 async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefined> {
-	if (served.detached) return served.owner === viewer?.id ? PRIVATE : undefined;
-	if (!served.post || !(await ownerHidden(served.owner))) return IMMUTABLE;
-	const [unseen] = await sql`select 1 where ${served.owner}::bigint in ${protectedFor(viewer.id)} or ${served.owner}::bigint in ${suspendedFor(viewer.id)}`;
-	return unseen ? undefined : PRIVATE;
+	if (served.detached) return served.owner === viewer.id ? PRIVATE : undefined;
+	// Choice photos are referenced by polls, not media.post_id. Resolve those
+	// only for unbound uploads so ordinary post images keep their indexed path.
+	const pollIds: string[] = served.post ? [] : (await sql`select id::text from polls where choice_media @> ${sql.array([served.id], "INT8")}`).map((p: any) => p.id);
+	if (!served.post && !pollIds.length) {
+		// Avatars, banners and other non-post references retain their access
+		// policy. Their URL may later be attached to private content.
+		return PRIVATE;
+	}
+	const [access] = await sql`select 1 from posts post where
+		${served.post ? sql`post.id = ${served.post}::bigint` : sql`post.poll_id = any(${sql.array(pollIds, "INT8")})`}
+		and (not post.hidden or ${staffViewer(viewer.id)})
+		and post.user_id not in ${protectedFor(viewer.id)}
+		and post.user_id not in ${suspendedFor(viewer.id)}
+		and post.user_id not in ${blockedFor(viewer.id)} limit 1`;
+	if (access) return PRIVATE;
+	// A draft/deleted poll's uploaded choices remain available to its owner.
+	return !served.post && served.owner === viewer.id ? PRIVATE : undefined;
 }
 
 // /media/<id>[.ext], /media/banner/<id>[/<size>] and /media/poster/<id>.jpg; the
@@ -381,18 +403,18 @@ async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefi
 // original either way. Byte ranges are answered so the video player can seek.
 export async function serveMedia(req: Request, pathname: string, viewer: Viewer): Promise<Response> {
 	const poster = /^\/media\/poster\/(\d{1,19})\.jpg$/.exec(pathname);
-	if (poster) {
+	if (poster && isId(poster[1])) {
 		const file = posterFile(MEDIA_DIR, poster[1]);
 		const served = existsSync(file) || (await fetchRemoteMedia(poster[1], true)) ? await servedOf(poster[1]) : undefined;
 		const cache = served && (await cacheFor(viewer, served));
-		if (!cache) return new Response("not found", { status: 404 });
+		if (!cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
 		return new Response(Bun.file(file), { headers: { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff" } });
 	}
 	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
-	if (!m || !(existsSync(fileOf(m[1])) || (await fetchRemoteMedia(m[1])))) return new Response("not found", { status: 404 });
+	if (!m || !isId(m[1]) || !(existsSync(fileOf(m[1])) || (await fetchRemoteMedia(m[1])))) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
 	const served = await servedOf(m[1]);
 	const cache = served && (await cacheFor(viewer, served));
-	if (!served || !cache) return new Response("not found", { status: 404 });
+	if (!served || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
 	const headers: Record<string, string> = { "content-type": served.mime, "cache-control": cache, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
 	const size = statSync(fileOf(m[1])).size;
 	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
@@ -411,16 +433,29 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 
 // attaches uploads to a new post; only the poster's own unused, finished
 // uploads count. A video goes alone, photos up to four.
-export async function attachMedia(userId: string, postId: string, mediaIds: string[]) {
-	const ids = mediaIds.filter((id) => isId(id)).slice(0, 4);
+export class MediaError extends Error {}
+
+export async function attachMedia(userId: string, postId: string, mediaIds: string[], opts: { db?: SQL; strict?: boolean } = {}) {
+	const db = opts.db ?? sql;
+	const ids = [...new Set(mediaIds.filter(isId).slice(0, 4))];
+	if (opts.strict && (ids.length !== mediaIds.length || !isId(postId))) throw new MediaError("Invalid media attachments.");
 	if (!ids.length) return;
-	const rows = await sql`select id, kind from media where id = any(${sql.array(ids, "INT8")}) and user_id = ${userId}::bigint
-		and post_id is null and state = 'ready'`;
+	const [post] = await db`select id from posts where id = ${postId}::bigint and user_id = ${userId}::bigint`;
+	if (!post) {
+		if (opts.strict) throw new MediaError("The post can't use these attachments.");
+		return;
+	}
+	const rows = await db`select id, kind from media where id = any(${sql.array(ids, "INT8")}) and user_id = ${userId}::bigint
+		and post_id is null and state = 'ready' for update`;
 	const kinds = new Map<string, string>(rows.map((r: any) => [String(r.id), r.kind]));
 	const usable = ids.filter((id) => kinds.has(id));
 	const video = usable.find((id) => kinds.get(id) === "video");
-	for (const [i, id] of (video ? [video] : usable).entries())
-		await sql`update media set post_id = ${postId}::bigint, position = ${i} where id = ${id}::bigint`;
+	if (opts.strict && (usable.length !== ids.length || (video && usable.length > 1))) throw new MediaError("Attachments must be your own unused, finished uploads. A video goes alone.");
+	for (const [i, id] of (video ? [video] : usable).entries()) {
+		const changed = await db`update media set post_id = ${postId}::bigint, position = ${i} where id = ${id}::bigint
+			and user_id = ${userId}::bigint and post_id is null and state = 'ready' returning id`;
+		if (opts.strict && !changed.length) throw new MediaError("An attachment is no longer available.");
+	}
 }
 
 export async function mediaForPosts(postIds: string[]): Promise<Map<string, MediaRow[]>> {
