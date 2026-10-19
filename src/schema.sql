@@ -405,7 +405,18 @@ create table if not exists affiliations (
 	created_at timestamptz not null default now(),
 	primary key (org_id, user_id)
 );
-create unique index if not exists affiliations_user_idx on affiliations (user_id);
+drop index if exists affiliations_user_idx;
+create index if not exists affiliations_user_created_idx on affiliations (user_id, created_at);
+create or replace function affiliations_cap() returns trigger language plpgsql as $$
+begin
+	perform 1 from users where id = new.user_id for update;
+	if (select count(*) from affiliations where user_id = new.user_id) >= 4 then
+		raise exception 'affiliation_limit' using errcode = 'P0001';
+	end if;
+	return new;
+end $$;
+drop trigger if exists affiliations_cap on affiliations;
+create trigger affiliations_cap before insert on affiliations for each row execute function affiliations_cap();
 -- instance-wide settings as key/value (sign-up mode, ...)
 create table if not exists settings (
 	key text primary key,
