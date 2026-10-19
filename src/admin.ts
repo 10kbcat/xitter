@@ -9,7 +9,7 @@
 // written to the audit log.
 
 import { isSuperadminViewer } from "./superadmin";
-import { SUPERADMINS, superadminNameHere } from "./superadmins";
+import { SUPERADMINS, isSuperadminHome, superadminNameHere } from "./superadmins";
 import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
 import { pullFrom } from "./federation-sync";
 import type { Viewer } from "./auth";
@@ -175,6 +175,7 @@ const ACTIONS: Record<string, Action> = {
 	} },
 	federationAcceptKey: { role: "admin", run: async (a, b) => {
 		const id = instanceOf(b.instance);
+		if (isSuperadminHome(id) && !a.superadmin) throw new AdminError("That is a superadmin's home instance. Only a superadmin can accept a new key for it.", 403);
 		await acceptKeyChange(id).catch((e) => {
 			throw new AdminError(e instanceof Error ? e.message : String(e));
 		});

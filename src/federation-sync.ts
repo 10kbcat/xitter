@@ -7,6 +7,9 @@ import { posterFile } from "./video";
 
 const MEDIA_DIR = process.env.MEDIA_DIR ?? "media";
 const PAGE = 200;
+const EVENTS_PER_HOUR = Number(process.env.FEDERATION_EVENTS_PER_HOUR) || 20_000;
+const MAX_ACCOUNTS = Number(process.env.FEDERATION_MAX_ACCOUNTS) || 100_000;
+const budgets = new Map<string, { start: number; used: number }>();
 const MAX_MEDIA = 64 * 1024 * 1024;
 const REF_RE = /^(\d{1,19})@([a-z0-9.:-]{1,260})$/;
 
@@ -62,7 +65,7 @@ const publicPost = (id: string) =>
 async function renderPost(id: string) {
 	const [p] = await publicPost(id);
 	if (!p) return { kind: "post", id, gone: true };
-	const media = await sql`select id::text, kind, mime, width, height, alt_text, duration_ms from media where post_id = ${id}::bigint order by position, id`;
+	const media = await sql`select id::text, kind, mime, width, height, alt_text, duration_ms from media where post_id = ${id}::bigint order by position, media.id`;
 	return {
 		kind: "post",
 		id,
@@ -90,7 +93,7 @@ async function renderPair(kind: "like" | "repost" | "follow", a: string, b: stri
 }
 
 async function eventsAfter(after: string, limit: number) {
-	const rows = await sql`select seq::text, kind, a::text, b::text from federation_outbox where seq > ${after}::bigint order by seq limit ${limit}`;
+	const rows = await sql`select seq::text, kind, a::text, b::text from federation_outbox where seq > ${after}::bigint order by federation_outbox.seq limit ${limit}`;
 	const events: unknown[] = [];
 	for (const r of rows) {
 		const rendered = r.kind === "user" ? await renderUser(r.a) : r.kind === "post" ? await renderPost(r.a) : await renderPair(r.kind, r.a, r.b);
@@ -212,6 +215,8 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 		await sql`update users set screen_name = ${handle}, name = ${clip(u.name, 50)}, bio = ${clip(u.bio, 300)}, location = ${clip(u.location, 60)}, protected = ${!!u.protected}
 			where id = ${local}::bigint`;
 	else {
+		const [{ n }] = await sql`select count(*)::int as n from users where instance = ${instance}`;
+		if (n >= MAX_ACCOUNTS) throw new FederationError(`${instance} already has ${MAX_ACCOUNTS} accounts here`);
 		await sql`insert into users (id, screen_name, name, password_hash, bio, location, protected, instance, remote_id, created_at)
 			values (${id}::bigint, ${handle}, ${clip(u.name, 50)}, '!', ${clip(u.bio, 300)}, ${clip(u.location, 60)}, ${!!u.protected}, ${instance}, ${u.id}::bigint, ${created})
 			on conflict (instance, remote_id) where instance is not null do nothing`;
@@ -319,10 +324,23 @@ export async function pullFrom(instance: string): Promise<number> {
 			if (r.status !== 200) throw new FederationError(`${instance} answered ${r.status}`);
 			const doc = r.json();
 			if (!Array.isArray(doc?.events) || !/^\d{1,19}$/.test(String(doc.next))) throw new FederationError(`${instance} sent a malformed page`);
+			const previous = budgets.get(instance);
+			const budget = previous && Date.now() - previous.start <= 3_600_000 ? previous : { start: Date.now(), used: 0 };
+			budgets.set(instance, budget);
+			let stoppedAt: string | undefined;
 			for (const e of doc.events) {
 				if (isBlocked(instance)) return applied;
+				if (budget.used >= EVENTS_PER_HOUR) {
+					stoppedAt = /^\d{1,19}$/.test(String(e?.seq)) && BigInt(e.seq) > BigInt(peer.cursor) && BigInt(e.seq) <= BigInt(doc.next) ? String(BigInt(e.seq) - 1n) : peer.cursor;
+					break;
+				}
+				budget.used++;
 				await applyEvent(instance, e).catch((err) => console.error(`federation: ${instance} event ${e?.seq}:`, err instanceof Error ? err.message : err));
 				applied++;
+			}
+			if (stoppedAt !== undefined) {
+				await sql`update federation_peers set cursor = greatest(cursor, ${stoppedAt}::bigint), last_error = ${`paused: more than ${EVENTS_PER_HOUR} changes in an hour`}, last_error_at = now() where instance = ${instance}`;
+				return applied;
 			}
 			await sql`update federation_peers set cursor = greatest(cursor, ${doc.next}::bigint), last_ok_at = now(), last_error = null where instance = ${instance}`;
 			if (!doc.more) break;

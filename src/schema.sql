@@ -1205,6 +1205,12 @@ create table if not exists federation_peers (
 	last_error text,
 	last_error_at timestamptz
 );
+do $$ begin
+	if not exists (select 1 from pg_constraint where conname = 'federation_peers_key_check') then
+		update federation_peers set key = null where key !~ '^[A-Za-z0-9_-]{43}$';
+		alter table federation_peers add constraint federation_peers_key_check check (key ~ '^[A-Za-z0-9_-]{43}$');
+	end if;
+end $$;
 create table if not exists federation_blocks (
 	instance text primary key,
 	source text not null check (source in ('local', 'emergency', 'registry')),

@@ -177,6 +177,34 @@ try {
 	check("meow can't rename away from the superadmin handle", rename.status === 400, await rename.text());
 	const org = await adminApi(A, adminCookies, "createOrg", { screen_name: "MEOW", name: "meow" });
 	check("nobody makes an org with that handle", org.status !== 200 && /reserved/.test(org.body.error ?? ""), org.body);
+
+	const bCookies = `auth_token=${bSession.token}; ct0=${bSession.csrf}`;
+	const acceptHome = await adminApi(B, bCookies, "federationAcceptKey", { instance: idOf(A.origin) });
+	check("B's admins can't accept a new key for the superadmin's home", acceptHome.status === 403, acceptHome.body);
+	const [pinnedOnB] = await B.db`select key from federation_peers where instance = ${idOf(A.origin)}`;
+	if (process.env.FED_REGISTRY && process.env.FED_B_KEY_FILE) {
+		const forgedList = `${process.env.FED_REGISTRY}.forged.json`;
+		const list = JSON.parse(await Bun.file(process.env.FED_REGISTRY).text());
+		list.sequence += 1;
+		for (const i of list.instances) if (i.id === idOf(A.origin)) i.public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+		await Bun.write(forgedList, JSON.stringify(list));
+		const probe = Bun.spawnSync(["bun", "-e", `import { refreshRegistry, keyFor, pendingKeyChange } from "./src/federation"; await refreshRegistry(); console.log(JSON.stringify({ key: await keyFor(${JSON.stringify(idOf(A.origin))}), pending: await pendingKeyChange(${JSON.stringify(idOf(A.origin))}) })); process.exit(0);`], {
+			env: { ...process.env, DATABASE_URL: process.env.FED_B_DB ?? "postgres://tiago@127.0.0.1:5432/fed_b", PUBLIC_ORIGIN: B.origin, FEDERATION_REGISTRY_URL: forgedList, FEDERATION_KEY_FILE: process.env.FED_B_KEY_FILE, FEDERATION_ALLOW_HTTP: "1", XITTER_TEST_SUPERADMINS: `meow@${idOf(A.origin)}` },
+		});
+		await B.db`delete from federation_state where key = 'registry'`;
+		const seen = JSON.parse(probe.stdout.toString().trim().split("\n").pop() || "{}");
+		check("a list that swaps the home's key doesn't replace the pinned one", !!pinnedOnB?.key && seen.key === pinnedOnB.key, { seen, pinned: pinnedOnB?.key, err: probe.stderr.toString().slice(0, 300) });
+		check("and shows up as a key change", seen.pending === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", seen);
+	}
+
+	if (process.env.FED_D_DB) {
+		const D = new SQL(process.env.FED_D_DB);
+		const paused = await until(async () => (await D`select last_error from federation_peers where instance = ${idOf(A.origin)}`)[0]?.last_error ?? "", 60);
+		check("an instance over its hourly budget is paused", /paused/.test(paused ?? ""), paused);
+		const [{ cursor }] = await D`select cursor::text from federation_peers where instance = ${idOf(A.origin)}`;
+		const [{ head }] = await A.db`select max(seq)::text as head from federation_outbox`;
+		check("and it stops reading before the end, after the events it applied", BigInt(cursor) > 0n && BigInt(cursor) < BigInt(head), { cursor, head });
+	}
 } finally {
 	for (const m of made) await m.side.db`delete from users where id = ${m.id}::bigint`;
 }

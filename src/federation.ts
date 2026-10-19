@@ -203,10 +203,11 @@ export async function keyFor(id: string): Promise<string | undefined> {
 	const hardcoded = pinnedHomeKey(id);
 	if (hardcoded) return hardcoded;
 	const listedKey = listedInstance(id)?.public_key;
-	if (listedKey) return listedKey;
+	const home = isSuperadminHome(id);
+	if (listedKey && !home) return listedKey;
 	const [pinned] = await sql`select key from federation_peers where instance = ${id}`;
 	if (pinned?.key) return pinned.key;
-	const seen = await wellKnownKey(id).catch(() => undefined);
+	const seen = listedKey ?? (await wellKnownKey(id).catch(() => undefined));
 	if (!seen) return undefined;
 	await sql`insert into federation_peers (instance, key) values (${id}, ${seen}) on conflict (instance) do update set key = coalesce(federation_peers.key, excluded.key)`;
 	const [kept] = await sql`select key from federation_peers where instance = ${id}`;
@@ -214,17 +215,19 @@ export async function keyFor(id: string): Promise<string | undefined> {
 }
 
 export async function pendingKeyChange(id: string): Promise<string | undefined> {
-	if (listedInstance(id)?.public_key) return undefined;
+	if (pinnedHomeKey(id)) return undefined;
+	const listedKey = listedInstance(id)?.public_key;
+	if (listedKey && !isSuperadminHome(id)) return undefined;
 	const [pinned] = await sql`select key from federation_peers where instance = ${id}`;
-	const live = await wellKnownKey(id).catch(() => undefined);
+	const live = listedKey ?? (await wellKnownKey(id).catch(() => undefined));
 	return pinned?.key && live && live !== pinned.key ? live : undefined;
 }
 
 export async function acceptKeyChange(id: string) {
 	wellKnownKeys.delete(id);
-	const live = await wellKnownKey(id);
-	if (!live) throw new Error("that instance doesn't publish a key");
-	await sql`update federation_peers set key = ${live} where instance = ${id}`;
+	const next = (isSuperadminHome(id) && listedInstance(id)?.public_key) || (await wellKnownKey(id));
+	if (!next) throw new Error("that instance doesn't publish a key");
+	await sql`update federation_peers set key = ${next} where instance = ${id}`;
 }
 
 const requestText = (method: string, path: string, from: string, to: string, ts: string, nonce: string, body: Uint8Array) =>
