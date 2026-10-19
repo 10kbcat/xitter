@@ -932,6 +932,30 @@ create table if not exists api_tokens (
 	last_used_at timestamptz
 );
 create index if not exists api_tokens_user_idx on api_tokens (user_id);
+-- Public OAuth clients use authorization-code + PKCE. They never receive a
+-- client secret; users can revoke grants independently of personal tokens.
+create table if not exists oauth_clients (
+	id bigint primary key,
+	owner_id bigint not null references users(id) on delete cascade,
+	name text not null check (char_length(name) between 1 and 80),
+	redirect_uri text not null,
+	revoked boolean not null default false,
+	created_at timestamptz not null default now()
+);
+create index if not exists oauth_clients_owner_idx on oauth_clients(owner_id);
+create table if not exists oauth_codes (
+	code_hash text primary key,
+	client_id bigint not null references oauth_clients(id) on delete cascade,
+	user_id bigint not null references users(id) on delete cascade,
+	redirect_uri text not null,
+	scope text not null check (scope in ('read', 'write')),
+	code_challenge text not null,
+	expires_at timestamptz not null
+);
+create index if not exists oauth_codes_expires_idx on oauth_codes(expires_at);
+alter table api_tokens add column if not exists client_id bigint references oauth_clients(id) on delete cascade;
+alter table api_tokens add column if not exists expires_at timestamptz;
+create index if not exists api_tokens_client_idx on api_tokens(client_id, user_id) where client_id is not null;
 
 -- Branded hashtags (X's hashflags): for a while, posts with the hashtag get a
 -- custom like animation (Lottie JSON), and the hashtag an emoji after it.

@@ -68,6 +68,7 @@ export type MenuLink = { href: string; text: string; description: string; icon: 
 export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const links: MenuLink[] = [];
 	const s = settings();
+	links.push({ href: "/account/apps", text: "Connected apps", description: "Review and remove apps authorized to use your account.", icon: CODE, viewBox: "0 -960 960 960" });
 	if (s.invite_quota.enabled && s.signup_mode === "invite")
 		links.push({ href: "/account/invites", text: "Invites", description: `Invite people you know to ${s.instance_name}.`, icon: TICKET });
 	const [u] = await sql`select coalesce(u.verified_type in ('business', 'government'), false) or exists (select 1 from affiliations where org_id = u.id)
