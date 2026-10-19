@@ -50,6 +50,9 @@ export async function setBlock(blockerId: string, blockedId: string, on: boolean
 		await tx`insert into blocks (blocker_id, blocked_id) values (${blockerId}::bigint, ${blockedId}::bigint) on conflict do nothing`;
 		await tx`delete from follows where (follower_id = ${blockerId}::bigint and followee_id = ${blockedId}::bigint)
 			or (follower_id = ${blockedId}::bigint and followee_id = ${blockerId}::bigint)`;
+		for (const t of [tx`list_members`, tx`list_subscribers`])
+			await tx`delete from ${t} m using lists l where m.list_id = l.id
+				and ((l.owner_id = ${blockerId}::bigint and m.user_id = ${blockedId}::bigint) or (l.owner_id = ${blockedId}::bigint and m.user_id = ${blockerId}::bigint))`;
 	});
 }
 

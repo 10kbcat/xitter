@@ -1,6 +1,7 @@
 // usage: bun scripts/test-visibility.ts
 
 import { createUser } from "../src/auth";
+import { setBlock } from "../src/blocks";
 import { sql } from "../src/db";
 import { newId } from "../src/ids";
 
@@ -51,6 +52,20 @@ try {
 		(await who.get("ArticleEntitiesSlice", { userId: locked, lifecycle: "Published" })).data?.user?.result?.articles_article_mixer_slice?.items?.length ?? 0;
 	check("a stranger can't list a protected account's articles", (await articlesOf(s)) === 0);
 	check("a follower can", (await articlesOf(f)) === 1);
+
+	const list = newId();
+	await sql`insert into lists (id, owner_id, name) values (${list}::bigint, ${stranger}::bigint, 'watched')`;
+	await sql`insert into list_members (list_id, user_id) values (${list}::bigint, ${fan}::bigint)`;
+	await setBlock(fan, stranger, true);
+	check("blocking someone takes you off their lists", !(await sql`select 1 from list_members where list_id = ${list}::bigint`).length);
+
+	const hiddenList = newId();
+	await sql`insert into lists (id, owner_id, name, is_private) values (${hiddenList}::bigint, ${locked}::bigint, 'private', true)`;
+	await sql`insert into list_members (list_id, user_id) values (${hiddenList}::bigint, ${fan}::bigint)`;
+	await setBlock(fan, stranger, false);
+	await sql`insert into follows (follower_id, followee_id) values (${stranger}::bigint, ${fan}::bigint) on conflict do nothing`;
+	const suggested = JSON.stringify(await s.get("ListCreationRecommendedUsers", { listId: hiddenList }));
+	check("someone else's private list doesn't change who is suggested", suggested.includes(`"rest_id":"${fan}"`));
 } finally {
 	await sql`delete from users where id = any(${sql.array(ids, "INT8")})`;
 }
