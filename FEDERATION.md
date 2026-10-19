@@ -213,7 +213,9 @@ superadmin can accept it.
 
 The keys of `xitter.opuadm.com` and `xit.chococat.lol` are pinned in
 `instances.json` and as `instance_key` in `src/superadmins.ts`, so no list
-change or first contact decides them. If one of them loses
+change or first contact decides them. Each superadmin's account id is pinned
+as `user_id` too, so a new account that takes the same name on a home
+instance is never a superadmin. If one of them loses
 `data/federation-key.json`, its superadmins can't issue tickets until the new
 key is pinned here and every instance redeploys, so back that file up. A new
 superadmin home gets the same
