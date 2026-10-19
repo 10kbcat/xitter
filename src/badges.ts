@@ -61,8 +61,12 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// the containers that show a name with its badge; the account is the "@name" in them
 	var SEL='[data-testid="User-Name"],[data-testid="UserName"],[data-testid="UserCell"],[data-testid="HoverCard"],[data-testid="SideNav_AccountSwitcher_Button"],[data-testid="primaryColumn"] h2';
 	function handle(box){
+		// a handle shortened to "@name" (shorten below) keeps the whole one on its
+		// element: the short text would name someone else here, with their badges
+		var tagged=box.matches("[data-xitter-handle]")?box:box.querySelector("[data-xitter-handle]");
+		if(tagged)return tagged.getAttribute("data-xitter-handle");
 		var spans=box.querySelectorAll("span");
-		for(var i=0;i<spans.length;i++){var full=spans[i].getAttribute("data-xitter-handle");if(full)return full;var m=/^@([^\s\/\?#@%,:]{1,50}(?:@[a-zA-Z0-9.-]{1,253}(?::\d{1,5})?)?)$/.exec(spans[i].textContent);if(m)return m[1].toLowerCase()}
+		for(var i=0;i<spans.length;i++){var m=/^@([^\s\/\?#@%,:]{1,50}(?:@[a-zA-Z0-9.-]{1,253}(?::\d{1,5})?)?)$/.exec(spans[i].textContent);if(m)return m[1].toLowerCase()}
 		// a profile's top bar has the name but no handle: the page's address does
 		if(box.tagName==="H2"&&box.querySelector('div[style*="height: calc(1.0625em)"]')){var p=/^\/([^\/?#]{1,150})(?:\/|$)/.exec(location.pathname);if(p)try{return decodeURIComponent(p[1]).toLowerCase()}catch(e){}}
 	}
