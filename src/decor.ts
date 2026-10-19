@@ -591,7 +591,8 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			if(k===undefined){want(n);return}
 			var ring=box.querySelector(":scope > [data-xitter-frame]");
 			var src=k&&(still?k.frameStill:k.frame);
-			if(!src){if(ring)ring.remove();return}
+			if(!src){if(ring)ring.remove();box.removeAttribute("data-xitter-framed");return}
+			box.setAttribute("data-xitter-framed","");
 			if(ring&&ring.getAttribute("src")===src)return;
 			if(ring)ring.remove();
 			ring=document.createElement("img");
@@ -690,7 +691,10 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			.catch(function(){names.forEach(function(n){delete waiting[n]})});
 	}
 	var base=document.createElement("style");
-	base.textContent='[data-xitter-frame]{position:absolute;left:-11%;top:-11%;width:122%;height:122%;max-width:none;pointer-events:none;z-index:1}'+
+	// Steam's frames are drawn around a square picture: a round one leaves gaps
+	// in the corners, so a framed picture is squared off
+	base.textContent='[data-xitter-framed] div{border-radius:4%!important}'+
+		'[data-xitter-frame]{position:absolute;left:-11%;top:-11%;width:122%;height:122%;max-width:none;pointer-events:none;z-index:1}'+
 		'[data-xitter-decor-bg]{position:fixed;inset:0;z-index:-1;background:#000 center top/cover no-repeat;overflow:hidden;pointer-events:none}'+
 		'[data-xitter-decor-bg] video{position:absolute;left:50%;top:0;transform:translateX(-50%);min-width:100%;min-height:100%;object-fit:cover}';
 	document.head.appendChild(base);
