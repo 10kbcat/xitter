@@ -35,6 +35,8 @@ drop index if exists posts_reply_to_idx;
 alter table posts drop constraint if exists posts_reply_to_id_fkey;
 alter table posts add column if not exists reply_to_user_id bigint;
 create index if not exists posts_user_idx on posts (user_id, id desc);
+-- trends read the last days' posts; without it every refresh read the whole table
+create index if not exists posts_created_idx on posts (created_at);
 -- replies to an account's posts, newest first (notifications.ts)
 create index if not exists posts_reply_user_idx on posts (reply_to_user_id, created_at) where reply_to_user_id is not null;
 
