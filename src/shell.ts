@@ -82,7 +82,8 @@ const WIDE = "html[data-wide-nav]";
 // the X drawn at the top of the sign-in dialog, known by its path
 const DIALOG_LOGO = '[role="dialog"] span:has(> svg > path[d^="M21.742 21.75l-7.563-11.179"])';
 // the X anywhere else: the phone layout's top bar, the loading screen
-const MARK = 'svg:has(> path[d^="M21.742 21.75l-7.563-11.179"])';
+// (the top bar wraps the path in a <g>, so not only direct children)
+const MARK = 'svg:has(path[d^="M21.742 21.75l-7.563-11.179"])';
 // the big X beside the signed-out home page's sign-in form
 const HERO = 'main div:has(> svg > path[d^="M285.38 207.711"])';
 // X's code field is sized for 6 boxes; the 8-digit invite code's boxes share the width
@@ -97,7 +98,7 @@ ${DARK} ${DIALOG_LOGO}{background-image:url(/public/icon-dark.png)}
 ${DIALOG_LOGO} svg{opacity:0}
 ${MARK}{background:url(/public/icon-light.png) center/contain no-repeat}
 ${DARK} ${MARK}{background-image:url(/public/icon-dark.png)}
-${MARK} > path{opacity:0}
+${MARK} path{opacity:0}
 ${HERO}{background:url(/public/logo-light.png) center/min(100%,391px) auto no-repeat}
 ${DARK} ${HERO}{background-image:url(/public/logo-dark.png)}
 ${HERO} svg{opacity:0}
