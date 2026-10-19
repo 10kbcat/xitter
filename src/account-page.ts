@@ -196,7 +196,9 @@ ${body}
 </div>
 </body>
 </html>`;
-	const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8", "cache-control": cache };
+	// never inside another site's frame: these pages hold one-click actions
+	// (authorizing an app, removing 2FA) a hidden frame could be clicked into
+	const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" };
 	if (referrer) headers["referrer-policy"] = referrer;
 	return new Response(html, { status, headers });
 }
