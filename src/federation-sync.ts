@@ -646,10 +646,10 @@ export async function savedRemoteMedia(): Promise<{ files: number; bytes: number
 	return { files: r.files, bytes: r.bytes };
 }
 
-export async function dropRemoteMedia(): Promise<{ files: number; bytes: number }> {
+export async function dropRemoteMedia(instance?: string): Promise<{ files: number; bytes: number }> {
 	let files = 0;
 	let bytes = 0;
-	for (const { id } of await sql`select id::text from media where remote_instance is not null`) {
+	for (const { id } of await sql`select id::text from media where remote_instance is not null and (${instance ?? null}::text is null or remote_instance = ${instance ?? null})`) {
 		for (const file of [join(MEDIA_DIR, id), posterFile(MEDIA_DIR, id)]) {
 			if (!existsSync(file)) continue;
 			bytes += statSync(file).size;
