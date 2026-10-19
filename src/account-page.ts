@@ -91,8 +91,8 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/20px ${FONT};over
 .heading{min-width:0}
 .title{font-size:20px;line-height:24px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sub{color:var(--muted);font-size:13px;line-height:16px}
-.tabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
+/* the tabs wrap onto more rows rather than hide past the edge */
+.tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border)}
 .tabs a{flex:1 0 auto;display:flex;justify-content:center;padding:0 16px;color:var(--muted);font-weight:500;text-decoration:none}
 .tabs span{position:relative;display:block;padding:16px 0;white-space:nowrap}
 .tabs a[aria-current]{color:var(--text);font-weight:700}

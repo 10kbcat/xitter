@@ -67,23 +67,26 @@ const SHIELD = "M12 1.5 3.5 5v6c0 5.2 3.6 10 8.5 11.5 4.9-1.5 8.5-6.3 8.5-11.5V5
 const ROBOT = "M11 2h2v3h5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5V2zM6 7v11h12V7H6zm3 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm-6 5h6v1.5H9V15z";
 // Material Symbols "public"
 const GLOBE = "M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q41-45 62.5-100.5T800-480q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z";
-export type MenuLink = { href: string; text: string; description: string; icon: string; viewBox?: string; menuOnly?: boolean };
+// Every link is a tab on the account pages. `where` adds it to the client too:
+// the More menu, Settings > Your account, or both. The menu keeps only what
+// someone may need to act on; the rest live in Settings.
+export type MenuLink = { href: string; text: string; description: string; icon: string; viewBox?: string; where: "menu" | "settings" | "both" | "tabs" };
 export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const links: MenuLink[] = [];
 	const s = settings();
-	links.push({ href: "/account/apps", text: "Connected apps", description: "Review and remove apps authorized to use your account.", icon: CODE, viewBox: "0 -960 960 960" });
+	links.push({ href: "/account/apps", text: "Connected apps", description: "Review and remove apps authorized to use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	if (s.invite_quota.enabled && s.signup_mode === "invite")
-		links.push({ href: "/account/invites", text: "Invites", description: `Invite people you know to ${s.instance_name}.`, icon: TICKET });
+		links.push({ href: "/account/invites", text: "Invites", description: `Invite people you know to ${s.instance_name}.`, icon: TICKET, where: "both" });
 	const [u] = await sql`select coalesce(u.verified_type in ('business', 'government'), false) or exists (select 1 from affiliations where org_id = u.id)
 			or exists (select 1 from affiliations where user_id = u.id) or exists (select 1 from affiliation_requests where user_id = u.id) as org,
 		exists (select 1 from staff_messages where user_id = u.id and revoked_at is null) or exists (select 1 from moderation_appeals where user_id = u.id) as notices
 		from users u where u.id = ${userId}::bigint`;
-	if (u?.org) links.push({ href: "/account/organisation", text: "Organisation", description: "Manage affiliates, or answer an organisation that asked to add you.", icon: BUILDING });
-	links.push({ href: "/account/automation", text: "Automation", description: "Name the account that runs this one.", icon: ROBOT, menuOnly: true });
-	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD });
-	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960" });
-	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960" });
-	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD });
+	if (u?.org) links.push({ href: "/account/organisation", text: "Organisation", description: "Manage affiliates, or answer an organisation that asked to add you.", icon: BUILDING, where: "settings" });
+	links.push({ href: "/account/automation", text: "Automation", description: "Name the account that runs this one.", icon: ROBOT, where: "tabs" });
+	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD, where: "both" });
+	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960", where: "settings" });
+	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
+	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD, where: "settings" });
 	return links;
 }
 
@@ -220,19 +223,20 @@ export const TIDY_SCRIPT = `(function(){
 		a.addEventListener("mouseleave",function(){a.style.backgroundColor=""});
 	}
 	function menuLinks(){
-		if(!T.links||!T.links.length)return;
+		var items=(T.links||[]).filter(function(l){return l.where==="menu"||l.where==="both"});
+		if(!items.length)return;
 		// each entry sits alone in a row wrapper, so the copy takes the wrapper along
 		var s=document.querySelector('[role="menu"] a[href="/settings"]');
 		var row=s&&s.parentNode;
 		if(!row||row.parentNode.querySelector("[data-xitter-link]"))return;
-		T.links.forEach(function(l){
+		items.forEach(function(l){
 			var box=row.cloneNode(true);
 			copy(box.querySelector('a[href="/settings"]'),l);
 			row.parentNode.insertBefore(box,row);
 		});
 	}
 	function accountRows(){
-		var rows=(T.links||[]).filter(function(l){return !l.menuOnly});
+		var rows=(T.links||[]).filter(function(l){return l.where==="settings"||l.where==="both"});
 		var screen=document.querySelector('[data-testid="accountScreen"]');
 		if(!rows.length||!screen||screen.querySelector("[data-xitter-link]"))return;
 		var last=screen.querySelector('a[href="/settings/deactivate"]');
