@@ -166,6 +166,12 @@ any variable from the Configuration table can be added to `.env`.
 `FETCH_CLIENT=0` skips the first-start download; `docker compose exec app bun
 scripts/fetch-client.ts --latest` re-pins the build.
 
+The image has a health check: `/healthz` answers `ok` while the server runs
+and reaches its database, and `docker compose ps` shows the app as
+`unhealthy` when it doesn't. Docker doesn't restart unhealthy containers by
+itself; a watcher such as
+[autoheal](https://github.com/willfarrell/docker-autoheal) can.
+
 For an optional PgBouncer connection pool, add `DB_HOST=pool` and
 `DB_PORT=6432` to `.env`, then start with
 `docker compose --profile sqlpool up -d --build`. PgBouncer uses session pooling

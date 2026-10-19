@@ -275,6 +275,11 @@ async function route(req: Request): Promise<Response | undefined> {
 	rememberIp(req, server.requestIP(req)?.address);
 	const url = new URL(req.url);
 	const p = url.pathname;
+	// for Docker's health check (Dockerfile): the server answers and reaches its database
+	if (p === "/healthz") {
+		const db = await Promise.race([sql`select 1`.then(() => true, () => false), Bun.sleep(3000).then(() => false)]);
+		return new Response(db ? "ok" : "database unreachable", { status: db ? 200 : 503, headers: { "cache-control": "no-store" } });
+	}
 	if (p === "/federation/superadmin/accept") return acceptTicket(req, requestIp(req) ?? "unknown");
 	if (req.method !== "GET" && req.method !== "HEAD" && req.headers.has("cookie")) {
 		const site = req.headers.get("sec-fetch-site");
