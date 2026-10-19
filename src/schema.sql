@@ -938,6 +938,8 @@ alter table users add column if not exists count_overrides jsonb;
 -- Replies the author of a conversation's first post hid from it (X's "Hide
 -- reply"). They leave the conversation and show under "Hidden replies".
 alter table posts add column if not exists reply_hidden_at timestamptz;
+-- hidden-reply checks look up one conversation and only its hidden replies
+create index if not exists posts_hidden_replies_idx on posts (conversation_id) where reply_hidden_at is not null;
 
 -- X's Delegate: an account (owner) shares itself with members, who then act as
 -- it from their own sign-in. Each account has one group, so the group's id is

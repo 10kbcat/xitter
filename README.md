@@ -150,6 +150,15 @@ any variable from the Configuration table can be added to `.env`.
 `FETCH_CLIENT=0` skips the first-start download; `docker compose exec app bun
 scripts/fetch-client.ts --latest` re-pins the build.
 
+For an optional PgBouncer connection pool, add `DB_HOST=pool` and
+`DB_PORT=6432` to `.env`, then start with
+`docker compose --profile sqlpool up -d --build`. PgBouncer uses session pooling
+so Bun's prepared statements and startup migration keep their connection
+semantics. `PGBOUNCER_POOL_SIZE` defaults to 20 server connections; tune it
+alongside `DB_POOL_MAX` for the number of app replicas. Backups use a direct
+PostgreSQL connection. The Compose PostgreSQL service also uses conservative
+cache and autovacuum settings; adjust them for the host's memory and workload.
+
 ### Keep these private
 
 - An `auth_token` cookie is a live login to your X account. Use it only for
@@ -162,6 +171,7 @@ scripts/fetch-client.ts --latest` re-pins the build.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgres://dev@localhost:5432/xitter` | Postgres connection |
+| `BACKUP_DATABASE_URL` | `DATABASE_URL` | Direct Postgres connection for `pg_dump` when the app uses a pooler |
 | `DB_POOL_MAX` | `20` | Postgres connections the server keeps open |
 | `DB_STATEMENT_TIMEOUT`, `DB_LOCK_TIMEOUT` | `30s`, `10s` | A query running or waiting on a lock longer than this is cancelled, so one stuck query can't hold every connection (the migration at start-up has no limit) |
 | `PORT` | `3000` | Listen port |
