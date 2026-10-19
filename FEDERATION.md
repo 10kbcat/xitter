@@ -82,7 +82,9 @@ Every instance has an Ed25519 key in `data/federation-key.json` (or
 `data/`. Losing it means asking every peer to accept a new key.
 
 `GET /.well-known/xitter` returns the instance's address, software, protocol
-and public key.
+and public key. Under `federation.peers` it lists every other instance on the
+list, whether it federates with it and when it last pulled from it
+successfully, so anyone can see that two instances are syncing.
 
 Requests between instances carry these headers:
 

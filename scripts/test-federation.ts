@@ -56,6 +56,11 @@ try {
 	check("named with her instance", handle?.screen_name === `${alice.name}@${idOf(A.origin)}`, handle?.screen_name);
 	const mirror = await until(async () => (await B.db`select local_id::text from federated_objects where instance = ${idOf(A.origin)} and kind = 'post' and remote_id = ${postId}::bigint`)[0]?.local_id as string);
 	check("and her post", !!mirror);
+	const syncStatus = await until(async () => {
+		const doc = (await (await fetch(`${B.origin}/.well-known/xitter`)).json()) as any;
+		return doc.federation?.peers?.find((p: any) => p.id === idOf(A.origin) && p.federating && p.last_sync_at);
+	}, 60);
+	check("B's public status shows when it last synced with A", !!syncStatus, syncStatus);
 
 	const found = await bob.get("UserByScreenName", { screen_name: `${alice.name}@${idOf(A.origin)}`, withSafetyModeUserFields: true });
 	check("bob finds alice by her handle", found.data?.user?.result?.rest_id === aliceOnB, found.data?.user?.result?.rest_id);
