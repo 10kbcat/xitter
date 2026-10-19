@@ -190,7 +190,7 @@ const PAGES = {
 	email: { icon: "mail", title: "Email" },
 	apps: { icon: "devices", title: "Client apps" },
 	settings: { icon: "tune", title: "Settings" },
-	errors: { icon: "bug_report", title: "Errors" },
+	errors: { icon: "bug_report", title: "Errors", needs: "errors" },
 	permissions: { icon: "admin_panel_settings", title: "Staff permissions", needs: "admin" },
 	security: { icon: "shield_lock", title: "Security", needs: "admin" },
 	backups: { icon: "backup", title: "Backups", needs: "admin" },
@@ -290,7 +290,7 @@ const RENDER = {
 		const groups = [...new Set(permissions.map((p) => p.group))];
 		const box = (role, p) => '<td style="text-align:center"><input type="checkbox" data-role="' + role + '" data-perm="' + esc(p.key) + '"' + (roles[role][p.key] ? " checked" : "") + "></td>";
 		main.innerHTML = "<h1>Staff permissions</h1>" +
-			'<p class="dim">What moderators and support can do in this panel. Admins can always do everything, and every staff role can look through accounts, posts, reports and the audit log. Roles, settings, security, backups and the client build stay with admins. Nobody acts on staff at or above their own role, whatever they are allowed. Changes apply to the next thing a staff member does; they see new buttons after reloading the panel.</p>' +
+			'<p class="dim">What moderators and support can do in this panel. Admins can always do everything, and every staff role can look through accounts, posts, reports and the audit log; the Privacy permissions decide who also sees IP and email addresses. Roles, settings, security, backups and the client build stay with admins. Nobody acts on staff at or above their own role, whatever they are allowed. Changes apply to the next thing a staff member does; they see new buttons after reloading the panel.</p>' +
 			'<div class="scroll"><table class="table"><tr><th>Permission</th><th>Out of the box</th>' + ROLES.map((r) => '<th style="text-align:center">' + r + "</th>").join("") + "</tr>" +
 			groups.map((g) => '<tr><td colspan="' + (2 + ROLES.length) + '"><b>' + esc(g) + "</b></td></tr>" +
 				permissions.filter((p) => p.group === g).map((p) => "<tr><td>" + esc(p.label) + '</td><td class="small dim">' + esc(p.default_role === "admin" ? "admins only" : p.default_role === "moderator" ? "moderators" : "moderators and support") + "</td>" + ROLES.map((r) => box(r, p)).join("") + "</tr>").join("")).join("") +
@@ -601,7 +601,7 @@ const RENDER = {
 			(can("sendTestMail") ? '<div class="row"><input id="mto" placeholder="you@example.org" style="flex:1;min-width:200px"><button class="btn primary" id="msend">Send test mail</button><button class="btn" id="mdigest">Send digests now</button></div>' : "") + "</div>" +
 			'<div class="box"><h2>Recent mail</h2><p class="dim small">Password resets, notification digests for people who turned them on (Settings > Notifications > Email notifications: activity, new messages; only after 30 minutes away, at most every 4 hours) and tests.</p><div class="scroll">' +
 			(m.log.length ? '<table class="table"><tr><th>When</th><th>To</th><th>What</th><th>State</th></tr>' +
-				m.log.map((l) => '<tr><td class="small dim">' + esc(when(l.created_at)) + "</td><td>" + esc(l.to_addr) + (l.screen_name ? ' <span class="dim small">@' + esc(l.screen_name) + "</span>" : "") +
+				m.log.map((l) => '<tr><td class="small dim">' + esc(when(l.created_at)) + "</td><td>" + (l.to_addr ? esc(l.to_addr) : '<span class="dim">hidden</span>') + (l.screen_name ? ' <span class="dim small">@' + esc(l.screen_name) + "</span>" : "") +
 					"</td><td>" + esc(l.subject) + ' <span class="dim small">' + esc(l.kind) + "</span></td><td>" + pill(l.status) + (l.error ? '<div class="small dim">' + esc(l.error) + "</div>" : "") + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">Nothing sent yet.</div>') + "</div></div>";
 		if ($("#msend")) $("#msend").onclick = () => act(() => api("sendTestMail", { to: $("#mto").value }), "Test mail sent").then(route);
@@ -908,10 +908,10 @@ const RENDER = {
 				'<label class="small dim">Joins organisation <select id="o"><option value="">none</option>' + orgs.map((o) => '<option value="' + esc(o.id) + '">@' + esc(o.screen_name) + "</option>").join("") + "</select></label>" +
 				'<button class="btn primary" id="make">Make</button></div><div id="made"></div></div>' : "") +
 			'<div class="scroll"><table class="table"><tr><th>Code</th><th>State</th><th>Used</th><th>By</th><th>Made</th><th></th></tr>' +
-			invites.map((i) => '<tr><td class="code">' + esc(i.code) + (i.org ? ' <span class="dim small">→ @' + esc(i.org) + "</span>" : "") + "</td><td>" + esc(state(i)) + "</td><td>" + i.uses + "/" + i.max_uses +
+			invites.map((i) => '<tr><td class="code">' + (i.code ? esc(i.code) : '<span class="dim">hidden</span>') + (i.org ? ' <span class="dim small">→ @' + esc(i.org) + "</span>" : "") + "</td><td>" + esc(state(i)) + "</td><td>" + i.uses + "/" + i.max_uses +
 				(i.used_by.length ? '<div class="dim small">' + i.used_by.map((n) => "@" + esc(n)).join(", ") + "</div>" : "") + '</td><td class="small">' + (i.created_by ? "@" + esc(i.created_by) : '<span class="dim">script</span>') +
 				'</td><td class="small dim">' + esc(when(i.created_at)) + (i.expires_at ? "<br>until " + esc(when(i.expires_at)) : "") + "</td><td>" +
-				(state(i) === "open" ? '<button class="btn" data-copy="' + esc(i.code) + '">Copy link</button>' + (can("revokeInvite") ? ' <button class="btn danger" data-revoke="' + esc(i.code) + '">Revoke</button>' : "") : "") + "</td></tr>").join("") +
+				(state(i) === "open" && i.code ? '<button class="btn" data-copy="' + esc(i.code) + '">Copy link</button>' + (can("revokeInvite") ? ' <button class="btn danger" data-revoke="' + esc(i.code) + '">Revoke</button>' : "") : "") + "</td></tr>").join("") +
 			"</table></div>";
 		bindTabs();
 		if ($("#qsave")) $("#qsave").onclick = () => act(() => api("saveInviteQuota", { enabled: $("#qon").checked, per_month: Number($("#qn").value), uses: Number($("#qu").value), min_age_days: Number($("#qa").value) }), "Saved").then(route);
@@ -1061,7 +1061,7 @@ const RENDER = {
 	async automod(main) {
 		main.innerHTML = '<h1>Automod</h1><p class="dim">New posts and profiles are checked as they\'re written. This looks through what was there before: visible posts, newest first, and every profile. Nothing happens to what it finds until you act. Settings &gt; Automod holds the strike ladder.</p>' +
 			'<div class="bar"><button class="btn primary" id="scan">Scan</button><span class="dim small" id="scanState"></span></div><div id="hits"></div>' +
-			'<h2>Held after deletion</h2><p class="dim small">When a suspended account is deleted, its handles, email and recent addresses stay here, so nobody can take the handle or a look-alike of it, and sign-ups from that email or those addresses are refused. Handles of suspended accounts that still exist are held without being listed.</p><div id="held"></div>';
+			(can("heldIdentities") ? '<h2>Held after deletion</h2><p class="dim small">When a suspended account is deleted, its handles, email and recent addresses stay here, so nobody can take the handle or a look-alike of it, and sign-ups from that email or those addresses are refused. Handles of suspended accounts that still exist are held without being listed.</p><div id="held"></div>' : "");
 		const drawHeld = async () => {
 			const { held } = await api("heldIdentities");
 			$("#held").innerHTML = held.length
@@ -1073,7 +1073,7 @@ const RENDER = {
 				act(() => api("releaseIdentity", { kind: h.kind, value: h.value }), "Released").then(drawHeld);
 			});
 		};
-		drawHeld();
+		if (can("heldIdentities")) drawHeld();
 		const found = [];
 		let next = null, scanned = 0;
 		const draw = () => {
@@ -1156,7 +1156,7 @@ async function renderUser(main, id) {
 	main.innerHTML =
 		'<p><a href="#users">← Users</a></p>' + person(u) +
 		'<p class="dim small">Joined ' + esc(when(u.created_at)) + " · last sign-in " + esc(when(u.last_seen_at)) + " · " + u.posts + " posts · " + u.followers + " followers · " + u.sessions + " active sessions" +
-		(u.invite_code ? " · invite " + '<span class="code">' + esc(u.invite_code) + "</span>" + (u.invited_by ? " from @" + esc(u.invited_by) : "") : "") +
+		(u.invite_code ? " · invite " + '<span class="code">' + esc(u.invite_code) + "</span>" : u.invited_by ? " · invited" : "") + (u.invited_by ? " from @" + esc(u.invited_by) : "") +
 		(u.org ? " · affiliate of @" + esc(u.org) : "") + ' · <a href="/' + esc(u.screen_name) + '" target="_blank">open profile</a></p>' +
 		'<div class="grid2">' +
 		// profile
@@ -1224,7 +1224,7 @@ async function renderUser(main, id) {
 		// organisation
 		(isOrg ? '<h2>Affiliates</h2>' + (can("addAffiliate") ? '<div class="bar"><input id="aff" placeholder="@handle to add"><button class="btn primary" id="addaff">Add affiliate</button></div>' : "") +
 			(affiliates.length ? '<div class="scroll"><table class="table">' + affiliates.map((a) => '<tr><td>' + person(a) + "</td><td>" + (can("removeAffiliate") ? '<button class="btn danger" data-unaff="' + esc(a.id) + '">Remove</button>' : "") + "</td></tr>").join("") + "</table></div>" : '<div class="empty">No affiliates yet.</div>') : "") +
-		(alts.length ? '<h2>Seen from the same addresses</h2><p class="dim small">Accounts that signed in from an address this one used in the last 90 days. Shared networks put strangers here too.</p><p>' + alts.map((a) => '<a href="#user/' + esc(a.id) + '">@' + esc(a.screen_name) + "</a>" + (a.status !== "active" ? ' <span class="pill ' + esc(a.status) + '">' + esc(a.status) + "</span>" : "")).join(", ") + "</p>" : "") +
+		(alts?.length ? '<h2>Seen from the same addresses</h2><p class="dim small">Accounts that signed in from an address this one used in the last 90 days. Shared networks put strangers here too.</p><p>' + alts.map((a) => '<a href="#user/' + esc(a.id) + '">@' + esc(a.screen_name) + "</a>" + (a.status !== "active" ? ' <span class="pill ' + esc(a.status) + '">' + esc(a.status) + "</span>" : "")).join(", ") + "</p>" : "") +
 		(invited.length ? "<h2>Invited</h2><p>" + invited.map((i) => '<a href="#user/' + esc(i.id) + '">@' + esc(i.screen_name) + "</a>").join(", ") + "</p>" : "") +
 		"<h2>History</h2>" + (log.length ? '<table class="table">' + log.map((e) => '<tr><td class="small dim">' + esc(when(e.created_at)) + "</td><td>" + (e.automatic ? "automod" : "@" + esc(e.actor ?? "?")) + " " + esc(e.action.replace(/_/g, " ")) + '</td><td class="small dim code">' + esc(e.detail ? JSON.stringify(e.detail) : "") + "</td></tr>").join("") + "</table>" : '<div class="empty">No staff actions yet.</div>');
 

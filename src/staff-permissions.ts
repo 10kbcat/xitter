@@ -1,6 +1,7 @@
 // What moderators and support may do in the admin panel, chosen by an admin
 // (Admin > Staff permissions). Each permission is a group of panel actions
-// with the role that has it by default; an admin turns it on or off for each
+// with the role that has it by default (a Privacy one also hides some fields
+// from what every staff member reads, see `allows`); an admin turns it on or off for each
 // role below admin. Admins always have every permission. Actions outside the
 // list (roles, settings, security, backups, the client build, these
 // permissions themselves) stay with the role written on them in admin.ts.
@@ -23,7 +24,7 @@ export const PERMISSIONS: Record<string, Permission> = {
 	delete_posts: { group: "Moderation", label: "Delete posts", role: "moderator", actions: ["deletePost"] },
 	post_visibility: { group: "Moderation", label: "Hide posts and articles, mark them sensitive, label them", role: "moderator", actions: ["setPostVisibility", "setPostNotice", "setArticleVisibility"] },
 	media: { group: "Moderation", label: "Delete uploaded media", role: "moderator", actions: ["deleteMedia"] },
-	automod_scan: { group: "Moderation", label: "Scan old posts and profiles with automod, see held identities", role: "moderator", actions: ["automodScan", "heldIdentities"] },
+	automod_scan: { group: "Moderation", label: "Scan old posts and profiles with automod", role: "moderator", actions: ["automodScan"] },
 	release_identities: { group: "Moderation", label: "Release held handles, emails and addresses", role: "admin", actions: ["releaseIdentity"] },
 
 	staff_notes: { group: "Accounts", label: "Write staff notes", role: "support", actions: ["addStaffNote"] },
@@ -35,15 +36,20 @@ export const PERMISSIONS: Record<string, Permission> = {
 	notes_access: { group: "Accounts", label: "Give Community Notes writing access", role: "admin", actions: ["setNotesAccess"] },
 	delete_accounts: { group: "Accounts", label: "Delete accounts", role: "admin", actions: ["deleteUser"] },
 	orgs: { group: "Accounts", label: "Create organisations and manage their affiliates", role: "admin", actions: ["createOrg", "addAffiliate", "removeAffiliate"] },
-	invites: { group: "Accounts", label: "Make and revoke invites", role: "admin", actions: ["createInvite", "revokeInvite"] },
+	// without it the invite list shows no codes: an open one is a way in while sign-up is by invite
+	invites: { group: "Accounts", label: "See, make and revoke invite codes", role: "admin", actions: ["createInvite", "revokeInvite"] },
 
 	badges: { group: "Content", label: "Make and delete custom badges and profile labels", role: "admin", actions: ["createBadge", "deleteBadge", "createLabel", "deleteLabel"] },
 	stickers: { group: "Content", label: "Manage sticker packs", role: "admin", actions: ["createStickerPack", "renameStickerPack", "moveStickerPack", "deleteStickerPack", "addSticker", "deleteSticker"] },
 	hashflags: { group: "Content", label: "Manage branded hashtags", role: "admin", actions: ["createHashflag", "endHashflag", "deleteHashflag"] },
 	explore: { group: "Content", label: "Manage Explore cards and topics", role: "admin", actions: ["saveCard", "deleteCard", "saveTopic", "deleteTopic"] },
 
-	errors: { group: "Instance", label: "Resolve errors", role: "admin", actions: ["resolveErrors"] },
+	// stack traces show the server's paths and internals
+	errors: { group: "Instance", label: "See and resolve server errors", role: "admin", actions: ["errors", "resolveErrors"] },
 	mail: { group: "Instance", label: "Send test mail and digests", role: "admin", actions: ["sendTestMail", "runMailDigests"] },
+
+	ip_addresses: { group: "Privacy", label: "See IP addresses: where accounts sign in, other accounts seen at the same address, identities held after deletion", role: "moderator", actions: ["heldIdentities"] },
+	emails: { group: "Privacy", label: "See email addresses in the mail log", role: "admin", actions: [] },
 };
 
 const PERMISSION_OF = new Map(Object.entries(PERMISSIONS).flatMap(([key, p]) => p.actions.map((a) => [a, key] as const)));
@@ -53,6 +59,12 @@ export const permissionOf = (action: string) => PERMISSION_OF.get(action);
 export function rolePermissions(role: GrantableRole): Record<string, boolean> {
 	const chosen = settings().staff_permissions[role] ?? {};
 	return Object.fromEntries(Object.entries(PERMISSIONS).map(([key, p]) => [key, typeof chosen[key] === "boolean" ? chosen[key] : RANK[role] >= RANK[p.role]]));
+}
+
+// whether a staff role has a permission, for the fields an action leaves out without it
+export function allows(role: string | null | undefined, key: string): boolean {
+	if (role === "admin") return true;
+	return GRANTABLE.includes(role as GrantableRole) && rolePermissions(role as GrantableRole)[key];
 }
 
 // whether a staff role may run an action that otherwise needs `needs`

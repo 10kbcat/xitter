@@ -28,7 +28,7 @@ import { stickerActions } from "./stickers";
 import { hashflagActions } from "./hashflags";
 import { switchActions } from "./feature-switches";
 import { staffGate } from "./staff-access";
-import { GRANTABLE, PERMISSIONS, RANK, type Role, mayRun, permissionOf, rolePermissions } from "./staff-permissions";
+import { GRANTABLE, PERMISSIONS, RANK, type Role, allows, mayRun, permissionOf, rolePermissions } from "./staff-permissions";
 
 export class AdminError extends Error {
 	constructor(
@@ -84,7 +84,7 @@ const randomPassword = () => {
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, u.verified_type, u.translator, u.flag, u.status, u.role,
-	u.created_at, u.last_seen_at, u.invite_code,
+	u.created_at, u.last_seen_at,
 	(select count(*)::int from posts p where p.user_id = u.id) as posts,
 	(select count(*)::int from follows f where f.followee_id = u.id) as followers,
 	(select o.screen_name from affiliations af join users o on o.id = af.org_id where af.user_id = u.id) as org,
@@ -114,10 +114,10 @@ const ACTIONS: Record<string, Action> = {
 		await audit(a, "revoke_platform", id);
 		return {};
 	} },
-	mail: { role: "support", run: async () => ({
+	mail: { role: "support", run: async (a) => ({
 		enabled: mailEnabled(),
 		from: mailFrom(),
-		log: await sql`select m.id::text, m.to_addr, m.kind, m.subject, m.status, m.error, m.created_at, u.screen_name
+		log: await sql`select m.id::text, ${allows(a.role, "emails") ? sql`m.to_addr` : sql`null::text as to_addr`}, m.kind, m.subject, m.status, m.error, m.created_at, u.screen_name
 			from mail_log m left join users u on u.id = m.user_id order by m.created_at desc limit 50`,
 	}) },
 	// what Resend says to a test mail answers whether the sending domain is verified
@@ -253,9 +253,9 @@ const ACTIONS: Record<string, Action> = {
 
 	user: {
 		role: "support",
-		run: async (_a, b) => {
+		run: async (a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, u.bio, u.location, u.website, u.based_in_override, u.country, u.count_overrides, u.notes_writer, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text,
+			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.based_in_override, u.country, u.count_overrides, u.notes_writer, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text,
 				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select c.screen_name from invites i join users c on c.id = i.created_by where i.code = u.invite_code) as invited_by
@@ -267,7 +267,8 @@ const ACTIONS: Record<string, Action> = {
 				left join users a on a.id = l.actor_id where l.target = ${id} order by l.id desc limit 50`;
 			const strikes = await activeStrikes(id);
 			const ladder = settings().automod.ladder;
-			const alts = await sql`select distinct u.id::text as id, u.screen_name, u.status from login_events mine
+			// null when the viewer may not see addresses
+			const alts = !allows(a.role, "ip_addresses") ? null : await sql`select distinct u.id::text as id, u.screen_name, u.status from login_events mine
 				join login_events other on other.ip = mine.ip and other.user_id <> mine.user_id and other.created_at > now() - interval '90 days'
 				join users u on u.id = other.user_id
 				where mine.user_id = ${id}::bigint and mine.ip is not null and mine.created_at > now() - interval '90 days' limit 20`;
@@ -464,6 +465,7 @@ const ACTIONS: Record<string, Action> = {
 			const [u] = await sql`select id::text as id from users where lower(screen_name) = lower(${String(b.screen_name ?? "").replace(/^@/, "")})`;
 			if (!u) throw new AdminError("No account with that handle.");
 			if (u.id === orgId) throw new AdminError("An organisation can't be its own affiliate.");
+			await guard(a, u.id);
 			// one organisation per person; adding moves them
 			await sql`insert into affiliations (org_id, user_id) values (${orgId}::bigint, ${u.id}::bigint)
 				on conflict (user_id) do update set org_id = excluded.org_id, created_at = now()`;
@@ -477,6 +479,7 @@ const ACTIONS: Record<string, Action> = {
 		run: async (a, b) => {
 			const orgId = idOf(b.orgId, "organisation");
 			const userId = idOf(b.userId, "account");
+			await guard(a, userId);
 			await sql`delete from affiliations where org_id = ${orgId}::bigint and user_id = ${userId}::bigint`;
 			await audit(a, "remove_affiliate", userId, { org: orgId });
 			return {};
@@ -548,10 +551,11 @@ const ACTIONS: Record<string, Action> = {
 		},
 	},
 
+	// without the invites permission a code shows as null
 	invites: {
 		role: "support",
-		run: async () => ({
-			invites: await sql`select i.code, i.max_uses, i.uses, i.expires_at, i.revoked, i.created_at,
+		run: async (a) => ({
+			invites: await sql`select ${allows(a.role, "invites") ? sql`i.code` : sql`null::text as code`}, i.max_uses, i.uses, i.expires_at, i.revoked, i.created_at,
 				c.screen_name as created_by, o.screen_name as org,
 				(select coalesce(json_agg(u.screen_name order by u.created_at), '[]') from users u where u.invite_code = i.code) as used_by
 				from invites i left join users c on c.id = i.created_by left join users o on o.id = i.org_id
