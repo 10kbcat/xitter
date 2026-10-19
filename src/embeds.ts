@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { MEDIA_DIR } from "./media";
+import { isId } from "./ids";
 import { feature, settings } from "./settings";
 import { posterFile } from "./video";
 
@@ -29,14 +30,15 @@ async function publicAuthor(where: ReturnType<typeof sql>): Promise<Author | und
 type Post = { id: string; text: string; created_at: Date; author: Author; image?: { id: string; kind: string; mime: string; width: number; height: number } };
 
 async function publicPost(id: string): Promise<Post | undefined> {
-	const [p] = await sql`select p.id::text, p.user_id::text, p.text, p.created_at, p.sensitive and not u.never_sensitive as sensitive from posts p join users u on u.id = p.user_id where p.id = ${id}::bigint and not p.hidden`;
+	if (!isId(id)) return undefined;
+	const [p] = await sql`select p.id::text, p.user_id::text, p.text, p.created_at, p.sensitive and not u.never_sensitive as sensitive, u.never_sensitive from posts p join users u on u.id = p.user_id where p.id = ${id}::bigint and not p.hidden`;
 	if (!p) return undefined;
 	const author = await publicAuthor(sql`id = ${p.user_id}::bigint`);
 	if (!author) return undefined;
 	const [m] = p.sensitive
 		? []
 		: await sql`select id::text, kind, mime, width, height from media
-			where post_id = ${id}::bigint and state = 'ready' and (sensitive_warning is null or ${!p.sensitive}) order by position nulls last limit 1`;
+			where post_id = ${id}::bigint and state = 'ready' and (coalesce(cardinality(sensitive_warning), 0) = 0 or ${p.never_sensitive}) order by position nulls last limit 1`;
 	return { id: p.id, text: p.text, created_at: p.created_at, author, image: m as Post["image"] };
 }
 
@@ -121,14 +123,14 @@ export async function linkPreview(pathname: string): Promise<Response | undefine
 }
 
 async function fileResponse(file: string, type: string): Promise<Response> {
-	if (!existsSync(file)) return new Response("not found", { status: 404 });
-	return new Response(Bun.file(file), { headers: { "content-type": type, "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+	if (!existsSync(file)) return new Response("not found", { status: 404, headers: { "cache-control": "no-store" } });
+	return new Response(Bun.file(file), { headers: { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
 
 // the pictures the preview pages name: a public post's first photo or video
 // frame, a public account's avatar. Other uploads stay for signed-in users.
 export async function embedImage(pathname: string): Promise<Response> {
-	const none = new Response("not found", { status: 404 });
+	const none = new Response("not found", { status: 404, headers: { "cache-control": "no-store" } });
 	if (!feature("link_previews")) return none;
 	const post = /^\/embed\/post\/(\d{1,19})$/.exec(pathname);
 	if (post) {
@@ -137,10 +139,10 @@ export async function embedImage(pathname: string): Promise<Response> {
 		return p.image.kind === "photo" ? fileResponse(join(MEDIA_DIR, p.image.id), p.image.mime) : fileResponse(posterFile(MEDIA_DIR, p.image.id), "image/jpeg");
 	}
 	const avatar = /^\/embed\/avatar\/(\d{1,19})$/.exec(pathname);
-	if (avatar) {
+	if (avatar && isId(avatar[1])) {
 		const a = await publicAuthor(sql`id = ${avatar[1]}::bigint`);
 		const id = a && avatarId(a);
-		if (!id) return none;
+		if (!id || !isId(id)) return none;
 		const [m] = await sql`select mime from media where id = ${id}::bigint`;
 		return m ? fileResponse(join(MEDIA_DIR, id), m.mime) : none;
 	}
@@ -149,7 +151,7 @@ export async function embedImage(pathname: string): Promise<Response> {
 
 // oEmbed (oembed.com): apps such as Discord show the author line from it
 export async function oembed(url: URL): Promise<Response> {
-	const none = new Response("not found", { status: 404 });
+	const none = new Response("not found", { status: 404, headers: { "cache-control": "no-store" } });
 	if (!feature("link_previews")) return none;
 	let target: URL;
 	try {
@@ -173,6 +175,6 @@ export async function oembed(url: URL): Promise<Response> {
 			provider_name: settings().instance_name,
 			provider_url: PUBLIC_ORIGIN,
 		},
-		{ headers: { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" } },
+		{ headers: { "cache-control": "no-store", "access-control-allow-origin": "*" } },
 	);
 }

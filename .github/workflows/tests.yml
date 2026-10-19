@@ -77,6 +77,7 @@ jobs:
           bun scripts/test-scheduled-media.ts
       - name: Media privacy and chunked upload regression tests
         run: |
+          bun scripts/test-embed-privacy.ts
           bun scripts/test-poll-media-privacy.ts
           bun scripts/test-media-finalization.ts
           bun scripts/test-media-upload-cap.ts
