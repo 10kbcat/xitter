@@ -278,7 +278,7 @@ export async function verifyIncoming(req: Request, path: string, opts: { allowSu
 	if (!FEDERATION_ON) return fail(404, "Federation is off here.");
 	if (to !== INSTANCE_ID) return fail(421, "This request is for another instance.");
 	if (!ID_RE.test(from) || !/^\d{13}$/.test(ts) || !/^[A-Za-z0-9_-]{22}$/.test(nonce)) return fail(400, "Malformed federation headers.");
-	if (!isPeer(from) && !(opts.allowSuperadminHome && isSuperadminHome(from) && !isBlocked(from))) return fail(403, `${INSTANCE_ID} doesn't federate with ${from}.`);
+	if (!isPeer(from) && !(opts.allowSuperadminHome && isSuperadminHome(from) && listedInstance(from)?.state !== "blocked")) return fail(403, `${INSTANCE_ID} doesn't federate with ${from}.`);
 	if (Math.abs(Date.now() - Number(ts)) > CLOCK_SKEW_MS) return fail(401, "The request's clock is too far off.");
 	const declared = Number(req.headers.get("content-length") ?? "0");
 	if (declared > MAX_BODY) return fail(413, "The request is too large.");

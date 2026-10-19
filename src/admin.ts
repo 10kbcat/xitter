@@ -6,6 +6,10 @@
 // do everything else (profiles, badges, roles, organisations, invites,
 // instance settings). Every change is written to the audit log.
 
+import { isSuperadminViewer } from "./superadmin";
+import { SUPERADMINS } from "./superadmins";
+import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
+import { pullFrom } from "./federation-sync";
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { isFlag } from "./flags";
@@ -69,7 +73,10 @@ const rankOf = (role: string | null, isOwner: boolean) => (isOwner ? 4 : role ? 
 
 export async function guard(actor: Viewer, targetId: string) {
 	const u = await userRow(targetId);
-	if (targetId === actor.id || !u.role) return u;
+	if (targetId === actor.id) return u;
+	const [t] = await sql`select instance from users where id = ${targetId}::bigint`;
+	if (isSuperadminViewer({ screen_name: u.screen_name, instance: t?.instance }) && !actor.superadmin) throw new AdminError("That account is a superadmin.", 403);
+	if (!u.role || actor.superadmin) return u;
 	const owner = await ownerId();
 	if (rankOf(u.role, targetId === owner) >= rankOf(actor.role ?? null, actor.id === owner) && (targetId === owner || u.role_granted_by !== actor.id))
 		throw new AdminError(targetId === owner ? "That account is the instance owner." : "That account is staff at your level or above.", 403);
@@ -90,7 +97,92 @@ const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, 
 	(select o.screen_name from affiliations af join users o on o.id = af.org_id where af.user_id = u.id) as org,
 	(select count(*)::int from affiliations af where af.org_id = u.id) as affiliates`;
 
+const instanceOf = (v: unknown) => {
+	const id = typeof v === "string" ? v.trim().toLowerCase() : "";
+	if (!ID_RE.test(id) || id === INSTANCE_ID) throw new AdminError("Name another instance by its address, like xit.example.org.");
+	return id;
+};
+
 const ACTIONS: Record<string, Action> = {
+	federation: { role: "support", run: async () => {
+		const blocks = await listBlocks();
+		const stats = await sql`select p.instance, p.cursor::text, p.last_ok_at, p.last_error, p.last_error_at, p.key,
+			(select count(*)::int from users u where u.instance = p.instance) as accounts,
+			(select count(*)::int from posts x join users u on u.id = x.user_id where u.instance = p.instance) as posts
+			from federation_peers p`;
+		const [{ head }] = await sql`select coalesce(max(seq), 0)::text as head from federation_outbox`;
+		const byId = new Map(stats.map((r: any) => [r.instance, r]));
+		const known = new Set([...listed().map((i) => i.id), ...stats.map((r: any) => r.instance), ...blocks.map((b) => b.instance)]);
+		known.delete(INSTANCE_ID);
+		return {
+			enabled: FEDERATION_ON,
+			id: INSTANCE_ID,
+			public_key: publicKey(),
+			entry: { id: INSTANCE_ID, name: settings().instance_name, source_url: settings().source_url || null, public_key: publicKey(), state: "active" },
+			listed_here: listedInstance(INSTANCE_ID) ?? null,
+			registry: { sequence: registrySequence(), checked_at: registryCheckedAt ? new Date(registryCheckedAt).toISOString() : null, error: registryError },
+			outbox_head: head,
+			superadmins: SUPERADMINS.map((x) => `${x.screen_name}@${x.instance}`),
+			instances: await Promise.all(
+				[...known].sort().map(async (id) => {
+					const l = listedInstance(id);
+					const r: any = byId.get(id);
+					return {
+						id,
+						name: l?.name ?? id,
+						listed: l?.state ?? null,
+						key_source: l?.public_key ? "list" : r?.key ? "first contact" : null,
+						key_change: r?.key && !l?.public_key ? ((await pendingKeyChange(id).catch(() => undefined)) ?? null) : null,
+						block: blocks.find((b) => b.instance === id) ?? null,
+						federating: isPeer(id),
+						cursor: r?.cursor ?? "0",
+						last_ok_at: r?.last_ok_at ?? null,
+						last_error: r?.last_error ?? null,
+						accounts: r?.accounts ?? 0,
+						posts: r?.posts ?? 0,
+					};
+				}),
+			),
+		};
+	} },
+	federationBlock: { role: "admin", run: async (a, b) => {
+		const id = instanceOf(b.instance);
+		const reason = typeof b.reason === "string" ? b.reason.trim().slice(0, 500) : "";
+		await setFederationBlock(id, "local", reason, { id: a.id, name: a.screen_name });
+		await audit(a, "federation_block", id, { reason });
+		return {};
+	} },
+	federationUnblock: { role: "admin", run: async (a, b) => {
+		const id = instanceOf(b.instance);
+		const [row] = await sql`select source from federation_blocks where instance = ${id}`;
+		if (row?.source === "registry") throw new AdminError("The instance list has it switched off. That changes with a pull request to instances.json.");
+		if (row?.source === "emergency" && !a.superadmin) throw new AdminError("A superadmin defederated it in an emergency. Only a superadmin can lift that.", 403);
+		await liftBlock(id, row?.source === "emergency" ? "emergency" : "local");
+		await audit(a, "federation_unblock", id);
+		return {};
+	} },
+	federationPurge: { role: "admin", run: async (a, b) => {
+		const id = instanceOf(b.instance);
+		if (!isFederationBlocked(id)) throw new AdminError("Defederate the instance before deleting what came from it.");
+		const gone = await sql`delete from users where instance = ${id} returning id`;
+		await sql`delete from federated_objects where instance = ${id}`;
+		await sql`update federation_peers set cursor = 0 where instance = ${id}`;
+		await audit(a, "federation_purge", id, { accounts: gone.length });
+		return { accounts: gone.length };
+	} },
+	federationAcceptKey: { role: "admin", run: async (a, b) => {
+		const id = instanceOf(b.instance);
+		await acceptKeyChange(id).catch((e) => {
+			throw new AdminError(e instanceof Error ? e.message : String(e));
+		});
+		await audit(a, "federation_accept_key", id);
+		return {};
+	} },
+	federationPull: { role: "admin", run: async (a, b) => {
+		const id = instanceOf(b.instance);
+		await audit(a, "federation_pull", id);
+		return { applied: await pullFrom(id) };
+	} },
 	setNotesAccess: { role: "admin", run: async (a, b) => {
 		const id = idOf(b.id);
 		await guard(a, id);
