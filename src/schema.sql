@@ -247,6 +247,7 @@ create table if not exists media (
 	created_at timestamptz not null default now()
 );
 create index if not exists media_post_idx on media (post_id, position);
+create index if not exists media_user_idx on media (user_id, id);
 alter table media add column if not exists detached boolean not null default false;
 create or replace function media_detached() returns trigger language plpgsql as $$
 begin
@@ -610,6 +611,7 @@ create table if not exists polls (
 );
 -- an image poll: one uploaded photo per choice, in choice order
 alter table polls add column if not exists choice_media bigint[];
+create index if not exists polls_user_idx on polls (user_id, id);
 create index if not exists polls_choice_media_idx on polls using gin (choice_media) where choice_media is not null;
 
 create table if not exists poll_votes (
@@ -621,6 +623,7 @@ create table if not exists poll_votes (
 );
 
 alter table posts add column if not exists poll_id bigint references polls (id) on delete set null;
+create index if not exists poll_votes_user_idx on poll_votes (user_id, created_at, poll_id);
 create index if not exists posts_poll_idx on posts (poll_id) where poll_id is not null;
 
 -- scheduled posts and drafts, kept as the composer sent them

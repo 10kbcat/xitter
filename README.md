@@ -44,8 +44,8 @@ copy during setup, and it stays on that machine.
   when mail is set up; Settings > Email changes it by a confirmation link), pride flag badges, organisations
   with affiliates, several signed-in accounts
 - Account settings: password change, username change, language, deactivation
-  (reactivates on sign-in within 30 days), data archive (including drafts and
-  scheduled posts), email notification
+  (reactivates on sign-in within 30 days), data archive (including drafts,
+  scheduled posts, polls, media metadata and bookmark folders), email notification
   settings (activity and new-message digests, sent while you're away), sessions
   list with revoke, account access history (each sign-in
   with its app and address), two-factor sign-in with an
@@ -70,7 +70,8 @@ copy during setup, and it stays on that machine.
 - A public JSON API under `/api/v1` with personal tokens (`/account/api`,
   read or read and write), including chunked video uploads with progress and
   retry support; `/api` documents it. Pending uploads expire after one hour and
-  are lost if the server restarts.
+  are lost if the server restarts. Changing or resetting a password revokes all
+  of that account's API tokens.
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges (blue, gold organisation, grey government organisation or official),
   translator globes (blue translator, gold translator moderator, yellow approver),

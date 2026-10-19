@@ -5,7 +5,7 @@
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
-import { MediaError, attachMedia } from "./media";
+import { MediaError, attachMedia, mediaUrl, posterUrl, type MediaRow } from "./media";
 import { fetchPreview, linksIn, previewable } from "./links";
 import { lookupRemoteUser } from "./federation-sync";
 import { mentionHandles } from "./mentions";
@@ -63,13 +63,40 @@ const quoteOf = (request: Vars) => {
 	return id;
 };
 
-function item(row: any) {
+function mediaIdsOf(request: Vars | null): string[] {
+	return [request, ...(Array.isArray(request?.thread_tweets) ? request.thread_tweets.slice(0, 25) : [])]
+		.flatMap((part) => Array.isArray(part?.media_ids) ? part.media_ids.slice(0, 4).filter(isId) : []);
+}
+
+// Unsent posts use ApiImage/ApiVideo/ApiGif, not the published tweet's legacy
+// media entity. The client matches media_key's id back to each thread item's
+// media_ids when restoring its composer uploads.
+function unsentMedia(m: MediaRow) {
+	const image = { original_img_width: m.width, original_img_height: m.height, ...(m.alt_text ? { alt_text: m.alt_text } : {}) };
+	const url = mediaUrl(m.id, m.mime);
+	const video = m.kind === "video";
+	const gif = !video && m.mime === "image/gif";
+	return {
+		media_key: `${video ? "7" : gif ? "16" : "3"}_${m.id}`,
+		...(m.sensitive_warning?.length ? { sensitive_media_warning: {
+			adult_content: m.sensitive_warning.includes("adult_content"), graphic_violence: m.sensitive_warning.includes("graphic_violence"), other: m.sensitive_warning.includes("other"),
+		} } : {}),
+		media_info: video ? {
+			__typename: "ApiVideo", ...image, original_img_url: posterUrl(m.id), duration_millis: m.duration_ms ?? 0,
+			variants: [{ content_type: "video/mp4", bit_rate: Math.round(m.size * 8 / Math.max(1, (m.duration_ms ?? 1000) / 1000)), url }],
+		} : gif ? {
+			__typename: "ApiGif", ...image, original_img_url: url, variants: [{ content_type: "image/gif", url }],
+		} : { __typename: "ApiImage", ...image, original_img_url: url },
+	};
+}
+
+function item(row: any, media: Map<string, ReturnType<typeof unsentMedia>>) {
 	const request = row.request as Vars;
 	return {
 		rest_id: row.id,
 		...(row.kind === "scheduled" ? { scheduling_info: { execute_at: Math.floor(new Date(row.execute_at).getTime() / 1000), state: "Scheduled" } } : {}),
 		tweet_create_request: { ...request, type: "PostTweetRequest" },
-		media_entities: [],
+		media_entities: [...new Set(mediaIdsOf(request))].flatMap((id) => media.has(id) ? [media.get(id)!] : []),
 	};
 }
 
@@ -84,14 +111,14 @@ function executeAt(vars: Vars): Date {
 	return at;
 }
 
-async function check(userId: string, request: Vars, kind: "scheduled" | "draft") {
-	const [author] = await sql`select status, deactivated_at from users where id = ${userId}::bigint`;
+async function check(userId: string, request: Vars, kind: "scheduled" | "draft", db: typeof sql = sql, moderate = true) {
+	const [author] = await db`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if ((author?.status !== "active" && author?.status !== "limited") || author?.deactivated_at) throw new PostError("Your account can't post right now.", 326);
 	const usedMedia = new Set<string>();
 	for (const part of parts(request)) {
 		if (kind === "scheduled" && !part.status.trim() && !part.media_ids.length) throw new PostError("Your post is empty.", 170);
-		await checkLength(userId, part.status);
-		await refuseHate(userId, part.status);
+		await checkLength(userId, part.status.trim(), db);
+		if (moderate) await refuseHate(userId, part.status.trim());
 		quoteOf(part);
 		for (const id of part.media_ids) {
 			if (kind === "scheduled" && usedMedia.has(id)) throw new PostError("An attachment can only be used once in a thread.", 186);
@@ -99,7 +126,7 @@ async function check(userId: string, request: Vars, kind: "scheduled" | "draft")
 		}
 	}
 	if (kind === "scheduled" && usedMedia.size) {
-		const media = await sql`select id::text, kind from media where id = any(${sql.array([...usedMedia], "INT8")})
+		const media = await db`select id::text, kind from media where id = any(${sql.array([...usedMedia], "INT8")})
 			and user_id = ${userId}::bigint and post_id is null and state = 'ready'`;
 		if (media.length !== usedMedia.size) throw new PostError("Attachments must be your own unused, finished uploads.", 186);
 		const videos = new Set(media.filter((m: any) => m.kind === "video").map((m: any) => m.id));
@@ -174,7 +201,17 @@ async function remove(v: Viewer, idsToDelete: unknown[], kind: "scheduled" | "dr
 async function list(v: Viewer, kind: "scheduled" | "draft") {
 	const rows = await sql`select id::text, kind, execute_at, request from scheduled_posts where user_id = ${v.id}::bigint and kind = ${kind}
 		order by ${kind === "scheduled" ? sql`execute_at asc` : sql`created_at desc`} limit 100`;
-	return rows.map(item);
+	const idsToLoad = [...new Set(rows.flatMap((row: any) => mediaIdsOf(row.request)))];
+	const media = new Map<string, ReturnType<typeof unsentMedia>>();
+	if (idsToLoad.length) {
+		// A saved request can contain stale or forged ids. Never expose another
+		// account's upload metadata, published attachments, or unfinished files.
+		const uploads = await sql`select id::text, kind, mime, size, width, height, duration_ms, alt_text, sensitive_warning
+			from media where user_id = ${v.id}::bigint and id = any(${sql.array(idsToLoad, "INT8")})
+			and post_id is null and not detached and state = 'ready'`;
+		for (const upload of uploads) media.set(upload.id, unsentMedia(upload as MediaRow));
+	}
+	return rows.map((row: any) => item(row, media));
 }
 
 export const scheduledHandlers = {
@@ -192,7 +229,7 @@ export const scheduledHandlers = {
 // Claim and finish one schedule in the same transaction. A worker/process crash
 // rolls back both the posts and its queue claim; another worker can retry it.
 export async function runDue(lookupMention: (handle: string) => Promise<unknown> = lookupRemoteUser): Promise<number> {
-	const candidates = await sql`select id::text, request from scheduled_posts where kind = 'scheduled' and execute_at <= now()
+	const candidates = await sql`select id::text, user_id::text, request from scheduled_posts where kind = 'scheduled' and execute_at <= now()
 		order by execute_at, id limit 20`;
 	// Resolve at most 20 unknown remote handles once for the whole batch, with
 	// the upstream best-effort timeout. No publication or queue locks exist yet.
@@ -209,15 +246,27 @@ export async function runDue(lookupMention: (handle: string) => Promise<unknown>
 	}
 	let handled = 0;
 	for (const candidate of candidates) {
+		// Safety actions must commit independently, before any queue/publication
+		// connection is reserved. This also works with a one-connection pool.
+		let preflight: { request: Vars } | { error: unknown };
+		try {
+			const request = cleanRequest(candidate.request);
+			await check(candidate.user_id, request, "scheduled");
+			preflight = { request };
+		} catch (error) {
+			preflight = { error };
+		}
 		const result = await sql.begin(async (tx) => {
 			const [row] = await tx`select id::text, user_id::text, request, attempts from scheduled_posts
-				where id = ${candidate.id}::bigint and kind = 'scheduled' and execute_at <= now() for update skip locked`;
+				where id = ${candidate.id}::bigint and user_id = ${candidate.user_id}::bigint and kind = 'scheduled' and execute_at <= now()
+					and request = ${JSON.stringify(candidate.request)}::text::jsonb for update skip locked`;
 			if (!row) return undefined;
 			try {
-				const request = cleanRequest(row.request);
-				// Safety strikes deliberately use their normal committed connection:
-				// rejecting a publication must never undo its moderation action.
-				await check(row.user_id, request, "scheduled");
+				if ("error" in preflight) throw preflight.error;
+				const request = preflight.request;
+				// Recheck mutable account/upload state on this transaction. The exact
+				// request snapshot (and trimmed text) already passed static moderation.
+				await check(row.user_id, request, "scheduled", tx, false);
 				await tx.savepoint(async (publication) => {
 					let replyTo = request.in_reply_to_status_id;
 					for (const part of parts(request)) {
