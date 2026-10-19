@@ -37,6 +37,9 @@ async function account(side: typeof A, name: string) {
 			(await fetch(`${side.origin}/i/api/graphql/q/${op}?variables=${encodeURIComponent(JSON.stringify(variables))}`, { headers })).json(),
 		form: (path: string, body: Record<string, string>) => fetch(`${side.origin}/i/api${path}`, { method: "POST", headers, body: new URLSearchParams(body) }),
 		raw: (path: string) => fetch(`${side.origin}${path}`, { headers }),
+		// a page form, like Settings > Other instances
+		page: (path: string, body: Record<string, string>) =>
+			fetch(`${side.origin}${path}`, { method: "POST", headers: { cookie: headers.cookie }, body: new URLSearchParams({ csrf: headers["x-csrf-token"], ...body }), redirect: "manual" }),
 	};
 }
 
@@ -369,6 +372,53 @@ try {
 		const seen = JSON.parse(firstProbe.stdout.toString().trim().split("\n").pop() || "{}");
 		check("a list that swaps the home's key doesn't replace the pinned one", !!pinnedOnB?.key && seen.key === pinnedOnB.key, { seen, pinned: pinnedOnB?.key, err: firstProbe.stderr.toString().slice(0, 300) });
 		check("and shows up as a key change", seen.pending === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", seen);
+	}
+
+	// what people see of other instances, and hiding them (in a block: its names are its own)
+	{
+		const tweet = await bob.get("TweetResultByRestId", { tweetId: mirror });
+		const source = tweet.data?.tweetResult?.result?.legacy?.source as string | undefined;
+		check("a copy's source line names its instance", !!source?.endsWith(` - ${idOf(A.origin)}`), source);
+		const globe = `/public/globe.svg?from=${encodeURIComponent(idOf(A.origin))}`;
+		check("accounts from other instances wear the globe", JSON.stringify(found).includes(globe));
+		const card = (await (await bob.raw(`/i/api/xitter/instance?id=${encodeURIComponent(idOf(A.origin))}`)).json()) as any;
+		check("the globe's card describes the instance", card.id === idOf(A.origin) && card.accounts >= 1 && card.rules?.endsWith("/rules") && card.hidden === false, card);
+		const unknownCard = await bob.raw("/i/api/xitter/instance?id=nowhere.invalid");
+		check("but only instances this one knows", unknownCard.status === 404, unknownCard.status);
+
+		const quiet = await account(A, `fq${stamp}`);
+		made.push({ side: A, id: quiet.id });
+		const word = `quietword${stamp}`;
+		const quietPost = (await quiet.gql("CreateTweet", { tweet_text: `${word} from a` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+		const quietMirror = await until(async () => (await B.db`select local_id::text from federated_objects where instance = ${idOf(A.origin)} and kind = 'post' and remote_id = ${quietPost}::bigint`)[0]?.local_id as string);
+		const quietOnB = await until(async () => (await B.db`select id::text from users where instance = ${idOf(A.origin)} and remote_id = ${quiet.id}::bigint`)[0]?.id as string);
+		check("B keeps a copy of someone bob doesn't follow", !!quietMirror && !!quietOnB);
+		const searchFor = async (q: string) => JSON.stringify(await bob.get("SearchTimeline", { rawQuery: q, product: "Latest", count: 20 })).includes(quietMirror ?? "-");
+		check("bob finds their post in search", await searchFor(word));
+		const hide = (body: Record<string, string>) => bob.page("/account/instances", body);
+		await hide({ instance: idOf(A.origin), hide: "1" });
+		check("hiding A takes it out of bob's search", !(await searchFor(word)));
+		check("but a search naming the full handle still finds it", await searchFor(`from:${quiet.name}@${idOf(A.origin)} ${word}`));
+		check("accounts bob follows on A stay", JSON.stringify(await bob.get("SearchTimeline", { rawQuery: `hello from a ${stamp}`, product: "Latest", count: 20 })).includes(mirror ?? "-"));
+		const hiddenCard = (await (await bob.raw(`/i/api/xitter/instance?id=${encodeURIComponent(idOf(A.origin))}`)).json()) as any;
+		check("and the card says A is hidden", hiddenCard.hidden === true, hiddenCard.hidden);
+
+		const bobPost = (await bob.gql("CreateTweet", { tweet_text: `hello from b ${stamp}` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+		const bobPostOnA = await until(async () => (await A.db`select local_id::text from federated_objects where instance = ${idOf(B.origin)} and kind = 'post' and remote_id = ${bobPost}::bigint`)[0]?.local_id as string, 60);
+		await quiet.gql("FavoriteTweet", { tweet_id: bobPostOnA });
+		const liked = await until(async () => (await B.db`select 1 from likes where user_id = ${quietOnB ?? "0"}::bigint and post_id = ${bobPost}::bigint`).length > 0, 60);
+		const notified = async () => JSON.stringify(await bob.get("NotificationsTimeline", { timeline_type: "All", count: 40 })).includes(quietOnB ?? "-");
+		check("bob is notified of a like from a hidden instance", !!liked && (await notified()));
+		await hide({ notifications: "1" });
+		check("until he mutes notifications from what he hid", !(await notified()));
+		await hide({ notifications: "0" });
+		await hide({ instance: idOf(A.origin), hide: "0" });
+		check("showing A again brings the post back", await searchFor(word));
+
+		const remoteList = await adminApi(B, bCookies, "users", { q: quiet.name, home: "remote" });
+		const localList = await adminApi(B, bCookies, "users", { q: quiet.name, home: "local" });
+		check("the admin list of other instances' accounts has them", remoteList.body.users?.some((u: any) => u.id === quietOnB), remoteList.body.error);
+		check("and the list of this instance's doesn't", localList.status === 200 && !localList.body.users?.some((u: any) => u.id === quietOnB), localList.body.error);
 	}
 
 } finally {
