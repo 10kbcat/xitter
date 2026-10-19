@@ -118,13 +118,16 @@ export async function login(screenName: string, password: string): Promise<{ tok
 	return made ? { token, csrf, userId: u.id } : undefined;
 }
 
-// a session for an account whose password and second factor were both checked
-export async function startSession(userId: string): Promise<{ token: string; csrf: string; userId: string }> {
+export type Session = { token: string; csrf: string; userId: string };
+
+// Pass the existing transaction when consuming a second-factor challenge, so
+// password resets cannot slip between the proof and the session insertion.
+export async function startSession(userId: string, executor: typeof sql = sql): Promise<Session> {
 	const token = randomHex(20);
 	const csrf = randomHex(32);
-	const made = await sql`insert into sessions (token, user_id, csrf) select ${token}, id, ${csrf} from users where id = ${userId}::bigint and status <> 'suspended' returning token`;
+	const made = await executor`insert into sessions (token, user_id, csrf) select ${token}, id, ${csrf} from users where id = ${userId}::bigint and status <> 'suspended' returning token`;
 	if (!made.length) throw new Error("account suspended");
-	await sql`update users set last_seen_at = now() where id = ${userId}::bigint`;
+	await executor`update users set last_seen_at = now() where id = ${userId}::bigint`;
 	return { token, csrf, userId };
 }
 

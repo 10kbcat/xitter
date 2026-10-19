@@ -6,7 +6,7 @@ import { sql } from "./db";
 import { hit } from "./ratelimit";
 import { settings } from "./settings";
 import { newSecret, otpauthUrl, verifyCode } from "./totp";
-import type { Viewer } from "./auth";
+import { startSession, type Session, type Viewer } from "./auth";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -40,11 +40,20 @@ export async function startChallenge(screenName: string, password: string): Prom
 	if (!(await Bun.password.verify(password, u.password_hash).catch(() => false))) return undefined;
 	const token = crypto.randomUUID();
 	await sql`delete from login_challenges where created_at < now() - interval '15 minutes'`;
-	await sql`insert into login_challenges (token, user_id) values (${token}::uuid, ${u.id}::bigint)`;
-	return token;
+	const made = await sql.begin(async (tx) => {
+		// The password check was asynchronous. Serialize challenge creation with
+		// credential changes, then verify that the checked hash is still current.
+		const [current] = await tx`select id from users where id = ${u.id}::bigint
+			and password_hash = ${u.password_hash} and totp_enabled and instance is null
+			and (status <> 'suspended' or deactivated_at > now() - interval '30 days') for update`;
+		if (!current) return false;
+		await tx`insert into login_challenges (token, user_id) values (${token}::uuid, ${u.id}::bigint)`;
+		return true;
+	});
+	return made ? token : undefined;
 }
 
-export async function answerChallenge(token: string, code: string): Promise<{ userId?: string; error?: string; unknown?: boolean }> {
+export async function answerChallenge(token: string, code: string): Promise<{ userId?: string; session?: Session; error?: string; unknown?: boolean }> {
 	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) return { unknown: true };
 	// Reserve an attempt before checking the code, including parallel guesses.
 	const [c] = await sql`update login_challenges set attempts = attempts + 1
@@ -59,12 +68,20 @@ export async function answerChallenge(token: string, code: string): Promise<{ us
 	if (!(await codeAccepted(c.user_id, code))) {
 		return { error: "That code isn't right. Check your authenticator app and try again." };
 	}
-	const used = await sql`delete from login_challenges where token = ${token}::uuid and created_at > now() - interval '15 minutes' returning token`;
-	if (!used.length) return { unknown: true };
-	const [u] = await sql`select status, deactivated_at > now() - interval '30 days' as returning from users where id = ${c.user_id}::bigint`;
-	if (u?.returning) await sql`update users set status = 'active', deactivated_at = null where id = ${c.user_id}::bigint`;
-	else if (!u || u.status === "suspended") return { error: "This account is suspended." };
-	return { userId: c.user_id };
+	return sql.begin(async (tx) => {
+		// Always lock the account before the challenge, matching password changes.
+		// They revoke challenges and sessions under this same account lock.
+		const [u] = await tx`select status, totp_enabled, deactivated_at,
+			deactivated_at > now() - interval '30 days' as returning
+			from users where id = ${c.user_id}::bigint for update`;
+		const used = await tx`delete from login_challenges where token = ${token}::uuid
+			and created_at > now() - interval '15 minutes' returning token`;
+		if (!used.length || !u?.totp_enabled) return { unknown: true };
+		if (u.returning) await tx`update users set status = 'active', deactivated_at = null where id = ${c.user_id}::bigint`;
+		else if (u.status === "suspended" || u.deactivated_at) return { error: "This account is suspended." };
+		const session = await startSession(c.user_id, tx);
+		return { userId: c.user_id, session };
+	});
 }
 
 const page = (req: Request, viewer: Viewer, body: string) => accountPage({ req, viewer, title: "Two-factor authentication", body });

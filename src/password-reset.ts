@@ -13,13 +13,20 @@ const hash = (token: string) => createHash("sha256").update(token).digest("hex")
 export async function requestReset(usernameOrEmail: string): Promise<void> {
 	const who = usernameOrEmail.trim().replace(/^@/, "");
 	if (!who || !mailEnabled()) return;
-	const [u] = await sql`select id::text, screen_name, email from users
-		where (lower(screen_name) = lower(${who}) or lower(email) = lower(${who})) and email is not null and status <> 'suspended' and instance is null`;
-	if (!u) return;
-	const [recent] = await sql`select 1 from password_resets where user_id = ${u.id}::bigint and created_at > now() - interval '2 minutes'`;
-	if (recent) return;
 	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
-	await sql`insert into password_resets (token_hash, user_id) values (${hash(token)}, ${u.id}::bigint)`;
+	const u = await sql.begin(async (tx) => {
+		// Lock before reading the recipient and issuing the token. Changing the
+		// verified email uses the same lock and invalidates previously issued links.
+		const [account] = await tx`select id::text, screen_name, email from users
+			where (lower(screen_name) = lower(${who}) or lower(email) = lower(${who}))
+			and email is not null and status <> 'suspended' and instance is null for update`;
+		if (!account) return undefined;
+		const [recent] = await tx`select 1 from password_resets where user_id = ${account.id}::bigint and created_at > now() - interval '2 minutes'`;
+		if (recent) return undefined;
+		await tx`insert into password_resets (token_hash, user_id) values (${hash(token)}, ${account.id}::bigint)`;
+		return account;
+	});
+	if (!u) return;
 	const name = settings().instance_name;
 	await sendMail(
 		u.email,
@@ -73,6 +80,8 @@ export async function resetRoute(req: Request, url: URL): Promise<Response> {
 		// Older links must not be able to replace the newly chosen password either.
 		await tx`update password_resets set used = true where user_id = ${row.user_id}::bigint and not used`;
 		await tx`delete from sessions where user_id = ${row.user_id}::bigint`;
+		await tx`delete from login_challenges where user_id = ${row.user_id}::bigint`;
+		await tx`update email_confirmations set used = true where user_id = ${row.user_id}::bigint and not used`;
 		return true;
 	});
 	if (!changed) return page(req, `<h1>Link expired</h1><p>This reset link is invalid or has been used. <a href="/">Back to sign in</a>, then ask for a new one.</p>`, 410);

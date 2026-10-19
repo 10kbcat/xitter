@@ -490,8 +490,20 @@ const ACTIONS: Record<string, Action> = {
 			const id = idOf(b.id);
 			await guard(a, id, true);
 			const password = randomPassword();
-			await sql`update users set password_hash = ${await Bun.password.hash(password)} where id = ${id}::bigint`;
-			await sql`delete from sessions where user_id = ${id}::bigint`;
+			const hash = await Bun.password.hash(password);
+			await sql.begin(async (tx) => {
+				// Match password changes and sign-ins: lock the account first so no
+				// in-flight sign-in or recovery issuance survives credential revocation.
+				const [target] = await tx`select id, instance from users where id = ${id}::bigint for update`;
+				if (!target) throw new AdminError("No such account.", 404);
+				await guard(a, id, true);
+				if (target.instance) throw new AdminError(`That account lives on ${target.instance}, which manages it. Here you can only moderate it.`, 403);
+				await tx`update users set password_hash = ${hash} where id = ${id}::bigint`;
+				await tx`delete from sessions where user_id = ${id}::bigint`;
+				await tx`update password_resets set used = true where user_id = ${id}::bigint and not used`;
+				await tx`delete from login_challenges where user_id = ${id}::bigint`;
+				await tx`update email_confirmations set used = true where user_id = ${id}::bigint and not used`;
+			});
 			await audit(a, "reset_password", id);
 			return { password };
 		},
