@@ -3,6 +3,7 @@
 // Resend. With both set, Resend is the fallback for a send SMTP refused.
 // Every attempt is kept in mail_log (Admin > Settings > Email), including the
 // ones skipped for want of a transport, so it shows whether mail would have gone out.
+import { type PeerCertificate, checkServerIdentity } from "node:tls";
 import nodemailer from "nodemailer";
 import { sql } from "./db";
 import { newId } from "./ids";
@@ -17,7 +18,9 @@ export const mailFrom = () => process.env.MAIL_FROM ?? `${JSON.stringify(setting
 export const mailEnabled = () => !!(SMTP_URL || KEY);
 
 // SMTP_TLS_NAME: the name on the server's certificate when SMTP_URL reaches it
-// by another one (a container name inside Docker)
+// by another one (a container name inside Docker); the certificate is still
+// checked, against that name instead of the host
+const TLS_NAME = process.env.SMTP_TLS_NAME;
 const smtp = SMTP_URL
 	? nodemailer.createTransport(SMTP_URL, {
 			pool: true,
@@ -25,7 +28,7 @@ const smtp = SMTP_URL
 			connectionTimeout: 15_000,
 			greetingTimeout: 15_000,
 			socketTimeout: 30_000,
-			...(process.env.SMTP_TLS_NAME ? { tls: { servername: process.env.SMTP_TLS_NAME } } : {}),
+			...(TLS_NAME ? { tls: { servername: TLS_NAME, checkServerIdentity: (_host: string, cert: PeerCertificate) => checkServerIdentity(TLS_NAME, cert) } } : {}),
 		})
 	: undefined;
 
