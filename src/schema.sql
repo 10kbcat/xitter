@@ -12,6 +12,10 @@ create table if not exists users (
 	created_at timestamptz not null default now()
 );
 create unique index if not exists users_screen_name_key on users (lower(screen_name));
+create extension if not exists pg_trgm;
+create index if not exists users_handle_trgm_idx on users using gin (screen_name gin_trgm_ops);
+create index if not exists users_name_trgm_idx on users using gin (name gin_trgm_ops);
+create index if not exists users_bio_trgm_idx on users using gin (bio gin_trgm_ops);
 
 create table if not exists sessions (
 	token text primary key,
@@ -37,6 +41,9 @@ alter table posts add column if not exists reply_to_user_id bigint;
 create index if not exists posts_user_idx on posts (user_id, id desc);
 -- trends read the last days' posts; without it every refresh read the whole table
 create index if not exists posts_created_idx on posts (created_at);
+-- The search box uses ILIKE %term% and regex hashtag matches. Trigram GIN
+-- supports both without changing the search language or result ordering.
+create index if not exists posts_text_trgm_idx on posts using gin (text gin_trgm_ops);
 -- replies to an account's posts, newest first (notifications.ts)
 create index if not exists posts_reply_user_idx on posts (reply_to_user_id, created_at) where reply_to_user_id is not null;
 

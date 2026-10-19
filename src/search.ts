@@ -1,6 +1,6 @@
 // Search: the query language of X's search box and advanced search form,
-// turned into SQL over posts and users. No index beyond Postgres's own; fine
-// for an instance of friends, the place to add one when that stops being true.
+// turned into SQL over posts and users. schema.sql installs trigram indexes
+// for substring and hashtag matches; short terms can still require a scan.
 //
 //   words, "exact phrase"            all must appear (case-insensitive)
 //   -word, -"phrase"                 must not appear
