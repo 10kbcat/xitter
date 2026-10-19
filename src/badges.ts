@@ -44,7 +44,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
 	function shorten(box){
-		var spans=box.querySelectorAll("span");
+		var spans=[box].concat([].slice.call(box.querySelectorAll("span, a")));
 		for(var i=0;i<spans.length;i++){
 			var t=spans[i].firstChild;
 			if(!t||t.nodeType!==3||spans[i].childNodes.length!==1)continue;
@@ -96,6 +96,8 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		});
 		// the accounts under the search box carry no badge, only the handle
 		document.querySelectorAll('[data-testid="TypeaheadUser"]').forEach(shorten);
+		// "Replying to @name@example.org" on posts: links to accounts from other instances
+		document.querySelectorAll('article[data-testid="tweet"] a[href*="@"]').forEach(shorten);
 		if(queue.length)load();
 	}
 	function load(){
