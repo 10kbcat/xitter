@@ -91,6 +91,10 @@ const randomPassword = () => {
 	return [...crypto.getRandomValues(new Uint8Array(14))].map((b) => alphabet[b % alphabet.length]).join("");
 };
 
+// the Users and Organisations lists: "local" is this instance's own accounts,
+// "remote" the copies of accounts from other instances, anything else both
+const homeFilter = (home: unknown) => (home === "local" ? sql`and u.instance is null` : home === "remote" ? sql`and u.instance is not null` : sql``);
+
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 const userListCols = sql`u.id::text as id, u.screen_name, u.name, u.avatar_url, u.verified_type, u.translator, u.flag, u.status, u.role,
@@ -353,9 +357,10 @@ const ACTIONS: Record<string, Action> = {
 			const q = String(b.q ?? "").trim().replace(/^@/, "");
 			const status = ["active", "restricted", "limited", "suspended"].includes(b.status) ? b.status : null;
 			const staff = !!b.staff;
+			const home = homeFilter(b.home);
 			const match = sql`(${q} = '' or u.screen_name ilike ${like(q)} or u.name ilike ${like(q)})
 					and (${status}::text is null or u.status = ${status})
-					and (not ${staff} or u.role is not null)`;
+					and (not ${staff} or u.role is not null) ${home}`;
 			const rows = await sql`select ${userListCols} from users u where ${match}
 				order by u.created_at desc, u.id desc limit ${Math.min(Math.max(Number(b.limit) || 50, 1), 500)} offset ${Math.max(Number(b.offset) || 0, 0)}`;
 			const [{ total }] = await sql`select count(*)::int as total from users u where ${match}`;
@@ -546,8 +551,8 @@ const ACTIONS: Record<string, Action> = {
 
 	orgs: {
 		role: "support",
-		run: async () => ({
-			orgs: await sql`select ${userListCols} from users u where u.verified_type in ('business', 'government') or exists (select 1 from affiliations af where af.org_id = u.id) order by u.name`,
+		run: async (_a, b) => ({
+			orgs: await sql`select ${userListCols} from users u where (u.verified_type in ('business', 'government') or exists (select 1 from affiliations af where af.org_id = u.id)) ${homeFilter(b.home)} order by u.name`,
 		}),
 	},
 
