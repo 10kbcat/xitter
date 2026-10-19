@@ -22,6 +22,13 @@
 			"source_url": "https://github.com/Xittered/xitter",
 			"public_key": "FDWBt_uXkSyKKyM2J_9bYLfryG5N0bHFseMprag-Qv8",
 			"state": "active"
+		},
+		{
+			"id": "xt.iambrdn.com",
+			"name": "xt.brdn",
+			"source_url": "https://github.com/braidenhxyz/xitter-compose",
+			"public_key": "eiI4EMp0bupFbJ7EKy5A_MIo_yvhRMbljYSnzozwXIY",
+			"state": "active"
 		}
 	]
 }
