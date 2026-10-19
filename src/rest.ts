@@ -9,7 +9,7 @@ import { accountsRoute } from "./accounts";
 import type { Viewer } from "./auth";
 import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKeyword } from "./blocks";
 import { sql } from "./db";
-import { isFlag } from "./flags";
+import { flagValue, unknownFlag } from "./flags";
 import { isId } from "./ids";
 import { isVerified, legacyUser } from "./model";
 import { markSeen } from "./notifications";
@@ -101,8 +101,8 @@ async function profileRoute(path: string, viewer: Viewer, req: Request): Promise
 		return changedUser(viewer);
 	}
 	if (m[1] === "update_flag") {
-		const flag = f.flag || null;
-		if (flag !== null && !isFlag(flag)) return profileError("Unknown flag.");
+		if (unknownFlag(f.flag)) return profileError("Unknown flag.");
+		const flag = flagValue(f.flag);
 		await sql`update users set flag = ${flag} where id = ${viewer.id}::bigint`;
 		return changedUser(viewer);
 	}

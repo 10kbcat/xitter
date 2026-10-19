@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } fr
 import { join } from "node:path";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
-import { isFlag } from "./flags";
+import { flagValue } from "./flags";
 import { badgesOf } from "./users";
 import { FederationError, INSTANCE_ID, type Incoming, isBlocked, isPeer, peers, signedAnswer, signedFetch, signedRawAnswer } from "./federation";
 import { newId } from "./ids";
@@ -289,7 +289,7 @@ export async function applyUser(instance: string, u: any): Promise<string | unde
 	const looks = {
 		verified_type: pick(u.verified_type, ["blue", "business", "government", "government_individual"]),
 		translator: pick(u.translator, ["translator", "moderator", "approver"]),
-		flag: isFlag(u.flag) ? u.flag : null,
+		flag: flagValue(u.flag),
 		parody_label: pick(u.parody_label, ["Parody", "Commentary", "Fan"]) ?? "None",
 		remote_badges: JSON.stringify(badges),
 		decoration: JSON.stringify(parseDecoration(u.decoration)),
