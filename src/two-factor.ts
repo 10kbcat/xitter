@@ -17,16 +17,17 @@ async function state(userId: string) {
 
 // a six-digit app code, or one of the one-time backup codes (spent when used)
 export async function codeAccepted(userId: string, input: string): Promise<boolean> {
-	const [u] = await sql`select totp_secret, totp_backup from users where id = ${userId}::bigint and totp_enabled`;
+	const [u] = await sql`select totp_secret from users where id = ${userId}::bigint and totp_enabled`;
 	if (!u?.totp_secret) return false;
 	if (verifyCode(u.totp_secret, input)) return true;
 	const clean = input.replace(/[\s-]/g, "").toLowerCase();
-	const hashes: string[] = u.totp_backup ?? [];
-	const hit = hashes.indexOf(sha(clean));
-	if (!/^\d{6}$/.test(clean) || hit < 0) return false;
-	hashes.splice(hit, 1);
-	await sql`update users set totp_backup = ${JSON.stringify(hashes)}::text::jsonb where id = ${userId}::bigint`;
-	return true;
+	if (!/^\d{6}$/.test(clean)) return false;
+	const hash = sha(clean);
+	// Remove only this code, and only if it is still present. Replacing a
+	// previously read array lets parallel requests reuse a code or restore one.
+	const used = await sql`update users set totp_backup = totp_backup - ${hash}
+		where id = ${userId}::bigint and totp_enabled and totp_backup ? ${hash} returning id`;
+	return used.length > 0;
 }
 
 // Sign-in with the right password but a second factor still to come: a
@@ -44,20 +45,22 @@ export async function startChallenge(screenName: string, password: string): Prom
 }
 
 export async function answerChallenge(token: string, code: string): Promise<{ userId?: string; error?: string; unknown?: boolean }> {
-	if (!/^[0-9a-f-]{36}$/i.test(token)) return { unknown: true };
-	const [c] = await sql`select user_id::text, attempts from login_challenges where token = ${token}::uuid and created_at > now() - interval '15 minutes'`;
-	if (!c) return { unknown: true };
-	if (c.attempts >= 5) {
-		await sql`delete from login_challenges where token = ${token}::uuid`;
-		return { error: "Too many wrong codes. Start signing in again." };
+	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) return { unknown: true };
+	// Reserve an attempt before checking the code, including parallel guesses.
+	const [c] = await sql`update login_challenges set attempts = attempts + 1
+		where token = ${token}::uuid and created_at > now() - interval '15 minutes' and attempts < 5
+		returning user_id::text`;
+	if (!c) {
+		const exhausted = await sql`select 1 from login_challenges where token = ${token}::uuid
+			and created_at > now() - interval '15 minutes' and attempts >= 5`;
+		return exhausted.length ? { error: "Too many wrong codes. Start signing in again." } : { unknown: true };
 	}
-	// counted before the code is checked, so parallel guesses can't all slip in
 	if (!hit("code", c.user_id).ok) return { error: "Too many codes tried for this account. Wait an hour." };
 	if (!(await codeAccepted(c.user_id, code))) {
-		await sql`update login_challenges set attempts = attempts + 1 where token = ${token}::uuid`;
 		return { error: "That code isn't right. Check your authenticator app and try again." };
 	}
-	await sql`delete from login_challenges where token = ${token}::uuid`;
+	const used = await sql`delete from login_challenges where token = ${token}::uuid and created_at > now() - interval '15 minutes' returning token`;
+	if (!used.length) return { unknown: true };
 	const [u] = await sql`select status, deactivated_at > now() - interval '30 days' as returning from users where id = ${c.user_id}::bigint`;
 	if (u?.returning) await sql`update users set status = 'active', deactivated_at = null where id = ${c.user_id}::bigint`;
 	else if (!u || u.status === "suspended") return { error: "This account is suspended." };
