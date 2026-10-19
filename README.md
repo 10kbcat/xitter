@@ -157,18 +157,10 @@ image. The client is downloaded into its volume on the first start.
 
 ```sh
 docker/env.sh                  # writes .env with fresh secrets; edit PUBLIC_ORIGIN, HOST_PORT, mail keys there
-docker compose pull            # the published image; or skip this and use `up -d --build` to build here
-docker compose up -d
+docker compose up -d --build
 docker compose exec app bun scripts/create-user.ts <name> <password> "<display name>"
 docker compose exec app bun scripts/make-admin.ts <name>
 ```
-
-The image is published to `ghcr.io/xittered/xitter` for amd64 and arm64:
-`latest` follows `main`, and release tags (`v1.2.3`) publish `1.2.3` and
-`1.2`. To update, run `docker compose pull && docker compose up -d`. Set
-`XITTER_VERSION` in `.env` to stay on a release, or `XITTER_IMAGE` to use a
-fork's image. A modified checkout should be built with `--build`, since the
-pulled image runs upstream's code.
 
 Add `--profile keybackup` to `up` to also run the Juicebox realm for chat
 passcode recovery (built from `deploy/juicebox`, with its own Postgres); its
