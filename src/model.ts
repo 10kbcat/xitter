@@ -346,6 +346,8 @@ export type PostRow = {
 	article?: ArticleEntity;
 	// the post this one quotes, when it still exists
 	quoted?: PostRow;
+	// links in the text to posts that have a page here
+	localLinks?: Map<string, string>;
 };
 
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
@@ -452,7 +454,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 	const allTags = hashtags(p.text);
 	const mentions = allMentions.filter((m: any) => m.indices[1] <= textLength);
 	const tags = allTags.filter((t: any) => t.indices[1] <= textLength);
-	const urls = linkEntities(shown, textLength);
+	const urls = linkEntities(shown, textLength, p.localLinks);
 	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
 	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
@@ -471,7 +473,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 		...(long ? { note_tweet: { is_expandable: true, note_tweet_results: { result: {
 			id: globalId("NoteTweet", p.id),
 			text: p.text,
-			entity_set: { hashtags: allTags, user_mentions: allMentions, urls: linkEntities(p.text), symbols: [] },
+			entity_set: { hashtags: allTags, user_mentions: allMentions, urls: linkEntities(p.text, undefined, p.localLinks), symbols: [] },
 		} } } } : {}),
 		cashtag_attachments: [],
 		core: { user_results: { result: userResult(p.author) } },
@@ -509,7 +511,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 						...(p.reply_user_id ? { in_reply_to_screen_name: p.reply_screen_name, in_reply_to_user_id_str: p.reply_user_id } : {}),
 					}
 				: {}),
-			is_quote_status: !!p.quote_id,
+			is_quote_status: !!p.quote_id || !!p.quoted,
 			...(p.quoted && quoteLink
 				? {
 						quoted_status_id_str: p.quoted.id,

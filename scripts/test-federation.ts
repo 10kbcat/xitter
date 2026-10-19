@@ -91,6 +91,13 @@ try {
 	const [threaded] = replyOnA ? await A.db`select reply_to_id::text, reply_to_user_id::text from posts where id = ${replyOnA}::bigint` : [];
 	check("A threads bob's reply under alice's post", threaded?.reply_to_id === postId && threaded?.reply_to_user_id === alice.id, threaded);
 
+	const linking = await bob.gql("CreateTweet", { tweet_text: `look ${A.origin}/${alice.name}/status/${postId} and ${A.origin}/${alice.name}` });
+	const linkingId = linking.data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	const shownLink = (await bob.get("TweetResultByRestId", { tweetId: linkingId ?? "0" })).data?.tweetResult?.result;
+	check("a link to a post on another instance shows its copy here as a quote", shownLink?.quoted_status_result?.result?.rest_id === mirror, shownLink?.quoted_status_result?.result?.rest_id);
+	const linkTargets = (shownLink?.legacy?.entities?.urls ?? []).map((u: any) => u.expanded_url);
+	check("and its links open the copies here", linkTargets.includes(`${B.origin}/${alice.name}@${idOf(A.origin)}/status/${mirror}`) && linkTargets.includes(`${B.origin}/${alice.name}@${idOf(A.origin)}`), linkTargets);
+
 	const mentionA = await alice.gql("CreateTweet", { tweet_text: `hey @${bob.name}@${idOf(B.origin)}, I'm @${alice.name} ${stamp}` });
 	const mentionId = mentionA.data?.create_tweet?.tweet_results?.result?.rest_id as string;
 	const mentionsHere = await A.db`select user_id::text from post_mentions where post_id = ${mentionId ?? "0"}::bigint order by user_id`;
@@ -99,7 +106,11 @@ try {
 	const fullEntity = entities.find((m: any) => m.id_str === bobOnA);
 	check("and its entity covers the whole handle", fullEntity?.screen_name === `${bob.name}@${idOf(B.origin)}` && fullEntity.indices[1] - fullEntity.indices[0] === `@${bob.name}@${idOf(B.origin)}`.length, entities);
 	const mentionOnB = await until(async () => (await B.db`select local_id::text from federated_objects where instance = ${idOf(A.origin)} and kind = 'post' and remote_id = ${mentionId ?? "0"}::bigint`)[0]?.local_id as string);
-	const mentionsThere = mentionOnB ? (await B.db`select user_id::text from post_mentions where post_id = ${mentionOnB}::bigint`).map((m: any) => m.user_id) : [];
+	const mentionsOf = async () => (mentionOnB ? (await B.db`select user_id::text from post_mentions where post_id = ${mentionOnB}::bigint`).map((m: any) => m.user_id as string) : []);
+	const mentionsThere = (await until(async () => {
+		const m = await mentionsOf();
+		return m.includes(bob.id) && m.includes(aliceOnB) ? m : undefined;
+	}, 10)) ?? (await mentionsOf());
 	check("on B it mentions bob himself and alice's copy", mentionsThere.includes(bob.id) && mentionsThere.includes(aliceOnB), mentionsThere);
 	const bobNotified = await until(async () => {
 		const n = await bob.get("NotificationsTimeline", { timeline_type: "Mentions", count: 20 });
@@ -256,10 +267,11 @@ try {
 	await A.db`insert into sessions (token, user_id, csrf) values (${meowToken}, ${meowId}::bigint, 'meowcsrf')`;
 	const meowCookies = `auth_token=${meowToken}; ct0=meowcsrf`;
 	const ask = (path: string, form: Record<string, string>) => fetch(`${A.origin}${path}`, { method: "POST", headers: { cookie: meowCookies }, body: new URLSearchParams(form), redirect: "manual" });
-	const page = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000)) })).text();
+	const firstCode = codeAt(secret, Math.floor(Date.now() / 30000));
+	const page = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: firstCode })).text();
 	const ticket = /name="ticket" value="([^"]+)"/.exec(page)?.[1]?.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 	check("meow gets a ticket after password and code", !!ticket, page.slice(0, 200));
-	const replay = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000)) })).text();
+	const replay = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: firstCode })).text();
 	check("the same code can't be used twice", !replay.includes('name="ticket"'));
 	const wrong = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "wrong", code: "000000" })).text();
 	check("a wrong password gets no ticket", !wrong.includes('name="ticket"'));
@@ -282,6 +294,18 @@ try {
 	const [bSession] = await B.db`select token, csrf from sessions where user_id = ${bAdmin.id}::bigint`;
 	const demote = await adminApi(B, `auth_token=${bSession.token}; ct0=${bSession.csrf}`, "setStatus", { id: superOnB?.id, status: "suspended" });
 	check("B's own admins can't act on the superadmin", demote.status === 403, demote.body);
+
+	if (process.env.FED_D_DB) {
+		const D = new SQL(process.env.FED_D_DB);
+		const paused = await until(async () => {
+			const e = (await D`select last_error from federation_peers where instance = ${idOf(A.origin)}`)[0]?.last_error ?? "";
+			return /paused/.test(e) ? e : undefined;
+		}, 60);
+		check("an instance over its hourly budget is paused", /paused/.test(paused ?? ""), paused);
+		const [{ cursor }] = await D`select cursor::text from federation_peers where instance = ${idOf(A.origin)}`;
+		const [{ head }] = await A.db`select max(seq)::text as head from federation_outbox`;
+		check("and it stops reading before the end, after the events it applied", BigInt(cursor) > 0n && BigInt(cursor) < BigInt(head), { cursor, head });
+	}
 
 	const sent = await (await ask("/federation/superadmin/emergency", { instance: "localhost:3043", action: "block", reason: "test emergency", password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000) + 1) })).text();
 	check("meow sends an emergency defederation", sent.includes("Sent."), sent.slice(0, 300));
@@ -320,32 +344,23 @@ try {
 		list.sequence += 1;
 		for (const i of list.instances) if (i.id === idOf(A.origin)) i.public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 		await Bun.write(forgedList, JSON.stringify(list));
-		const probe = () => {
-			const run = Bun.spawnSync(["bun", "-e", `import { refreshRegistry, keyFor, pendingKeyChange } from "./src/federation"; await refreshRegistry(); console.log(JSON.stringify({ key: await keyFor(${JSON.stringify(idOf(A.origin))}), pending: await pendingKeyChange(${JSON.stringify(idOf(A.origin))}) })); process.exit(0);`], {
+		const probe = (clear = false) => {
+			const run = Bun.spawnSync(["bun", "-e", `import { sql } from "./src/db"; import { refreshRegistry, keyFor, pendingKeyChange } from "./src/federation"; await refreshRegistry(); ${clear ? `await sql\`update federation_peers set key = null where instance = \${${JSON.stringify(idOf(A.origin))}}\`;` : ""} console.log(JSON.stringify({ key: await keyFor(${JSON.stringify(idOf(A.origin))}), pending: await pendingKeyChange(${JSON.stringify(idOf(A.origin))}) })); process.exit(0);`], {
 				env: { ...process.env, DATABASE_URL: process.env.FED_B_DB ?? "postgres://tiago@127.0.0.1:5432/fed_b", PUBLIC_ORIGIN: B.origin, FEDERATION_REGISTRY_URL: forgedList, FEDERATION_KEY_FILE: process.env.FED_B_KEY_FILE, FEDERATION_ALLOW_HTTP: "1", XITTER_TEST_SUPERADMINS: `meow@${idOf(A.origin)}` },
 			});
 			return { stdout: run.stdout, stderr: run.stderr };
 		};
 		const firstProbe = probe();
-		await B.db`update federation_peers set key = null where instance = ${idOf(A.origin)}`;
-		const fresh = JSON.parse(probe().stdout.toString().trim().split("\n").pop() || "{}");
+		const fresh = JSON.parse(probe(true).stdout.toString().trim().split("\n").pop() || "{}");
 		const [afterFresh] = await B.db`select key from federation_peers where instance = ${idOf(A.origin)}`;
 		await B.db`update federation_peers set key = ${pinnedOnB?.key ?? null} where instance = ${idOf(A.origin)}`;
 		await B.db`delete from federation_state where key = 'registry'`;
-		check("on first contact, a home key the list and the home disagree on is refused", !fresh.key && !afterFresh?.key, { fresh, stored: afterFresh?.key });
+		check("on first contact, a home key the list and the home disagree on is refused", !fresh.key && afterFresh?.key !== "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", { fresh, stored: afterFresh?.key });
 		const seen = JSON.parse(firstProbe.stdout.toString().trim().split("\n").pop() || "{}");
 		check("a list that swaps the home's key doesn't replace the pinned one", !!pinnedOnB?.key && seen.key === pinnedOnB.key, { seen, pinned: pinnedOnB?.key, err: firstProbe.stderr.toString().slice(0, 300) });
 		check("and shows up as a key change", seen.pending === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", seen);
 	}
 
-	if (process.env.FED_D_DB) {
-		const D = new SQL(process.env.FED_D_DB);
-		const paused = await until(async () => (await D`select last_error from federation_peers where instance = ${idOf(A.origin)}`)[0]?.last_error ?? "", 60);
-		check("an instance over its hourly budget is paused", /paused/.test(paused ?? ""), paused);
-		const [{ cursor }] = await D`select cursor::text from federation_peers where instance = ${idOf(A.origin)}`;
-		const [{ head }] = await A.db`select max(seq)::text as head from federation_outbox`;
-		check("and it stops reading before the end, after the events it applied", BigInt(cursor) > 0n && BigInt(cursor) < BigInt(head), { cursor, head });
-	}
 } finally {
 	for (const m of made) await m.side.db`delete from users where id = ${m.id}::bigint`;
 }
