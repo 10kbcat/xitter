@@ -68,7 +68,7 @@ async function userRow(id: string) {
 // change the owner's account, the owner can change theirs. Admins otherwise
 // can't touch each other, except that whoever gave an account its staff role
 // can still act on it, while they still rank as high as it (not once demoted).
-const ownerId = async () => (await sql`select id::text from users where role = 'admin' order by created_at, id limit 1`)[0]?.id as string | undefined;
+const ownerId = async () => (await sql`select id::text from users where role = 'admin' and instance is null order by created_at, id limit 1`)[0]?.id as string | undefined;
 const rankOf = (role: string | null, isOwner: boolean) => (isOwner ? 4 : role ? RANK[role as Role] : 0);
 
 export async function guard(actor: Viewer, targetId: string, localOnly = false) {
@@ -486,7 +486,7 @@ const ACTIONS: Record<string, Action> = {
 			const role = b.role || null;
 			if (role !== null && !(role in RANK)) throw new AdminError("Unknown role.");
 			if (id === a.id && role !== "admin") {
-				const [{ n }] = await sql`select count(*)::int as n from users where role = 'admin'`;
+				const [{ n }] = await sql`select count(*)::int as n from users where role = 'admin' and instance is null`;
 				if (n <= 1) throw new AdminError("You are the last admin.");
 			}
 			// nobody demotes staff at or above their own rank, the owner included

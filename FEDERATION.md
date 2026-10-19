@@ -108,9 +108,14 @@ posts disappear from yours and nothing more comes from it until you federate
 again. You can also delete everything you got from it.
 
 A few people listed in `src/superadmins.ts` can act on every instance in an
-emergency, including defederating a bad instance everywhere at once.
+emergency, including defederating a bad instance everywhere at once. Only a
+superadmin can lift an emergency block, and lifting it keeps any block your
+own admins had made. A superadmin's own instance can't be blocked this way.
+The list's maintainers stop it by marking it `blocked` in `instances.json`,
+which also ends its superadmins' access.
 
 ## Leaving
 
 Set `FEDERATION=off` to stop federating, and open a pull request that removes
-your entry from `instances.json`.
+your entry from `instances.json`. Turning federation off also stops superadmins
+from signing in to your instance.
