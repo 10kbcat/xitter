@@ -619,6 +619,7 @@ create table if not exists poll_votes (
 );
 
 alter table posts add column if not exists poll_id bigint references polls (id) on delete set null;
+create index if not exists posts_poll_idx on posts (poll_id) where poll_id is not null;
 
 -- scheduled posts and drafts, kept as the composer sent them
 create table if not exists scheduled_posts (
