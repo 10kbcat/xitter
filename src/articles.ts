@@ -180,10 +180,15 @@ export async function getArticle(viewerId: string, id: string, withContent = tru
 	if (!row || (row.state !== "Published" && String(row.user_id) !== viewerId)) return undefined;
 	// hidden by staff: only its author and staff see it
 	if (row.hidden && String(row.user_id) !== viewerId && !(await sql`select 1 where ${staffViewer(viewerId)}`).length) return undefined;
-	const [unseen] = await sql`select 1 where ${row.user_id}::bigint in ${protectedFor(viewerId)} or ${row.user_id}::bigint in ${suspendedFor(viewerId)}
-		or ${row.user_id}::bigint in (select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
-	if (unseen) return undefined;
+	if (await authorUnseen(viewerId, String(row.user_id))) return undefined;
 	return entity(row, await userById(viewerId, String(row.user_id)), withContent);
+}
+
+// protected from the viewer, suspended, or blocking them: none of their articles show
+async function authorUnseen(viewerId: string, authorId: string): Promise<boolean> {
+	const [unseen] = await sql`select 1 where ${authorId}::bigint in ${protectedFor(viewerId)} or ${authorId}::bigint in ${suspendedFor(viewerId)}
+		or ${authorId}::bigint in (select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
+	return !!unseen;
 }
 
 // the viewer's own article, for changing it
@@ -264,6 +269,8 @@ export async function deleteArticle(viewerId: string, id: string) {
 // the editor's lists of drafts and published articles, newest change first
 export async function slice(viewerId: string, userId: string, lifecycle: string, cursor: unknown, count = 20) {
 	if (userId !== viewerId && lifecycle !== "Published") return { items: [], next: undefined };
+	// someone else's published ones, by the rules a single article goes by
+	if (userId !== viewerId && (await authorUnseen(viewerId, userId))) return { items: [], next: undefined };
 	const before = typeof cursor === "string" && isId(cursor) ? cursor : undefined;
 	const rows = await sql`select ${columns} from articles a where a.user_id = ${userId}::bigint and a.state = ${lifecycle === "Published" ? "Published" : "Draft"}
 		and (not a.hidden or a.user_id = ${viewerId}::bigint or ${staffViewer(viewerId)}) ${before ? sql`and a.id < ${before}::bigint` : sql``} order by a.id desc limit ${count}`;
