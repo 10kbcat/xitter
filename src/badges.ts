@@ -128,6 +128,9 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	}
 	function scan(){
 		document.querySelectorAll(SEL).forEach(function(box){
+			// a box holding other accounts' boxes (the account switcher, a hover card
+			// with a list): each of those is an account of its own, this one isn't
+			if(box.querySelector(SEL))return;
 			shorten(box);
 			var name=handle(box);
 			if(!name)return;
