@@ -74,9 +74,9 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// stays on the element (and its tooltip), and the globe badge says where
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
-	// a small tag with the instance follows the short handle, or five accounts
-	// would all read "@Roblox"; not inside a post's text, where a mention is part
-	// of a sentence (its link and tooltip still say who it is)
+	// the instance follows the short handle, or five accounts would all read
+	// "@Roblox": a small tag after a name, and inside a post's text, where a
+	// mention is part of a sentence, the rest of the handle in a fainter colour
 	function shorten(box){
 		var spans=[box].concat([].slice.call(box.querySelectorAll("span, a")));
 		for(var i=0;i<spans.length;i++){
@@ -87,14 +87,20 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			el.setAttribute("data-xitter-handle",(m[1]+"@"+m[2]).toLowerCase());
 			el.title="@"+m[1]+"@"+m[2];
 			t.nodeValue="@"+m[1];
-			if(!el.closest('[data-testid="tweetText"]')&&!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
-				var home=document.createElement("span");
-				home.setAttribute("data-xitter-home","");
+			if(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))continue;
+			var home=document.createElement("span");
+			home.setAttribute("data-xitter-home","");
+			home.title="From "+m[2];
+			if(el.closest('[data-testid="tweetText"]')){
+				// a mention in a sentence: the rest of the handle, fainter, in its colour
+				home.textContent="@"+m[2];
+				home.style.cssText="color:"+getComputedStyle(el).color+";opacity:.55;cursor:pointer";
+				home.addEventListener("click",function(link){return function(e){e.preventDefault();e.stopPropagation();link.click()}}(el));
+			}else{
 				home.textContent=m[2];
-				home.title="From "+m[2];
 				home.style.cssText="display:inline-block;margin-left:4px;padding:0 5px;border:1px solid rgb(13 148 136 / .5);border-radius:4px;color:#0d9488;font-size:12px;line-height:16px;vertical-align:1px;white-space:nowrap";
-				el.after(home);
 			}
+			el.after(home);
 		}
 	}
 	// the same inside running text ("Replying to @a@x.org and @b@y.org")
