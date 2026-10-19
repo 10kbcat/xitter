@@ -61,9 +61,21 @@ export async function resetRoute(req: Request, url: URL): Promise<Response> {
 	if (password.length < 8) return form(req, token, "Your password needs to be at least 8 characters.");
 	if (password.length > 256) return form(req, token, "Passwords are at most 256 characters.");
 	if (password !== String(f?.get("confirm") ?? "")) return form(req, token, "The two passwords don't match.");
-	await sql`update users set password_hash = ${await Bun.password.hash(password)} where id = ${row.user_id}::bigint`;
-	await sql`update password_resets set used = true where token_hash = ${hash(token)}`;
-	await sql`delete from sessions where user_id = ${row.user_id}::bigint`;
+	const passwordHash = await Bun.password.hash(password);
+	const changed = await sql.begin(async (tx) => {
+		// Serialize resets for this account, including requests using different links.
+		await tx`select id from users where id = ${row.user_id}::bigint for update`;
+		const [claimed] = await tx`update password_resets set used = true
+			where token_hash = ${hash(token)} and not used and created_at > now() - interval '1 hour'
+			returning user_id`;
+		if (!claimed) return false;
+		await tx`update users set password_hash = ${passwordHash} where id = ${row.user_id}::bigint`;
+		// Older links must not be able to replace the newly chosen password either.
+		await tx`update password_resets set used = true where user_id = ${row.user_id}::bigint and not used`;
+		await tx`delete from sessions where user_id = ${row.user_id}::bigint`;
+		return true;
+	});
+	if (!changed) return page(req, `<h1>Link expired</h1><p>This reset link is invalid or has been used. <a href="/">Back to sign in</a>, then ask for a new one.</p>`, 410);
 	return page(req, `<h1>Password changed</h1><p>You can now <a href="/">sign in</a> with it. Every device was signed out.</p>`);
 }
 
