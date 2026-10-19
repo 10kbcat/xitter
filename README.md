@@ -31,6 +31,8 @@ copy during setup, and it stays on that machine.
 - Search with X's operators, including full federated handles, trends, Explore;
   trends by location (Explore settings: worldwide, a country, or yours with
   "Trends for you")
+- PostgreSQL trigram indexes for post text and account search; startup installs
+  the `pg_trgm` extension and builds the indexes on existing data once
 - News and sports cards at the top of Explore, written by staff (Admin >
   Explore cards); sports cards are scoreboards you update as the game goes
 - Topics: staff define them with keywords; people follow them from "Topics to
