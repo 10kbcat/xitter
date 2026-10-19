@@ -1,8 +1,11 @@
 # Xitter with Postgres. First run:
 #   docker/env.sh                      writes .env with fresh secrets
-#   docker compose up -d --build       (add --profile keybackup for chat key backup)
+#   docker compose up -d               the published image (or --build to build it here)
+#                                      (add --profile keybackup for chat key backup)
 services:
   app:
+    # published by .github/workflows/image.yml; `up --build` builds this checkout instead
+    image: ${XITTER_IMAGE:-ghcr.io/xittered/xitter}:${XITTER_VERSION:-latest}
     build: .
     restart: unless-stopped
     env_file: .env
