@@ -1,4 +1,5 @@
-// Profile decor for gold-check accounts (verified_type 'business'), taken from
+// Profile decor for gold and grey check accounts (verified_type 'business',
+// 'government' or 'government_individual'), taken from
 // the Steam Points Shop: a profile theme (Steam's own colour sets), a profile
 // background (a picture, or a looping video) and an avatar frame. Kept in
 // users.decor as { theme, background, frame }; the items carry only Steam's ids
@@ -19,6 +20,10 @@ const THUMBS = "https://community.akamai.steamstatic.com/economy/profilebackgrou
 const STEAM_DIR = join(MEDIA_DIR, "steam");
 const FILE_RE = /^[0-9a-f]{40}\.(png|jpg|gif|webm|mp4)$/;
 const MAX_FILE = 40 * 1024 * 1024;
+
+// who may wear it: gold checks and both grey ones
+export const DECOR_CHECKS = ["business", "government", "government_individual"];
+const mayWear = (v: { verified_type: string | null }) => DECOR_CHECKS.includes(v.verified_type ?? "");
 
 // community_item_class in the Points Shop
 const CLASSES = { background: 3, frame: 14, profile: 8 } as const;
@@ -333,13 +338,13 @@ const forClient = (d: Decor) => ({
 });
 
 // GET /i/api/xitter/decor?names=a,b: { a: { theme, background, frame }, ... },
-// only gold-check accounts that wear something
+// only gold and grey check accounts that wear something
 export async function decorFor(url: URL): Promise<Response> {
 	const names = [...new Set((url.searchParams.get("names") ?? "").split(",").map((n) => n.trim().toLowerCase()).filter((n) => STAFF_HANDLE.test(n)))].slice(0, 50);
 	const out: Record<string, ReturnType<typeof forClient>> = {};
 	if (names.length) {
 		const rows = await sql`select screen_name, decor from users where lower(screen_name) = any(${sql.array(names, "TEXT")})
-			and instance is null and verified_type = 'business' and status <> 'suspended' and decor is not null`;
+			and instance is null and verified_type = any(${sql.array(DECOR_CHECKS, "TEXT")}) and status <> 'suspended' and decor is not null`;
 		for (const r of rows) {
 			const d = clean(r.decor);
 			if (d.theme || d.background || d.frame) out[r.screen_name.toLowerCase()] = forClient(d);
@@ -352,7 +357,7 @@ export async function decorFor(url: URL): Promise<Response> {
 const swatch = (id: string) => `<span class="swatch" style="background:${themeBackground(THEMES[id]!)}"></span>`;
 
 async function page(req: Request, viewer: Viewer, d: Decor, error = "") {
-	const gold = viewer.verified_type === "business";
+	const gold = mayWear(viewer);
 	const form = (fields: string, label: string, kind = "") =>
 		`<form method="post" action="/account/decor" class="inline"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}">${fields}<button type="submit"${kind ? ` class="${kind}"` : ""}>${esc(label)}</button></form>`;
 	const worn = (kind: Kind, label: string) => {
@@ -374,7 +379,7 @@ async function page(req: Request, viewer: Viewer, d: Decor, error = "") {
 		.join("");
 	const body = gold
 		? `<h1>Profile decor</h1>
-	<p class="dim">Gold-check accounts can dress their profile with items from the Steam Points Shop: a theme, a background and an avatar frame. Your profile shows them to everyone here; your frame shows on your posts too.</p>
+	<p class="dim">Gold and grey check accounts can dress their profile with items from the Steam Points Shop: a theme, a background and an avatar frame. Your profile shows them to everyone here; your frame shows on your posts too.</p>
 	${error ? `<p class="error">${esc(error)}</p>` : ""}
 	<h2>Wearing</h2>
 	<div class="card split"><div><b>Theme</b><div class="meta">${d.theme ? esc(THEMES[d.theme]!.name) : "None"}</div></div>${d.theme ? swatch(d.theme) : ""}${
@@ -395,7 +400,7 @@ async function page(req: Request, viewer: Viewer, d: Decor, error = "") {
 	<button type="button" id="more" class="secondary" hidden>Load more</button>
 	<p class="dim">Items and art belong to Valve and the games' makers, shown from Steam.</p>
 	<script>${SHOP_SCRIPT}</script>`
-		: `<h1>Profile decor</h1><p class="dim">Profile themes, backgrounds and avatar frames from Steam are for gold-check accounts.</p>`;
+		: `<h1>Profile decor</h1><p class="dim">Profile themes, backgrounds and avatar frames from Steam are for gold and grey check accounts.</p>`;
 	return accountPage({ req, viewer, title: "Profile decor", status: error ? 400 : 200, body, css: PAGE_CSS });
 }
 
@@ -533,7 +538,7 @@ export async function decorRoute(req: Request, viewer: Viewer): Promise<Response
 	const [row] = await sql`select decor from users where id = ${viewer.id}::bigint`;
 	const d = clean(row?.decor);
 	if (req.method !== "POST") return page(req, viewer, d);
-	if (viewer.verified_type !== "business") return page(req, viewer, d, "Profile decor is for gold-check accounts.");
+	if (!mayWear(viewer)) return page(req, viewer, d, "Profile decor is for gold and grey check accounts.");
 	const f = await req.formData().catch(() => undefined);
 	if (String(f?.get("csrf") ?? "") !== viewer.csrf) return page(req, viewer, d, "That form is out of date. Try again.");
 	const theme = f?.get("theme");

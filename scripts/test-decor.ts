@@ -108,10 +108,14 @@ try {
 	check(single.items?.length > 0 && single.items.every((i: any) => i.appid === one), "one event shows only its own items");
 	check((await gold.api("/xitter/decor/shop?kind=frame&event=nope")).status === 400, "a made-up event is refused");
 
-	// losing the gold check hides it, without forgetting it
+	// a grey check wears it too; a blue one hides it, without forgetting it
+	await sql`update users set verified_type = 'government' where lower(screen_name) = lower(${goldName})`;
+	const grey = await other.api(`/xitter/decor?names=${goldName}`).then((r) => r.json());
+	check(!!grey[goldName.toLowerCase()], "a grey check shows it too");
+	check((await gold.post({ theme: "Steel" })).status === 303, "and can change it");
 	await sql`update users set verified_type = 'blue' where lower(screen_name) = lower(${goldName})`;
 	const hidden = await other.api(`/xitter/decor?names=${goldName}`).then((r) => r.json());
-	check(!hidden[goldName.toLowerCase()], "without the gold check nothing shows");
+	check(!hidden[goldName.toLowerCase()], "with a blue check nothing shows");
 	await sql`update users set verified_type = 'business' where lower(screen_name) = lower(${goldName})`;
 
 	// staff can take it off; an account without the permission can't
