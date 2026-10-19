@@ -7,9 +7,9 @@
 // post marked sensitive. Admin > Settings > Features turns previews off.
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { remoteMediaFile } from "./federation-sync";
 import { MEDIA_DIR } from "./media";
 import { isId } from "./ids";
 import { feature, settings } from "./settings";
@@ -27,7 +27,7 @@ async function publicAuthor(where: ReturnType<typeof sql>): Promise<Author | und
 	return u as Author | undefined;
 }
 
-type Post = { id: string; text: string; created_at: Date; author: Author; image?: { id: string; kind: string; mime: string; width: number; height: number } };
+type Post = { id: string; text: string; created_at: Date; author: Author; image?: { id: string; kind: string; mime: string; width: number; height: number; remote: boolean } };
 
 async function publicPost(id: string): Promise<Post | undefined> {
 	if (!isId(id)) return undefined;
@@ -37,7 +37,7 @@ async function publicPost(id: string): Promise<Post | undefined> {
 	if (!author) return undefined;
 	const [m] = p.sensitive
 		? []
-		: await sql`select id::text, kind, mime, width, height from media
+		: await sql`select id::text, kind, mime, width, height, remote_instance is not null as remote from media
 			where post_id = ${id}::bigint and state = 'ready' and (coalesce(cardinality(sensitive_warning), 0) = 0 or ${p.never_sensitive}) order by position nulls last limit 1`;
 	return { id: p.id, text: p.text, created_at: p.created_at, author, image: m as Post["image"] };
 }
@@ -78,7 +78,7 @@ ${tags.map(([attr, key, value]) => `<meta ${attr}="${key}" content="${esc(value)
 const postTitle = (a: Author) => `${a.name} (@${a.screen_name})`;
 
 function postPreview(p: Post): Response {
-	const photo = p.image && (p.image.kind === "photo" || existsSync(posterFile(MEDIA_DIR, p.image.id)));
+	const photo = p.image && (p.image.kind === "photo" || p.image.remote || existsSync(posterFile(MEDIA_DIR, p.image.id)));
 	const avatar = avatarId(p.author);
 	return page({
 		path: `/${p.author.screen_name}/status/${p.id}`,
@@ -122,9 +122,9 @@ export async function linkPreview(pathname: string): Promise<Response | undefine
 	return undefined;
 }
 
-async function fileResponse(file: string, type: string): Promise<Response> {
-	if (!existsSync(file)) return new Response("not found", { status: 404, headers: { "cache-control": "no-store" } });
-	return new Response(Bun.file(file), { headers: { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+async function fileResponse(body: Blob | undefined, type: string): Promise<Response> {
+	if (!body) return new Response("not found", { status: 404, headers: { "cache-control": "no-store" } });
+	return new Response(body, { headers: { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
 
 // the pictures the preview pages name: a public post's first photo or video
@@ -136,7 +136,7 @@ export async function embedImage(pathname: string): Promise<Response> {
 	if (post) {
 		const p = await publicPost(post[1]);
 		if (!p?.image) return none;
-		return p.image.kind === "photo" ? fileResponse(join(MEDIA_DIR, p.image.id), p.image.mime) : fileResponse(posterFile(MEDIA_DIR, p.image.id), "image/jpeg");
+		return p.image.kind === "photo" ? fileResponse(await remoteMediaFile(p.image.id), p.image.mime) : fileResponse(await remoteMediaFile(p.image.id, true), "image/jpeg");
 	}
 	const avatar = /^\/embed\/avatar\/(\d{1,19})$/.exec(pathname);
 	if (avatar && isId(avatar[1])) {
@@ -144,7 +144,7 @@ export async function embedImage(pathname: string): Promise<Response> {
 		const id = a && avatarId(a);
 		if (!id || !isId(id)) return none;
 		const [m] = await sql`select mime from media where id = ${id}::bigint`;
-		return m ? fileResponse(join(MEDIA_DIR, id), m.mime) : none;
+		return m ? fileResponse(await remoteMediaFile(id), m.mime) : none;
 	}
 	return none;
 }

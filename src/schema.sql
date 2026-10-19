@@ -106,6 +106,15 @@ alter table users add column if not exists status_restore text;
 alter table posts add column if not exists hidden boolean not null default false;
 alter table posts add column if not exists sensitive boolean not null default false;
 alter table users add column if not exists never_sensitive boolean not null default false;
+alter table users add column if not exists remote_badges jsonb;
+do $$ begin
+	if not exists (select 1 from information_schema.columns where table_name = 'posts' and column_name = 'received_at') then
+		alter table posts add column received_at timestamptz;
+		update posts set received_at = created_at;
+		alter table posts alter column received_at set default now();
+		alter table posts alter column received_at set not null;
+	end if;
+end $$;
 alter table sessions add column if not exists id uuid not null default gen_random_uuid();
 create unique index if not exists sessions_id_key on sessions(id);
 alter table sessions add column if not exists last_seen_at timestamptz not null default now();
@@ -1293,11 +1302,18 @@ begin
 	return new;
 end $$;
 create or replace trigger federation_user_insert after insert on users for each row execute function federation_user_changed();
-create or replace trigger federation_user_update after update of screen_name, name, bio, location, avatar_url, banner_url, protected, status, deactivated_at on users for each row
-	when (old.screen_name is distinct from new.screen_name or old.name is distinct from new.name or old.bio is distinct from new.bio or old.location is distinct from new.location
+create or replace trigger federation_user_update after update of screen_name, name, bio, location, website, avatar_url, banner_url, protected, status, deactivated_at, verified_type, translator, flag, parody_label on users for each row
+	when (old.screen_name is distinct from new.screen_name or old.name is distinct from new.name or old.bio is distinct from new.bio or old.location is distinct from new.location or old.website is distinct from new.website
 		or old.avatar_url is distinct from new.avatar_url or old.banner_url is distinct from new.banner_url or old.protected is distinct from new.protected
-		or old.status is distinct from new.status or old.deactivated_at is distinct from new.deactivated_at)
+		or old.status is distinct from new.status or old.deactivated_at is distinct from new.deactivated_at or old.verified_type is distinct from new.verified_type
+		or old.translator is distinct from new.translator or old.flag is distinct from new.flag or old.parody_label is distinct from new.parody_label)
 	execute function federation_user_changed();
+create or replace function federation_badges_changed() returns trigger language plpgsql as $$
+begin
+	insert into federation_outbox (kind, a) select 'user', u.id from users u where u.id = coalesce(new.user_id, old.user_id) and u.instance is null;
+	return null;
+end $$;
+create or replace trigger federation_user_badges after insert or delete on user_badges for each row execute function federation_badges_changed();
 create or replace trigger federation_user_delete before delete on users for each row execute function federation_user_changed();
 
 do $$ begin

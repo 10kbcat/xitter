@@ -7,7 +7,7 @@ import { hasBlockedPhrase } from "./settings";
 import { postLimitFor, weightedLength } from "./textlen";
 import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
-import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, suspendedFor } from "./blocks";
+import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
 import { fetchPreview, linkCard, linksIn, previewable, previewsFor } from "./links";
 import { mediaForPosts } from "./media";
@@ -436,11 +436,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		const [unseenRoot] = await db`select 1 from posts p join users u on u.id = p.user_id
 			where p.id = ${conversationId}::bigint and not ${seenBy(userId)}`;
 		if (unseenRoot) throw new PostError("The post you are replying to no longer exists.", 385);
-		const [limited] = await db`select exists (select 1 from posts r where r.id = ${conversationId}::bigint and r.reply_policy is not null and r.user_id <> ${userId}::bigint and not (
-				(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${userId}::bigint))
-				or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${userId}::bigint))
-				or (r.reply_policy = 'Verified' and exists (select 1 from users x where x.id = ${userId}::bigint and (x.verified_type is not null or exists (select 1 from affiliations af where af.user_id = x.id)))))) as no`;
-		if (limited.no) throw new PostError("The author of the original post limited who can reply to it.", 433);
+		if (await replyLimited(String(conversationId), userId, db)) throw new PostError("The author of the original post limited who can reply to it.", 433);
 	}
 	if (opts.quoteId) {
 		const [quoted] = await db`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
