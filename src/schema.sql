@@ -1408,3 +1408,6 @@ end $$;
 drop trigger if exists users_admins_unblocked on users;
 create trigger users_admins_unblocked after update of role on users for each row execute function admins_unblocked();
 delete from blocks bl using users b, users t where b.id = bl.blocker_id and t.id = bl.blocked_id and b.instance is null and t.role = 'admin' and t.instance is null;
+
+-- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
+alter table users add column if not exists decor jsonb;
