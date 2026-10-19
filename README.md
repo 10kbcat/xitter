@@ -70,7 +70,8 @@ copy during setup, and it stays on that machine.
 - A public JSON API under `/api/v1` with personal tokens (`/account/api`,
   read or read and write), including chunked video uploads with progress and
   retry support; `/api` documents it. Pending uploads expire after one hour and
-  are lost if the server restarts.
+  are lost if the server restarts. Changing or resetting a password revokes all
+  of that account's API tokens.
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges (blue, gold organisation, grey government organisation or official),
   translator globes (blue translator, gold translator moderator, yellow approver),

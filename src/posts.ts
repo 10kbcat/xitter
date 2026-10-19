@@ -166,8 +166,8 @@ const MAX_EDITS = 5;
 // Text changes only; media, replies and quotes stay as posted. The post keeps its
 // id and what it said before goes to post_versions.
 // the author's limit goes by their badge (textlen.ts, Admin > Settings)
-export async function checkLength(userId: string, text: string) {
-	const [u] = await sql`select verified_type from users where id = ${userId}::bigint`;
+export async function checkLength(userId: string, text: string, db: typeof sql = sql) {
+	const [u] = await db`select verified_type from users where id = ${userId}::bigint`;
 	const limit = postLimitFor(u?.verified_type);
 	if (weightedLength(text) > limit) throw new PostError(`Posts are limited to ${limit.toLocaleString("en-US")} characters.`, 186);
 }
@@ -418,7 +418,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	const db = opts.db ?? sql;
 	const [author] = await db`select status, deactivated_at from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
-	await checkLength(userId, text);
+	await checkLength(userId, text, db);
 	await refuseHate(userId, text);
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
 	const id = newId();
@@ -427,7 +427,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	if (opts.replyToId) {
 		const [parent] = await db`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
-		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
+		if (await isBlockedEitherWay(userId, String(parent.user_id), db)) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
 		replyToUserId = String(parent.user_id);
 		// a public reply inside a protected thread still belongs to that thread
@@ -445,7 +445,7 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 	if (opts.quoteId) {
 		const [quoted] = await db`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
-		if (await isBlockedEitherWay(userId, String(quoted.user_id))) throw new PostError("You can't quote this post.", 433);
+		if (await isBlockedEitherWay(userId, String(quoted.user_id), db)) throw new PostError("You can't quote this post.", 433);
 		const [owner] = await db`select protected from users where id = ${quoted.user_id}::bigint`;
 		if (owner?.protected && String(quoted.user_id) !== userId) throw new PostError("Posts from protected accounts can't be quoted.", 433);
 	}

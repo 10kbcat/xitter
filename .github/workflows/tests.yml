@@ -68,14 +68,18 @@ jobs:
           bun scripts/test-email-issuance.ts
           bun scripts/test-password-reset-issuance.ts
           bun scripts/test-admin-password-reset.ts
+          bun scripts/test-api-token-security.ts
           bun scripts/test-scheduled-threads.ts
           bun scripts/test-scheduled-quota.ts
           bun scripts/test-scheduled-mentions.ts
           bun scripts/test-scheduled-post-cost.ts
+          bun scripts/test-scheduled-single-connection.ts
+          bun scripts/test-scheduled-media.ts
       - name: Media privacy and chunked upload regression tests
         run: |
           bun scripts/test-poll-media-privacy.ts
           bun scripts/test-media-finalization.ts
+          bun scripts/test-media-upload-cap.ts
           bun scripts/test-public-api-chunked-media.ts
       - name: HTTP and encrypted chat regression tests
         run: |
