@@ -9,7 +9,7 @@
 // written to the audit log.
 
 import { isSuperadminViewer } from "./superadmin";
-import { SUPERADMINS, isSuperadminHome, superadminNameHere } from "./superadmins";
+import { SUPERADMINS, isSuperadminHome, superadminNameHere, superadminOf } from "./superadmins";
 import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
 import { pullFrom } from "./federation-sync";
 import type { Viewer } from "./auth";
@@ -263,7 +263,8 @@ const ACTIONS: Record<string, Action> = {
 		return {};
 	} },
 	// `allowed`: the actions this account may run, for the panel to show only those
-	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role,
+	me: { role: "support", run: async (a) => ({ id: a.id, screen_name: a.screen_name, role: a.role, superadmin: !!a.superadmin,
+		superadmin_home: !a.instance && a.role === "admin" && !!superadminOf(INSTANCE_ID, a.screen_name, a.id),
 		allowed: Object.entries(ACTIONS).filter(([name, x]) => mayRun(a.role, name, x.role)).map(([name]) => name) }) },
 
 	staffPermissions: { role: "admin", run: async () => ({
