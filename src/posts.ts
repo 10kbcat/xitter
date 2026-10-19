@@ -1,5 +1,7 @@
 import type { User } from "./auth";
+import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { INSTANCE_ID } from "./federation";
 import { newId } from "./ids";
 import { hateIn } from "./hate";
 import { automodStrike } from "./moderation";
@@ -9,7 +11,7 @@ import type { PostRow } from "./model";
 import { articlesByIds } from "./articles";
 import { blockedFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
-import { fetchPreview, linkCard, linksIn, previewable, previewsFor } from "./links";
+import { fetchPreview, linkCard, linksIn, previewable, previewsFor, statusLinkOf } from "./links";
 import { mediaForPosts } from "./media";
 import { communityObjects } from "./community-model";
 import { webSource } from "./platforms";
@@ -115,7 +117,24 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 			if (poll) p.poll = pollCard(poll);
 		}
 	}
-	const linkOf = (p: PostRow) => (p.poll || p.quote_id || p.article_id || p.media?.length ? undefined : linksIn(p.text).filter((l) => previewable(l.url)).at(-1)?.url);
+	const statusLinks = posts.flatMap((p) => linksIn(p.text).flatMap((l) => {
+		const at = statusLinkOf(l.url);
+		return at ? [{ post: p, url: l.url, ...at }] : [];
+	}));
+	if (statusLinks.length) {
+		const copies = await sql`select instance, remote_id::text, local_id::text from federated_objects where kind = 'post'
+			and (instance, remote_id) in (select * from unnest(${sql.array(statusLinks.map((l) => l.host), "TEXT")}::text[], ${sql.array(statusLinks.map((l) => l.id), "TEXT")}::bigint[]))`;
+		const localOf = (l: (typeof statusLinks)[number]) => (l.host === INSTANCE_ID ? l.id : copies.find((c: any) => c.instance === l.host && c.remote_id === l.id)?.local_id);
+		const linked = await postsByIds(viewerId, [...new Set(statusLinks.map(localOf).filter((id): id is string => !!id))], false);
+		for (const l of statusLinks) {
+			const target = linked.get(localOf(l) ?? "");
+			if (!target) continue;
+			l.post.localLinks ??= new Map();
+			l.post.localLinks.set(l.url, `${PUBLIC_ORIGIN}/${target.author.screen_name}/status/${target.id}`);
+			if (quotes && !l.post.quote_id && !l.post.poll && !l.post.article_id && !l.post.media?.length && target.id !== l.post.id) l.post.quoted = target;
+		}
+	}
+	const linkOf = (p: PostRow) => (p.poll || p.quote_id || p.quoted || p.article_id || p.media?.length ? undefined : linksIn(p.text).filter((l) => previewable(l.url)).at(-1)?.url);
 	const previews = await previewsFor(posts.map(linkOf).filter((u): u is string => !!u));
 	for (const p of posts) {
 		const preview = previews.get(linkOf(p) ?? "");
