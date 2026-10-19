@@ -196,6 +196,7 @@ async function remoteMedia(instance: string, owner: string, m: any, post: string
 	await sql`insert into media (id, user_id, kind, mime, size, width, height, post_id, position, alt_text, duration_ms, remote_instance, remote_id)
 		values (${id}::bigint, ${owner}::bigint, ${kind}, ${mime}, 0, ${width}, ${height}, ${post}::bigint, ${position}, ${alt}, ${duration}, ${instance}, ${m.id}::bigint)`;
 	await sql`insert into federated_objects (instance, kind, remote_id, local_id) values (${instance}, 'media', ${m.id}::bigint, ${id}::bigint) on conflict do nothing`;
+	prefetch(id, kind === "video");
 	return id;
 }
 
@@ -384,11 +385,72 @@ export function fetchRemoteMedia(localId: string, poster = false): Promise<boole
 	return job;
 }
 
+// Files are fetched when their post or profile syncs, not when someone first
+// views them: fetched on view, everything not yet seen went blank while the
+// other instance was down. A failing instance is left alone for a while and
+// the backfill below picks its files up again.
+const QUEUE_PARALLEL = 3;
+const BACKOFF_MS = 5 * 60_000;
+const queue: { id: string; poster: boolean }[] = [];
+const queued = new Set<string>();
+const failingUntil = new Map<string, number>();
+// answered 404 by their instance: not asked again until the next start
+const gone = new Set<string>();
+let draining = 0;
+
+function prefetch(localId: string, poster = false) {
+	for (const p of poster ? [false, true] : [false]) {
+		const key = `${localId}${p ? "p" : ""}`;
+		if (queued.has(key) || queue.length >= 10_000) continue;
+		queued.add(key);
+		queue.push({ id: localId, poster: p });
+	}
+	drain();
+}
+
+function drain() {
+	while (draining < QUEUE_PARALLEL && queue.length) {
+		const job = queue.shift()!;
+		draining++;
+		void fetchRemoteMedia(job.id, job.poster)
+			.catch(() => false)
+			.finally(() => {
+				queued.delete(`${job.id}${job.poster ? "p" : ""}`);
+				draining--;
+				drain();
+			});
+	}
+}
+
+// files still missing (an instance that was down, a server restart mid-queue)
+async function backfillMedia() {
+	const rows = await sql`select id::text, kind from media where remote_instance is not null and size = 0
+		and remote_instance <> all(${sql.array([...failingUntil].filter(([, until]) => until > Date.now()).map(([i]) => i), "TEXT")})
+		and id <> all(${sql.array([...gone], "INT8")})
+		order by id desc limit 200`;
+	for (const r of rows as any[]) prefetch(r.id, r.kind === "video");
+}
+
 async function downloadRemoteMedia(localId: string, poster: boolean): Promise<boolean> {
 	const [m] = await sql`select remote_instance, remote_id::text from media where id = ${localId}::bigint and remote_instance is not null`;
 	if (!m || !isPeer(m.remote_instance)) return false;
-	const r = await signedFetch(m.remote_instance, "GET", `/federation/v1/media/${m.remote_id}${poster ? "/poster" : ""}`, undefined, MAX_MEDIA).catch(() => undefined);
-	if (r?.status !== 200) return false;
+	if ((failingUntil.get(m.remote_instance) ?? 0) > Date.now()) return false;
+	let failure = "";
+	const r = await signedFetch(m.remote_instance, "GET", `/federation/v1/media/${m.remote_id}${poster ? "/poster" : ""}`, undefined, MAX_MEDIA).catch((e) => {
+		failure = e instanceof Error ? e.message : String(e);
+		return undefined;
+	});
+	// a 404 is that one file; anything else is the instance
+	if (r?.status !== 200) {
+		if (r?.status === 404 && !poster) gone.add(localId);
+		if (r?.status !== 404) {
+			if (!((failingUntil.get(m.remote_instance) ?? 0) > Date.now()))
+				console.error(`federation: media from ${m.remote_instance} failing (${failure || `status ${r?.status}`}), retrying in ${BACKOFF_MS / 60_000} minutes`);
+			failingUntil.set(m.remote_instance, Date.now() + BACKOFF_MS);
+		}
+		return false;
+	}
+	failingUntil.delete(m.remote_instance);
 	const file = poster ? posterFile(MEDIA_DIR, localId) : join(MEDIA_DIR, localId);
 	mkdirSync(MEDIA_DIR, { recursive: true });
 	const temp = `${file}.part${newId()}`;
@@ -418,6 +480,7 @@ export function startFederationSync() {
 		tick++;
 		void pokePeers().catch(() => {});
 		if (tick % 5 === 0) for (const p of peers()) void pullFrom(p.id);
+		if (tick % 200 === 10) void backfillMedia().catch((e) => console.error("federation: media backfill:", e instanceof Error ? e.message : e));
 		if (tick % 3600 === 0) void sql`delete from federation_outbox where created_at < now() - interval '60 days'`.catch(() => {});
 	}, 3000).unref();
 }
