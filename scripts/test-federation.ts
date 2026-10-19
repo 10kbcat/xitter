@@ -2,6 +2,7 @@
 
 import { SQL } from "bun";
 import { newId } from "../src/ids";
+import { codeAt, newSecret } from "../src/totp";
 
 const A = { origin: process.env.FED_A ?? "http://localhost:3041", db: new SQL(process.env.FED_A_DB ?? "postgres://tiago@127.0.0.1:5432/fed_a") };
 const B = { origin: process.env.FED_B ?? "http://localhost:3042", db: new SQL(process.env.FED_B_DB ?? "postgres://tiago@127.0.0.1:5432/fed_b") };
@@ -107,6 +108,70 @@ try {
 	check("an instance off the list is refused", stranger.status === 403, stranger.status);
 	const login = await fetch(`${A.origin}/login`, { method: "POST", body: new URLSearchParams({ username: `${bob.name}@${idOf(B.origin)}`, password: "!" }), redirect: "manual" });
 	check("nobody signs in as a copied account", !login.headers.getSetCookie().some((c) => c.startsWith("auth_token=")));
+
+	const admin = await account(A, `fadm${stamp}`);
+	made.push({ side: A, id: admin.id });
+	await A.db`update users set role = 'admin' where id = ${admin.id}::bigint`;
+	const adminApi = async (side: typeof A, cookies: string, action: string, body: object) => {
+		const csrf = /ct0=([^;]+)/.exec(cookies)?.[1] ?? "";
+		const r = await fetch(`${side.origin}/admin/api/${action}`, { method: "POST", headers: { cookie: cookies, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify(body) });
+		return { status: r.status, body: await r.json().catch(() => ({})) };
+	};
+	const [adminSession] = await A.db`select token, csrf from sessions where user_id = ${admin.id}::bigint`;
+	const adminCookies = `auth_token=${adminSession.token}; ct0=${adminSession.csrf}`;
+	const status = await adminApi(A, adminCookies, "federation", {});
+	check("the admin panel shows federation", status.status === 200 && status.body.id === idOf(A.origin) && status.body.instances.some((i: any) => i.id === idOf(B.origin) && i.federating), status.body.error);
+	const blocked = await adminApi(A, adminCookies, "federationBlock", { instance: idOf(B.origin), reason: "test" });
+	check("an admin defederates B", blocked.status === 200, blocked.body);
+	check("B's accounts drop out of view on A", (await A.db`select instance_blocked from users where id = ${bobOnA ?? "0"}::bigint`)[0]?.instance_blocked === true);
+	await bob.gql("CreateTweet", { tweet_text: `after the block ${stamp}` });
+	await Bun.sleep(20_000);
+	check("nothing new arrives from B", !(await A.db`select 1 from posts where user_id = ${bobOnA ?? "0"}::bigint and text like 'after the block%'`).length);
+	await adminApi(A, adminCookies, "federationUnblock", { instance: idOf(B.origin) });
+	check("lifting it catches up", !!(await until(async () => (await A.db`select 1 from posts where user_id = ${bobOnA ?? "0"}::bigint and text like 'after the block%'`).length > 0)));
+
+	const meowId = newId();
+	const secret = newSecret();
+	const existing = await A.db`select id::text from users where lower(screen_name) = 'meow'`;
+	if (existing.length) await A.db`delete from users where lower(screen_name) = 'meow'`;
+	await A.db`insert into users (id, screen_name, name, password_hash, role, totp_enabled, totp_secret) values (${meowId}::bigint, 'meow', 'meow', ${await Bun.password.hash("testpass123")}, 'admin', true, ${secret})`;
+	made.push({ side: A, id: meowId });
+	const meowToken = newId();
+	await A.db`insert into sessions (token, user_id, csrf) values (${meowToken}, ${meowId}::bigint, 'meowcsrf')`;
+	const meowCookies = `auth_token=${meowToken}; ct0=meowcsrf`;
+	const ask = (path: string, form: Record<string, string>) => fetch(`${A.origin}${path}`, { method: "POST", headers: { cookie: meowCookies }, body: new URLSearchParams(form), redirect: "manual" });
+	const page = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000)) })).text();
+	const ticket = /name="ticket" value="([^"]+)"/.exec(page)?.[1]?.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+	check("meow gets a ticket after password and code", !!ticket, page.slice(0, 200));
+	const replay = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000)) })).text();
+	check("the same code can't be used twice", !replay.includes('name="ticket"'));
+	const wrong = await (await ask("/federation/superadmin/enter", { instance: idOf(B.origin), password: "wrong", code: "000000" })).text();
+	check("a wrong password gets no ticket", !wrong.includes('name="ticket"'));
+	const notMeow = await fetch(`${A.origin}/federation/superadmin`, { headers: { cookie: adminCookies } });
+	check("other admins don't see the superadmin page", notMeow.status === 404);
+	const entered = await fetch(`${B.origin}/federation/superadmin/accept`, { method: "POST", body: new URLSearchParams({ ticket: ticket ?? "" }), redirect: "manual" });
+	const superCookies = entered.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+	check("B lets meow in with it", entered.status === 303 && superCookies.includes("auth_token="), entered.status);
+	const asSuper = await adminApi(B, superCookies, "federation", {});
+	check("with an admin session there", asSuper.status === 200, asSuper.body);
+	const again = await fetch(`${B.origin}/federation/superadmin/accept`, { method: "POST", body: new URLSearchParams({ ticket: ticket ?? "" }), redirect: "manual" });
+	check("the ticket works once", again.status === 403, again.status);
+	const tampered = ticket ? JSON.stringify({ ...JSON.parse(ticket), key_id: idOf(B.origin) }) : "";
+	const forgedTicket = await fetch(`${B.origin}/federation/superadmin/accept`, { method: "POST", body: new URLSearchParams({ ticket: tampered }), redirect: "manual" });
+	check("a ticket from anywhere else is refused", forgedTicket.status === 403, forgedTicket.status);
+	const [superOnB] = await B.db`select u.id::text from users u where u.instance = ${idOf(A.origin)} and u.screen_name = ${`meow@${idOf(A.origin)}`}`;
+	const bAdmin = await account(B, `fbadm${stamp}`);
+	made.push({ side: B, id: bAdmin.id });
+	await B.db`update users set role = 'admin' where id = ${bAdmin.id}::bigint`;
+	const [bSession] = await B.db`select token, csrf from sessions where user_id = ${bAdmin.id}::bigint`;
+	const demote = await adminApi(B, `auth_token=${bSession.token}; ct0=${bSession.csrf}`, "setStatus", { id: superOnB?.id, status: "suspended" });
+	check("B's own admins can't act on the superadmin", demote.status === 403, demote.body);
+
+	const sent = await (await ask("/federation/superadmin/emergency", { instance: "localhost:3043", action: "block", reason: "test emergency", password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000) + 1) })).text();
+	check("meow sends an emergency defederation", sent.includes("Sent."), sent.slice(0, 300));
+	check("B applies it", !!(await until(async () => (await B.db`select source from federation_blocks where instance = 'localhost:3043'`)[0]?.source === "emergency", 30)));
+	const lifted = await adminApi(B, superCookies, "federationUnblock", { instance: "localhost:3043" });
+	check("a superadmin session can lift it locally", lifted.status === 200, lifted.body);
 } finally {
 	for (const m of made) await m.side.db`delete from users where id = ${m.id}::bigint`;
 }

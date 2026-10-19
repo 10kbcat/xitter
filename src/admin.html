@@ -188,6 +188,7 @@ const PAGES = {
 	cards: { icon: "newspaper", title: "Explore cards" },
 	email: { icon: "mail", title: "Email" },
 	apps: { icon: "devices", title: "Client apps" },
+	federation: { icon: "hub", title: "Federation" },
 	settings: { icon: "tune", title: "Settings" },
 	errors: { icon: "bug_report", title: "Errors" },
 	security: { icon: "shield_lock", title: "Security", role: "admin" },
@@ -691,6 +692,52 @@ const RENDER = {
 		main.querySelectorAll("[data-revoke]").forEach((b) => b.onclick = async () => {
 			if (!(await ask("Revoke this token? The app's posts keep their label, but it can't post any more."))) return;
 			act(() => api("revokePlatform", { id: b.dataset.revoke }), "Token revoked").then(route);
+		});
+	},
+
+	async federation(main) {
+		const f = await api("federation");
+		const state = (i) => i.block
+			? '<span class="pill suspended">' + esc(i.block.source === "emergency" ? "emergency block" : i.block.source === "registry" ? "off the list" : "defederated") + "</span>"
+			: i.federating ? '<span class="pill">federating</span>' : '<span class="pill">not listed</span>';
+		const entry = JSON.stringify(f.entry, null, 2);
+		main.innerHTML = "<h1>Federation</h1>" +
+			'<p class="dim">Instances on the shared list in <a href="https://github.com/Xittered/xitter/blob/main/instances.json">instances.json</a> share public accounts, posts, media, likes, reposts and follows. Each one moderates its own people. Defederating stops all traffic with an instance and hides what came from it here.</p>' +
+			(f.enabled ? "" : '<div class="box">Federation is off on this instance (FEDERATION=off).</div>') +
+			'<div class="box" style="margin-bottom:16px"><h2>This instance</h2><p>Address <span class="code">' + esc(f.id) + '</span>, key <span class="code">' + esc(f.public_key) + "</span></p>" +
+			(f.listed_here
+				? '<p class="dim small">Listed as ' + esc(f.listed_here.name) + " (" + esc(f.listed_here.state) + ")" + (f.listed_here.public_key && f.listed_here.public_key !== f.public_key ? '. <b>The list has a different key for this instance, so others refuse it.</b>' : "") + "</p>"
+				: '<p class="dim small">Not on the list yet. Open a pull request that adds this entry to instances.json:</p><pre class="code">' + esc(entry) + "</pre>") +
+			'<p class="dim small">List sequence ' + esc(String(f.registry.sequence)) + ", checked " + esc(f.registry.checked_at ? when(f.registry.checked_at) : "never") + (f.registry.error ? ". Last error: " + esc(f.registry.error) : "") + ". Superadmins: " + esc(f.superadmins.join(", ")) + "</p></div>" +
+			'<div class="scroll">' + (f.instances.length
+				? '<table class="table"><tr><th>Instance</th><th>State</th><th>Accounts</th><th>Posts</th><th>Last sync</th><th></th></tr>' +
+					f.instances.map((i) => "<tr><td><b>" + esc(i.name) + '</b><div class="dim small">' + esc(i.id) + (i.key_source ? ", key from " + esc(i.key_source) : "") + "</div>" +
+						(i.block ? '<div class="dim small">' + esc(i.block.reason || "") + (i.block.by_name ? " (" + esc(i.block.by_name) + ")" : "") + "</div>" : "") +
+						(i.key_change ? '<div class="small"><b>It now shows another key.</b></div>' : "") + "</td><td>" + state(i) +
+						"</td><td>" + esc(String(i.accounts)) + "</td><td>" + esc(String(i.posts)) + '</td><td class="small dim">' + esc(i.last_ok_at ? when(i.last_ok_at) : "never") + (i.last_error ? '<div class="small">' + esc(i.last_error) + "</div>" : "") +
+						"</td><td>" + (can("admin")
+							? (i.block
+								? (i.block.source === "registry" || (i.block.source === "emergency" && !f.superadmin) ? "" : '<button class="btn" data-unblock="' + esc(i.id) + '">Federate again</button> ') + '<button class="btn danger" data-purge="' + esc(i.id) + '">Delete its content</button>'
+								: '<button class="btn" data-pull="' + esc(i.id) + '">Sync now</button> <button class="btn danger" data-block="' + esc(i.id) + '">Defederate</button>') +
+								(i.key_change ? ' <button class="btn" data-key="' + esc(i.id) + '">Accept the new key</button>' : "")
+							: "") + "</td></tr>").join("") + "</table>"
+				: '<div class="empty">No other instances yet.</div>') + "</div>" +
+			(can("admin") ? '<div class="box" style="margin-top:16px"><h2>Defederate an instance</h2><div class="row"><input id="fbi" placeholder="xit.example.org" style="flex:1;min-width:180px"><input id="fbr" placeholder="Reason" maxlength="500" style="flex:2;min-width:200px"><button class="btn danger" id="fbgo">Defederate</button></div></div>' : "");
+		const block = async (instance, reason) => {
+			if (!(await ask("Defederate " + instance + "? Its accounts and posts disappear here and nothing more comes from it until you federate again."))) return;
+			act(() => api("federationBlock", { instance, reason }), "Defederated").then(route);
+		};
+		if ($("#fbgo")) $("#fbgo").onclick = () => block($("#fbi").value.trim(), $("#fbr").value);
+		main.querySelectorAll("[data-block]").forEach((b) => b.onclick = () => block(b.dataset.block, ""));
+		main.querySelectorAll("[data-unblock]").forEach((b) => b.onclick = () => act(() => api("federationUnblock", { instance: b.dataset.unblock }), "Federating again").then(route));
+		main.querySelectorAll("[data-pull]").forEach((b) => b.onclick = () => act(() => api("federationPull", { instance: b.dataset.pull }), "Synced").then(route));
+		main.querySelectorAll("[data-key]").forEach((b) => b.onclick = async () => {
+			if (!(await ask("Trust the new key of " + b.dataset.key + "? Only do this if its admins told you they changed it."))) return;
+			act(() => api("federationAcceptKey", { instance: b.dataset.key }), "Key accepted").then(route);
+		});
+		main.querySelectorAll("[data-purge]").forEach((b) => b.onclick = async () => {
+			if (!(await ask("Delete every account, post and file that came from " + b.dataset.purge + "? This can't be undone. Federating again later brings back only what it sends from then on."))) return;
+			act(() => api("federationPurge", { instance: b.dataset.purge }), "Deleted").then(route);
 		});
 	},
 
