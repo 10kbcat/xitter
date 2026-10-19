@@ -16,7 +16,7 @@ export const isSuperadminViewer = (viewer: Pick<Viewer, "screen_name"> & { insta
 	!!(viewer.instance ? superadminOf(viewer.instance, viewer.screen_name.replace(/@[^@]*$/, "")) : superadminOf(INSTANCE_ID, viewer.screen_name));
 
 async function localSuperadmin(viewer: Viewer | undefined) {
-	if (!viewer || !superadminOf(INSTANCE_ID, viewer.screen_name)) return undefined;
+	if (!viewer || !superadminOf(INSTANCE_ID, viewer.screen_name, viewer.id)) return undefined;
 	const [u] = await sql`select id::text, password_hash, totp_enabled, role from users where id = ${viewer.id}::bigint and instance is null`;
 	return u?.role === "admin" ? u : undefined;
 }
@@ -183,7 +183,7 @@ export async function acceptTicket(req: Request, ip: string): Promise<Response> 
 	if (!t || t.typ !== "xitter-superadmin-v1" || t.iss !== issuer || t.aud !== INSTANCE_ID) return refuse("That ticket isn't valid here.");
 	if (!Number.isSafeInteger(t.iat) || !Number.isSafeInteger(t.exp) || t.exp < now || t.exp - t.iat > 2 * TICKET_SECONDS || t.iat > now + 60) return refuse("That ticket has expired.");
 	if (!Array.isArray(t.amr) || !t.amr.includes("otp") || !t.amr.includes("pwd")) return refuse("That ticket wasn't issued after a two-factor check.");
-	if (typeof t.sub !== "string" || !superadminOf(issuer, t.sub) || typeof t.sub_id !== "string" || !/^\d{1,19}$/.test(t.sub_id)) return refuse("That account isn't a superadmin.");
+	if (typeof t.sub !== "string" || typeof t.sub_id !== "string" || !/^\d{1,19}$/.test(t.sub_id) || !superadminOf(issuer, t.sub, t.sub_id)) return refuse("That account isn't a superadmin.");
 	if (typeof t.nonce !== "string" || !/^[A-Za-z0-9_-]{24}$/.test(t.nonce)) return refuse("That ticket isn't valid here.");
 	const [fresh] = await sql`insert into superadmin_tickets (nonce) values (${t.nonce}) on conflict do nothing returning nonce`;
 	if (!fresh) return refuse("That ticket was already used.");

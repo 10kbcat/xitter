@@ -9,7 +9,7 @@
 // written to the audit log.
 
 import { isSuperadminViewer } from "./superadmin";
-import { SUPERADMINS } from "./superadmins";
+import { SUPERADMINS, superadminNameHere } from "./superadmins";
 import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
 import { pullFrom } from "./federation-sync";
 import type { Viewer } from "./auth";
@@ -532,6 +532,7 @@ const ACTIONS: Record<string, Action> = {
 			const screenName = String(b.screen_name ?? "").trim().replace(/^@/, "");
 			const name = String(b.name ?? "").trim() || screenName;
 			if (!/^[A-Za-z0-9_]{4,15}$/.test(screenName)) throw new AdminError("Handles are 4 to 15 letters, digits or underscores.");
+			if (superadminNameHere(screenName)) throw new AdminError("That handle is reserved.");
 			const [taken] = await sql`select 1 from users where lower(screen_name) = lower(${screenName})`;
 			if (taken) throw new AdminError("That handle is taken.");
 			const password = randomPassword();

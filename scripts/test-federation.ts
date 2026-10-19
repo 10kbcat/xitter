@@ -172,6 +172,11 @@ try {
 	check("B applies it", !!(await until(async () => (await B.db`select source from federation_blocks where instance = 'localhost:3043'`)[0]?.source === "emergency", 30)));
 	const lifted = await adminApi(B, superCookies, "federationUnblock", { instance: "localhost:3043" });
 	check("a superadmin session can lift it locally", lifted.status === 200, lifted.body);
+
+	const rename = await fetch(`${A.origin}/1.1/account/settings.json`, { method: "POST", headers: { cookie: meowCookies, "x-csrf-token": "meowcsrf" }, body: new URLSearchParams({ screen_name: `meow${stamp}` }) });
+	check("meow can't rename away from the superadmin handle", rename.status === 400, await rename.text());
+	const org = await adminApi(A, adminCookies, "createOrg", { screen_name: "MEOW", name: "meow" });
+	check("nobody makes an org with that handle", org.status !== 200 && /reserved/.test(org.body.error ?? ""), org.body);
 } finally {
 	for (const m of made) await m.side.db`delete from users where id = ${m.id}::bigint`;
 }
