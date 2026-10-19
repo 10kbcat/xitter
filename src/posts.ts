@@ -425,6 +425,12 @@ export async function createPost(userId: string, text: string, opts: { replyToId
 		if (await isBlockedEitherWay(userId, String(parent.user_id))) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
 		replyToUserId = String(parent.user_id);
+		// a public reply inside a protected thread still belongs to that thread
+		// (GHSA-m9x2-9x93-6879): its root must be one the author may see too; a
+		// deleted root leaves the thread open
+		const [unseenRoot] = await sql`select 1 from posts p join users u on u.id = p.user_id
+			where p.id = ${conversationId}::bigint and not ${seenBy(userId)}`;
+		if (unseenRoot) throw new PostError("The post you are replying to no longer exists.", 385);
 		const [limited] = await sql`select exists (select 1 from posts r where r.id = ${conversationId}::bigint and r.reply_policy is not null and r.user_id <> ${userId}::bigint and not (
 				(r.reply_policy = 'Community' and exists (select 1 from follows f where f.follower_id = r.user_id and f.followee_id = ${userId}::bigint))
 				or (r.reply_policy = 'ByInvitation' and exists (select 1 from post_mentions m where m.post_id = r.id and m.user_id = ${userId}::bigint))
