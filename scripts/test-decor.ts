@@ -1,10 +1,10 @@
 // Profile decor from Steam: only gold-check accounts wear it, picks are checked
 // against Steam, and the files come through /public/steam/.
-// usage: bun scripts/test-decor.ts <gold account> <other account> <password>   (against a running server; needs Steam reachable)
+// usage: bun scripts/test-decor.ts <gold account> <other account> <password> [admin]   (against a running server; needs Steam reachable)
 import { sql } from "../src/db";
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
-const [goldName, otherName, password] = process.argv.slice(2);
+const [goldName, otherName, password, adminName] = process.argv.slice(2);
 if (!password) throw new Error("usage: bun scripts/test-decor.ts <gold account> <other account> <password>");
 
 let failed = 0;
@@ -23,6 +23,8 @@ async function signIn(name: string) {
 	const formCsrf = /name="csrf" value="([^"]+)"/.exec(page)?.[1] ?? "";
 	return {
 		page,
+		admin: (action: string, body: object) =>
+			fetch(`${origin}/admin/api/${action}`, { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify(body) }),
 		api: (path: string) => fetch(`${origin}/i/api${path}`, { headers: { cookie, "x-csrf-token": csrf } }),
 		post: (fields: Record<string, string>) =>
 			fetch(`${origin}/account/decor`, { method: "POST", headers: { cookie }, body: new URLSearchParams({ csrf: formCsrf, ...fields }), redirect: "manual" }),
@@ -111,6 +113,19 @@ try {
 	const hidden = await other.api(`/xitter/decor?names=${goldName}`).then((r) => r.json());
 	check(!hidden[goldName.toLowerCase()], "without the gold check nothing shows");
 	await sql`update users set verified_type = 'business' where lower(screen_name) = lower(${goldName})`;
+
+	// staff can take it off; an account without the permission can't
+	if (adminName) {
+		const [g] = await sql`select id::text as id from users where lower(screen_name) = lower(${goldName})`;
+		check((await other.admin("resetDecor", { id: g.id })).status === 403, "an account that isn't staff can't reset decor");
+		const staff = await signIn(adminName);
+		check((await staff.admin("resetDecor", { id: g.id })).ok, "staff reset an account's decor");
+		const [reset] = await sql`select decor from users where id = ${g.id}::bigint`;
+		check(reset.decor === null, "it's gone");
+		const [logged] = await sql`select detail from audit_log where action = 'reset_decor' and target = ${g.id} order by created_at desc limit 1`;
+		check(!!logged?.detail?.frame, "the audit log says what it was");
+		await gold.post({ theme: "Cosmic" });
+	}
 
 	for (const f of [{ kind: "frame", defid: "" }, { kind: "background", defid: "" }, { theme: "" }]) await gold.post(f);
 	const [after] = await sql`select decor from users where lower(screen_name) = lower(${goldName})`;
