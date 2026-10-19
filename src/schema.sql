@@ -1169,3 +1169,124 @@ do $$ begin
 		insert into schema_steps (name) values ('user_stats');
 	end if;
 end $$;
+
+-- federation (federation.ts, federation-sync.ts): accounts, posts and media
+-- from other instances are kept here as rows of their own, mapped to their id
+-- on the instance they come from
+alter table users add column if not exists instance text;
+alter table users add column if not exists remote_id bigint;
+alter table users add column if not exists instance_blocked boolean not null default false;
+create unique index if not exists users_remote_idx on users (instance, remote_id) where instance is not null;
+alter table media add column if not exists remote_instance text;
+alter table media add column if not exists remote_id bigint;
+alter table sessions add column if not exists expires_at timestamptz;
+alter table sessions add column if not exists superadmin boolean not null default false;
+create table if not exists federated_objects (
+	instance text not null,
+	kind text not null check (kind in ('user', 'post', 'media')),
+	remote_id bigint not null,
+	local_id bigint not null,
+	primary key (instance, kind, remote_id)
+);
+create unique index if not exists federated_objects_local_idx on federated_objects (kind, local_id);
+create table if not exists federation_outbox (
+	seq bigserial primary key,
+	kind text not null check (kind in ('user', 'post', 'like', 'repost', 'follow')),
+	a bigint not null,
+	b bigint,
+	created_at timestamptz not null default now()
+);
+create index if not exists federation_outbox_created_idx on federation_outbox (created_at);
+create table if not exists federation_peers (
+	instance text primary key,
+	cursor bigint not null default 0,
+	key text,
+	last_ok_at timestamptz,
+	last_error text,
+	last_error_at timestamptz
+);
+create table if not exists federation_blocks (
+	instance text primary key,
+	source text not null check (source in ('local', 'emergency', 'registry')),
+	reason text not null default '',
+	by_id bigint,
+	by_name text,
+	created_at timestamptz not null default now()
+);
+create table if not exists federation_state (key text primary key, value jsonb not null, updated_at timestamptz not null default now());
+create table if not exists federation_emergencies (
+	seq bigint primary key,
+	instance text not null,
+	action text not null check (action in ('block', 'lift')),
+	reason text not null default '',
+	by_name text not null,
+	issuer text not null,
+	envelope jsonb not null,
+	created_at timestamptz not null default now()
+);
+create table if not exists superadmin_tickets (nonce text primary key, used_at timestamptz not null default now());
+
+create or replace function federation_local(uid bigint) returns boolean language sql stable as $$
+	select exists (select 1 from users where id = uid and instance is null)
+$$;
+create or replace function federation_post_changed() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'DELETE' then
+		if federation_local(old.user_id) then insert into federation_outbox (kind, a) values ('post', old.id); end if;
+		return old;
+	end if;
+	if federation_local(new.user_id) then insert into federation_outbox (kind, a) values ('post', new.id); end if;
+	return new;
+end $$;
+create or replace trigger federation_post_insert after insert on posts for each row execute function federation_post_changed();
+create or replace trigger federation_post_update after update of text, hidden, edited_at, sensitive on posts for each row
+	when (old.text is distinct from new.text or old.hidden is distinct from new.hidden or old.edited_at is distinct from new.edited_at or old.sensitive is distinct from new.sensitive)
+	execute function federation_post_changed();
+create or replace trigger federation_post_delete before delete on posts for each row execute function federation_post_changed();
+
+create or replace function federation_pair_changed() returns trigger language plpgsql as $$
+declare
+	actor bigint;
+	target bigint;
+begin
+	if tg_table_name = 'follows' then
+		actor := coalesce(new.follower_id, old.follower_id);
+		target := coalesce(new.followee_id, old.followee_id);
+	else
+		actor := coalesce(new.user_id, old.user_id);
+		target := coalesce(new.post_id, old.post_id);
+	end if;
+	if federation_local(actor) then
+		insert into federation_outbox (kind, a, b) values (case tg_table_name when 'likes' then 'like' when 'reposts' then 'repost' else 'follow' end, actor, target);
+	end if;
+	return null;
+end $$;
+create or replace trigger federation_like_change after insert or delete on likes for each row execute function federation_pair_changed();
+create or replace trigger federation_repost_change after insert or delete on reposts for each row execute function federation_pair_changed();
+create or replace trigger federation_follow_change after insert or delete on follows for each row execute function federation_pair_changed();
+
+create or replace function federation_user_changed() returns trigger language plpgsql as $$
+begin
+	if tg_op = 'DELETE' then
+		if old.instance is null then insert into federation_outbox (kind, a) values ('user', old.id); end if;
+		return old;
+	end if;
+	if new.instance is null then insert into federation_outbox (kind, a) values ('user', new.id); end if;
+	return new;
+end $$;
+create or replace trigger federation_user_insert after insert on users for each row execute function federation_user_changed();
+create or replace trigger federation_user_update after update of screen_name, name, bio, location, avatar_url, banner_url, protected, status, deactivated_at on users for each row
+	when (old.screen_name is distinct from new.screen_name or old.name is distinct from new.name or old.bio is distinct from new.bio or old.location is distinct from new.location
+		or old.avatar_url is distinct from new.avatar_url or old.banner_url is distinct from new.banner_url or old.protected is distinct from new.protected
+		or old.status is distinct from new.status or old.deactivated_at is distinct from new.deactivated_at)
+	execute function federation_user_changed();
+create or replace trigger federation_user_delete before delete on users for each row execute function federation_user_changed();
+
+do $$ begin
+	if not exists (select 1 from schema_steps where name = 'federation_backfill') then
+		insert into federation_outbox (kind, a) select 'user', id from users where instance is null order by id;
+		insert into federation_outbox (kind, a) select 'post', p.id from posts p join users u on u.id = p.user_id
+			where u.instance is null and not u.protected and p.created_at > now() - interval '30 days' order by p.id;
+		insert into schema_steps (name) values ('federation_backfill');
+	end if;
+end $$;

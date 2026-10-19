@@ -12,7 +12,7 @@ export const blockedFor = (viewerId: string) =>
 	sql`(select blocked_id from blocks where blocker_id = ${viewerId}::bigint
 		union all select blocker_id from blocks where blocked_id = ${viewerId}::bigint)`;
 
-const gone = sql`(status = 'suspended' or deactivated_at is not null)`;
+const gone = sql`(status = 'suspended' or deactivated_at is not null or instance_blocked)`;
 export const outOfView = (viewerId: string) =>
 	sql`(select id from users where ${gone} or (status = 'limited' and id <> ${viewerId}::bigint
 		and id not in (select followee_id from follows where follower_id = ${viewerId}::bigint)

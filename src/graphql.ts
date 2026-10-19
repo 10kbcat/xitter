@@ -57,6 +57,7 @@ import {
 	unrepost,
 	seenBy,
 } from "./posts";
+import { lookupRemoteUser } from "./federation-sync";
 import { TopicError, setTopicState, suggestedTopics, topicById, topicContext, topicFeedbackActions, topicFeedbackKeys, topicResult, topicsForPosts } from "./topics";
 import { affiliatesOf, followList, suggestedUsers, userById, userByName, usersByIds } from "./users";
 
@@ -656,7 +657,8 @@ const handlers: Record<string, Handler> = {
 	},
 
 	UserByScreenName: async (v, vars) => {
-		const user = typeof vars.screen_name === "string" ? await userByName(v.id, vars.screen_name) : undefined;
+		const name = typeof vars.screen_name === "string" ? vars.screen_name.replace(/^@/, "") : "";
+		const user = name ? ((await userByName(v.id, name)) ?? (name.includes("@") && (await lookupRemoteUser(name).catch(() => undefined)) ? await userByName(v.id, name) : undefined)) : undefined;
 		// an empty answer makes the client show "this account doesn't exist"
 		if (!user) return { data: {} };
 		// staff too: they look a suspended account up in the admin panel

@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
+import { fetchRemoteMedia } from "./federation-sync";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { protectedFor, suspendedFor } from "./blocks";
 import { sql } from "./db";
@@ -382,13 +383,13 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 	const poster = /^\/media\/poster\/(\d{1,19})\.jpg$/.exec(pathname);
 	if (poster) {
 		const file = posterFile(MEDIA_DIR, poster[1]);
-		const served = existsSync(file) ? await servedOf(poster[1]) : undefined;
+		const served = existsSync(file) || (await fetchRemoteMedia(poster[1], true)) ? await servedOf(poster[1]) : undefined;
 		const cache = served && (await cacheFor(viewer, served));
 		if (!cache) return new Response("not found", { status: 404 });
 		return new Response(Bun.file(file), { headers: { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff" } });
 	}
 	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
-	if (!m || !existsSync(fileOf(m[1]))) return new Response("not found", { status: 404 });
+	if (!m || !(existsSync(fileOf(m[1])) || (await fetchRemoteMedia(m[1])))) return new Response("not found", { status: 404 });
 	const served = await servedOf(m[1]);
 	const cache = served && (await cacheFor(viewer, served));
 	if (!served || !cache) return new Response("not found", { status: 404 });

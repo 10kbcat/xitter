@@ -40,6 +40,7 @@ export const RULES = {
 	password: { limit: 10, window: 15 * MIN },
 	// codes and links mailed (sign-up, password reset), per address
 	mail: { limit: 5, window: 60 * MIN },
+	federation: { limit: 30_000, window: 15 * MIN },
 } satisfies Record<string, Rule>;
 
 export type Bucket = keyof typeof RULES;

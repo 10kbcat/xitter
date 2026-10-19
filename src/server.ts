@@ -30,6 +30,7 @@ import { forgotRoute, resetRoute } from "./password-reset";
 import { twoFactorRoute } from "./two-factor";
 import { extraBadges } from "./badges";
 import { startScheduler } from "./scheduled";
+import { federationRoute, startFederation } from "./federation-routes";
 import { gifProxy } from "./gifs";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
@@ -275,6 +276,10 @@ async function route(req: Request): Promise<Response | undefined> {
 			return new Response("This request came from another site.", { status: 403 });
 	}
 	if (p.startsWith("/abs/")) return serveClient(req, p);
+	if (p === "/.well-known/xitter" || p.startsWith("/federation/v1/")) {
+		const answer = await federationRoute(req, url);
+		if (answer) return answer;
+	}
 	// chat: the live socket (its token from GenerateXChatTokenMutation) and
 	// the way to the key backup realm
 	if (p === "/xchat/ws") {
@@ -419,6 +424,7 @@ const server = Bun.serve({
 });
 
 startScheduler();
+await startFederation();
 startMailDigests();
 startBackups();
 startPush();

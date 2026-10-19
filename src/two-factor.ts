@@ -32,7 +32,7 @@ export async function codeAccepted(userId: string, input: string): Promise<boole
 // 15 minute, five-guess challenge the code screen answers.
 export async function startChallenge(screenName: string, password: string): Promise<string | undefined> {
 	if (password.length > 1024 || screenName.length > 64) return undefined;
-	const [u] = await sql`select id::text, password_hash, totp_enabled from users where lower(screen_name) = lower(${screenName})
+	const [u] = await sql`select id::text, password_hash, totp_enabled from users where lower(screen_name) = lower(${screenName}) and instance is null
 		and (status <> 'suspended' or deactivated_at > now() - interval '30 days')`;
 	if (!u?.totp_enabled) return undefined;
 	if (!(await Bun.password.verify(password, u.password_hash).catch(() => false))) return undefined;

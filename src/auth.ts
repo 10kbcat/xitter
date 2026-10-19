@@ -90,7 +90,7 @@ export async function login(screenName: string, password: string): Promise<{ tok
 	if (password.length > 1024 || screenName.length > 64) return undefined;
 	await expireSanctions();
 	// accounts with a second factor sign in through the dialog's code step (startSession)
-	const [u] = await sql`select id, password_hash, deactivated_at from users where lower(screen_name) = lower(${screenName}) and not totp_enabled
+	const [u] = await sql`select id, password_hash, deactivated_at from users where lower(screen_name) = lower(${screenName}) and not totp_enabled and instance is null
 		and (status <> 'suspended' or deactivated_at > now() - interval '30 days')`;
 	// verify against a dummy hash when the user is unknown so timing does not reveal it
 	const ok = await Bun.password.verify(password, u?.password_hash ?? DUMMY_HASH).catch(() => false);
@@ -150,7 +150,8 @@ async function loadViewer(req: Request): Promise<Viewer | undefined> {
 	if (!token) return undefined;
 	const [row] = await sql`select ${viewerCols()}, s.csrf, s.token
 		from sessions s join users u on u.id = s.user_id
-		where s.token = ${token} and u.status <> 'suspended'`;
+		where s.token = ${token} and u.status <> 'suspended' and (s.expires_at is null or s.expires_at > now())
+			and (u.instance is null or (s.superadmin and s.expires_at is not null))`;
 	// for the admin panel's session list; written at most once a minute
 	if (row)
 		await sql`update sessions set last_seen_at = now(), user_agent = ${(req.headers.get("user-agent") ?? "").slice(0, 500)}
