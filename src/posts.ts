@@ -391,12 +391,19 @@ export async function setHighlight(userId: string, postId: string, on: boolean):
 	return true;
 }
 
-export async function folderPosts(viewerId: string, folderId: string, limit = 100): Promise<PostRow[]> {
-	const rows = await sql`${select(viewerId)}
+export async function folderPosts(viewerId: string, folderId: string, limit = 100, before?: { at: string; id: string }): Promise<{ posts: PostRow[]; next?: { at: string; id: string } }> {
+	const rows = await sql`with page as (${select(viewerId)}
 		join bookmark_folder_posts f on f.post_id = p.id and f.folder_id = ${folderId}::bigint
 		join bookmark_folders bf on bf.id = f.folder_id and bf.user_id = ${viewerId}::bigint
-		order by f.created_at desc limit ${limit}`;
-	return hydrate(viewerId, rows.map(toRow));
+		${before ? sql`where (f.created_at, f.post_id) < (${before.at}::timestamptz, ${before.id}::bigint)` : sql``}
+		order by f.created_at desc, f.post_id desc limit ${limit + 1})
+		select page.*, f.created_at::text as folder_created_at from page
+		join bookmark_folder_posts f on f.post_id = page.id and f.folder_id = ${folderId}::bigint
+		order by f.created_at desc, f.post_id desc`;
+	const more = rows.length > limit;
+	const page = rows.slice(0, limit);
+	const last = page.at(-1);
+	return { posts: await hydrate(viewerId, page.map(toRow)), ...(more && last ? { next: { at: last.folder_created_at, id: String(last.id) } } : {}) };
 }
 
 export async function likedPosts(viewerId: string, userId: string, limit = 100): Promise<PostRow[]> {

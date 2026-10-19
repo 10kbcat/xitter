@@ -675,6 +675,7 @@ create table if not exists bookmark_folder_posts (
 	created_at timestamptz not null default now(),
 	primary key (folder_id, post_id)
 );
+create index if not exists bookmark_folder_posts_page_idx on bookmark_folder_posts (folder_id, created_at desc, post_id desc);
 
 -- the reply the conversation's author pinned under their post
 alter table posts add column if not exists pinned_reply_id bigint references posts (id) on delete set null;
