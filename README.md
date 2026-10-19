@@ -74,6 +74,10 @@ copy during setup, and it stays on that machine.
   retry support; `/api` documents it. Pending uploads expire after one hour and
   are lost if the server restarts. Changing or resetting a password revokes all
   of that account's API tokens.
+- Connected apps: developers register a public client at `/account/apps/developer`,
+  users approve read or read-and-write access with OAuth 2 authorization code
+  and mandatory PKCE, and revoke access at `/account/apps`. Tokens expire after
+  30 days; `/api` documents the flow.
 - An admin panel at `/admin`: users, standing (restrict, limit, suspend),
   badges (blue, gold organisation, grey government organisation or official),
   translator globes (blue translator, gold translator moderator, yellow approver),
@@ -85,8 +89,7 @@ copy during setup, and it stays on that machine.
   and who sees IP addresses, email addresses, invite codes and server errors
   (`src/staff-permissions.ts`; `bun scripts/test-staff-permissions.ts` checks it)
 
-Not built yet: Spaces and live video, Moments, signing in other apps (Connected
-apps stays empty). Email is sent over SMTP to your own mail server when
+Not built yet: Spaces and live video, Moments. Email is sent over SMTP to your own mail server when
 `SMTP_URL` is set, or through [Resend](https://resend.com) when
 `RESEND_API_KEY` is (with both, Resend catches what SMTP refused); Admin >
 Email sends a test mail (it shows the server's answer) and lists every mail
