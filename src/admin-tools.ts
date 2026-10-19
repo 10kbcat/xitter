@@ -7,6 +7,7 @@ import { existsSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { type Action, AdminError, audit, guard, idOf } from "./admin";
 import { loadBuild } from "./build";
+import { INSTANCE_ID, isPeer } from "./federation";
 import { sql } from "./db";
 import { newId } from "./ids";
 import { MEDIA_DIR, sniffImage } from "./media";
@@ -162,8 +163,8 @@ export const toolActions: Record<string, Action> = {
 			await guard(a, id);
 			const badge = b.badgeId ? idOf(b.badgeId) : null;
 			await badgeExists(badge);
-			const rows = await sql`update users set org_badge_id = ${badge}::bigint where id = ${id}::bigint and verified_type in ('business', 'government') returning id`;
-			if (!rows.length) throw new AdminError("Only organisations have an organisation badge.");
+			const rows = await sql`update users set org_badge_id = ${badge}::bigint where id = ${id}::bigint returning id`;
+			if (!rows.length) throw new AdminError("No such account.", 404);
 			await audit(a, "org_badge", id, { badge });
 			return {};
 		},
@@ -483,7 +484,18 @@ export const toolActions: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			if (typeof b.maintenance !== "boolean" || typeof b.message !== "string" || b.message.length > 500) throw new AdminError("Invalid maintenance settings.");
-			const pin = b.global_pin ? idOf(String(b.global_pin).trim(), "post id") : null;
+			const pin = await (async () => {
+				const raw = typeof b.global_pin === "string" || typeof b.global_pin === "number" ? String(b.global_pin).trim() : "";
+				if (!raw) return null;
+				const url = /^https?:\/\/([^/?#\s]{1,260})\/[^?#\s]*\/status\/(\d{1,19})(?:[/?#]|$)/i.exec(raw);
+				if (!url) return idOf((/\/status\/(\d{1,19})/.exec(raw) ?? [])[1] ?? raw, "post id");
+				const host = url[1].toLowerCase();
+				const id = idOf(url[2], "post id");
+				if (host === INSTANCE_ID || !isPeer(host)) return id;
+				const [row] = await sql`select local_id::text from federated_objects where instance = ${host} and kind = 'post' and remote_id = ${id}::bigint`;
+				if (!row) throw new AdminError("That post hasn't reached this instance yet.");
+				return row.local_id as string;
+			})();
 			if (pin && !(await sql`select 1 from posts where id = ${pin}::bigint and not hidden`).length) throw new AdminError("Pin an existing visible post.");
 			await setSetting("operations", {
 				maintenance: b.maintenance,

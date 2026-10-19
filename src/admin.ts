@@ -432,11 +432,6 @@ const ACTIONS: Record<string, Action> = {
 			const badge = b.badge || null;
 			if (badge !== null && !["blue", "business", "government", "government_individual"].includes(badge)) throw new AdminError("Unknown badge.");
 			await guard(a, id);
-			// an account stops being an organisation when it loses the gold or grey (government) badge
-			if (badge !== "business" && badge !== "government") {
-				await sql`delete from affiliations where org_id = ${id}::bigint`;
-				await sql`delete from affiliation_requests where org_id = ${id}::bigint`;
-			}
 			// verified_at: "Verified since" on the About page; a new badge type starts it again
 			await sql`update users set verified_at = case when ${badge}::text is null then null when verified_type is distinct from ${badge}::text then now() else verified_at end,
 				verified_type = ${badge} where id = ${id}::bigint`;
@@ -546,7 +541,7 @@ const ACTIONS: Record<string, Action> = {
 	orgs: {
 		role: "support",
 		run: async () => ({
-			orgs: await sql`select ${userListCols} from users u where u.verified_type in ('business', 'government') order by u.name`,
+			orgs: await sql`select ${userListCols} from users u where u.verified_type in ('business', 'government') or exists (select 1 from affiliations af where af.org_id = u.id) order by u.name`,
 		}),
 	},
 
@@ -580,11 +575,9 @@ const ACTIONS: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const orgId = idOf(b.orgId, "organisation");
-			const [org] = await sql`select verified_type from users where id = ${orgId}::bigint`;
-			if (org?.verified_type !== "business" && org?.verified_type !== "government") throw new AdminError("Only accounts with the gold or grey organisation badge are organisations.");
+			if (!(await sql`select 1 from users where id = ${orgId}::bigint`).length) throw new AdminError("No such account.", 404);
 			const [u] = await sql`select id::text as id from users where lower(screen_name) = lower(${String(b.screen_name ?? "").replace(/^@/, "")})`;
 			if (!u) throw new AdminError("No account with that handle.");
-			if (u.id === orgId) throw new AdminError("An organisation can't be its own affiliate.");
 			await guard(a, u.id, true);
 			// one organisation per person; adding moves them
 			await sql`insert into affiliations (org_id, user_id) values (${orgId}::bigint, ${u.id}::bigint)
@@ -612,7 +605,7 @@ const ACTIONS: Record<string, Action> = {
 			const q = String(b.q ?? "").trim();
 			const author = String(b.author ?? "").trim().replace(/^@/, "");
 			const match = sql`(${q} = '' or p.text ilike ${like(q)}) and (${author} = '' or lower(u.screen_name) = lower(${author}))`;
-			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.hidden, p.sensitive, p.notice, p.count_overrides, p.reply_to_id::text as reply_to_id, u.screen_name, u.name,
+			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.hidden, p.sensitive, p.notice, p.count_overrides, p.reply_to_id::text as reply_to_id, u.id::text as user_id, u.screen_name, u.name,
 				(select count(*)::int from likes l where l.post_id = p.id) as likes,
 				(select count(*)::int from media m where m.post_id = p.id) as media
 				from posts p join users u on u.id = p.user_id
@@ -823,7 +816,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (_a, b) => {
 			const action = typeof b.action === "string" && /^[a-z_]{1,40}$/.test(b.action) ? b.action : null;
-			const who = typeof b.target === "string" ? b.target.trim().replace(/^@/, "").slice(0, 15) : "";
+			const who = typeof b.target === "string" ? b.target.trim().replace(/^@/, "").slice(0, 300).replace(new RegExp(`@${INSTANCE_ID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"), "") : "";
 			const offset = Math.max(0, Math.min(Number(b.offset) || 0, 100_000));
 			return {
 				entries: await sql`select l.id::text as id, l.action, l.target, l.detail, l.created_at, a.screen_name as actor, l.actor_id is null as automatic,
