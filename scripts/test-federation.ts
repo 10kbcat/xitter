@@ -105,6 +105,17 @@ try {
 	await A.db`update users set protected = true where id = ${alice.id}::bigint`;
 	check("a protected account's posts go from B", !!(await until(async () => !(await B.db`select 1 from posts where user_id = ${aliceOnB ?? "0"}::bigint`).length)));
 
+	const carol = await account(A, `fc${stamp}`);
+	made.push({ side: A, id: carol.id });
+	const carolOnB = await until(async () => (await B.db`select id::text from users where screen_name = ${`${carol.name}@${idOf(A.origin)}`}`)[0]?.id as string | undefined);
+	await A.db`update users set status = 'suspended' where id = ${carol.id}::bigint`;
+	check("a suspended account goes from B", !!carolOnB && !!(await until(async () => !(await B.db`select 1 from users where id = ${carolOnB ?? "0"}::bigint`).length)));
+	await A.db`update users set status = 'active' where id = ${carol.id}::bigint`;
+	const carolBack = await until(async () => (await B.db`select id::text from users where screen_name = ${`${carol.name}@${idOf(A.origin)}`}`)[0]?.id as string | undefined);
+	check("and comes back when it's lifted", !!carolBack, carolBack);
+	await A.db`delete from users where id = ${carol.id}::bigint`;
+	check("a deleted account goes from B", !!(await until(async () => !(await B.db`select 1 from users where screen_name = ${`${carol.name}@${idOf(A.origin)}`}`).length)));
+
 	const forged = await fetch(`${A.origin}/federation/v1/events?after=0`, {
 		headers: { "x-xitter-from": idOf(B.origin), "x-xitter-to": idOf(A.origin), "x-xitter-timestamp": String(Date.now()), "x-xitter-nonce": "AAAAAAAAAAAAAAAAAAAAAA", "x-xitter-signature": "x".repeat(86) },
 	});
