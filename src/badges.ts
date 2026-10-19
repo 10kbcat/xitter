@@ -74,7 +74,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// stays on the element (and its tooltip), and the globe badge says where
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
-	// `tag`: where accounts are told apart by their handle (search, Who to
+	// tag: where accounts are told apart by their handle (search, Who to
 	// follow, profiles), a small tag with the instance follows it, or five
 	// accounts would all read "@Roblox"
 	function shorten(box,tag){
