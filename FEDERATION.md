@@ -179,6 +179,11 @@ On every instance:
   else can sign up, rename to it or create an organization with it, even if
   the account is deleted.
 
+Because of that, a superadmin account that doesn't exist yet can't be made
+through the sign-up page. Create it on the server with
+`bun scripts/create-user.ts <name> <password>` and `bun scripts/make-admin.ts <name> admin`,
+then turn on two-factor authentication from its settings.
+
 ### Emergency defederation
 
 From the same page, a superadmin can defederate an instance everywhere. Their
