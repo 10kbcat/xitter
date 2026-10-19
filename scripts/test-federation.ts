@@ -160,6 +160,36 @@ try {
 	await alice.gql("DeleteTweet", { tweet_id: postId });
 	check("a deleted post goes from B", !!(await until(async () => !(await B.db`select 1 from posts where id = ${mirror ?? "0"}::bigint`).length)));
 
+	const parent = (await alice.gql("CreateTweet", { tweet_text: `parent ${stamp}` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	const orphan = (await alice.gql("CreateTweet", { tweet_text: `orphan ${stamp}`, reply: { in_reply_to_tweet_id: parent } })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	await alice.gql("DeleteTweet", { tweet_id: parent });
+	const orphanOnB = await until(async () => (await B.db`select p.reply_to_id::text from posts p join federated_objects f on f.kind = 'post' and f.local_id = p.id where f.instance = ${idOf(A.origin)} and f.remote_id = ${orphan ?? "0"}::bigint`)[0]);
+	check("a reply whose parent was deleted stays a reply on B", !!orphanOnB?.reply_to_id, orphanOnB);
+
+	const hidden = (await alice.gql("CreateTweet", { tweet_text: `not for peers ${stamp}` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	await A.db`update posts set hidden = true where id = ${hidden ?? "0"}::bigint`;
+	const quoting = (await alice.gql("CreateTweet", { tweet_text: `quoting ${stamp}`, attachment_url: `${A.origin}/${alice.name}/status/${hidden}` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	const quoteOnB = await until(async () => (await B.db`select p.text, p.quote_id::text from posts p join federated_objects f on f.kind = 'post' and f.local_id = p.id where f.instance = ${idOf(A.origin)} and f.remote_id = ${quoting ?? "0"}::bigint`)[0]);
+	check("a quote of a post that can't federate links to it on B", !quoteOnB?.quote_id && quoteOnB?.text?.includes(`${A.origin}/${alice.name}/status/${hidden}`), quoteOnB);
+
+	const closedPost = (await alice.gql("CreateTweet", { tweet_text: `soon protected ${stamp}` })).data?.create_tweet?.tweet_results?.result?.rest_id as string;
+	const closedOnB = await until(async () => (await B.db`select local_id::text from federated_objects where instance = ${idOf(A.origin)} and kind = 'post' and remote_id = ${closedPost ?? "0"}::bigint`)[0]?.local_id as string);
+	const quiet = (on: boolean) => A.db.begin(async (tx) => {
+		await tx`set local session_replication_role = replica`;
+		await tx`update users set protected = ${on} where id = ${alice.id}::bigint`;
+	});
+	await quiet(true);
+	const erin = await account(A, `fe${stamp}`);
+	const dave = await account(B, `fd${stamp}`);
+	made.push({ side: A, id: erin.id }, { side: B, id: dave.id });
+	const refused = await erin.gql("CreateTweet", { tweet_text: `let me in ${stamp}`, reply: { in_reply_to_tweet_id: closedPost } });
+	check("someone who doesn't follow a protected account can't reply to it", !refused.data?.create_tweet?.tweet_results?.result?.rest_id && !!refused.errors, refused.errors);
+	if (closedOnB) await B.db`insert into posts (id, user_id, text, reply_to_id, conversation_id) values (${newId()}::bigint, ${dave.id}::bigint, ${`sneaky ${stamp}`}, ${closedOnB}::bigint, ${closedOnB}::bigint)`;
+	const daveOnA = await until(async () => (await A.db`select id::text from users where instance = ${idOf(B.origin)} and remote_id = ${dave.id}::bigint`)[0]?.id as string);
+	await Bun.sleep(3000);
+	check("nor can someone from another instance", !!closedOnB && !!daveOnA && !(await A.db`select 1 from posts where reply_to_id = ${closedPost ?? "0"}::bigint and user_id = ${daveOnA}::bigint`).length, { closedOnB, daveOnA });
+	await quiet(false);
+
 	await A.db`update users set protected = true where id = ${alice.id}::bigint`;
 	check("a protected account's posts go from B", !!(await until(async () => !(await B.db`select 1 from posts where user_id = ${aliceOnB ?? "0"}::bigint`).length)));
 
