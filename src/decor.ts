@@ -639,6 +639,10 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			layer=document.createElement("div");
 			layer.setAttribute("data-xitter-decor-bg","");
 			var bg=k.background;
+			// the whole picture, as wide as the window: covering it cut the sides
+			// off, where the art usually is. Below it, a blurred copy fills in.
+			var fill=document.createElement("div");fill.className="fill";fill.style.backgroundImage='url("'+bg.image+'")';
+			layer.appendChild(fill);
 			if(bg.movie||bg.mp4){
 				var v=document.createElement("video");
 				v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");v.poster=bg.image;
@@ -646,7 +650,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 				if(bg.mp4){var s2=document.createElement("source");s2.src=bg.mp4;s2.type="video/mp4";v.appendChild(s2)}
 				if(matchMedia("(prefers-reduced-motion: reduce)").matches)v.autoplay=false;
 				layer.appendChild(v);
-			}else layer.style.backgroundImage='url("'+bg.image+'")';
+			}else{var pic=document.createElement("img");pic.src=bg.image;pic.alt="";layer.appendChild(pic)}
 			document.body.prepend(layer);
 			// the page's own black goes, so the background shows around the columns
 			// the menu on the left sits on the background: blurred under it, so it reads
@@ -695,8 +699,9 @@ export const DECOR_SCRIPT = String.raw`(function(){
 	// in the corners, so a framed picture is squared off
 	base.textContent='[data-xitter-framed] div{border-radius:4%!important}'+
 		'[data-xitter-frame]{position:absolute;left:-11%;top:-11%;width:122%;height:122%;max-width:none;pointer-events:none;z-index:1}'+
-		'[data-xitter-decor-bg]{position:fixed;inset:0;z-index:-1;background:#000 center top/cover no-repeat;overflow:hidden;pointer-events:none}'+
-		'[data-xitter-decor-bg] video{position:absolute;left:50%;top:0;transform:translateX(-50%);min-width:100%;min-height:100%;object-fit:cover}';
+		'[data-xitter-decor-bg]{position:fixed;inset:0;z-index:-1;background:#000;overflow:hidden;pointer-events:none}'+
+		'[data-xitter-decor-bg] .fill{position:absolute;inset:-60px;background:center/cover no-repeat;filter:blur(40px) brightness(.55)}'+
+		'[data-xitter-decor-bg] video,[data-xitter-decor-bg] img{position:absolute;left:0;top:0;width:100%;height:auto;-webkit-mask-image:linear-gradient(#000 80%,transparent);mask-image:linear-gradient(#000 80%,transparent)}';
 	document.head.appendChild(base);
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;scan()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 	addEventListener("popstate",scan);
