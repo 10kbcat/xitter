@@ -317,11 +317,20 @@ try {
 		check("and it stops reading before the end, after the events it applied", BigInt(cursor) > 0n && BigInt(cursor) < BigInt(head), { cursor, head });
 	}
 
+	const [bAdminSession] = await B.db`select token, csrf from sessions where user_id = ${bAdmin.id}::bigint`;
+	const bAdminCookies = `auth_token=${bAdminSession.token}; ct0=${bAdminSession.csrf}`;
+	const ownBlock = await adminApi(B, bAdminCookies, "federationBlock", { instance: "localhost:3043", reason: "our own reasons" });
+	check("B's admin defederates D on their own", ownBlock.status === 200, ownBlock.body);
 	const sent = await (await ask("/federation/superadmin/emergency", { instance: "localhost:3043", action: "block", reason: "test emergency", password: "testpass123", code: codeAt(secret, Math.floor(Date.now() / 30000) + 1) })).text();
 	check("meow sends an emergency defederation", sent.includes("Sent."), sent.slice(0, 300));
 	check("B applies it", !!(await until(async () => (await B.db`select source from federation_blocks where instance = 'localhost:3043'`)[0]?.source === "emergency", 30)));
 	const lifted = await adminApi(B, superCookies, "federationUnblock", { instance: "localhost:3043" });
 	check("a superadmin session can lift it locally", lifted.status === 200, lifted.body);
+	const [afterLift] = await B.db`select source, reason from federation_blocks where instance = 'localhost:3043'`;
+	check("lifting the emergency keeps B's own block", afterLift?.source === "local" && afterLift.reason === "our own reasons", afterLift);
+	await adminApi(B, bAdminCookies, "federationUnblock", { instance: "localhost:3043" });
+	await B.db`update sessions set expires_at = now() - interval '1 second' where user_id = ${superOnB?.id ?? "0"}::bigint and superadmin`;
+	check("meow's copy stops being an admin once the visit ends", !!(await until(async () => (await B.db`select role from users where id = ${superOnB?.id ?? "0"}::bigint`)[0]?.role === null, 75)));
 
 	const rename = await fetch(`${A.origin}/1.1/account/settings.json`, { method: "POST", headers: { cookie: meowCookies, "x-csrf-token": "meowcsrf" }, body: new URLSearchParams({ screen_name: `meow${stamp}` }) });
 	check("meow can't rename away from the superadmin handle", rename.status === 400, await rename.text());
@@ -339,7 +348,7 @@ try {
 	await A.db`update users set role = 'admin' where id = ${later.id}::bigint`;
 	check("and the block goes when they become an admin", !(await A.db`select 1 from blocks where blocker_id = ${alice.id}::bigint and blocked_id = ${later.id}::bigint`).length);
 	const blockSuper = await bob.form("/1.1/blocks/create.json", { user_id: superOnB?.id ?? "0" });
-	check("bob can't block a superadmin, who admins B too", blockSuper.status === 403, blockSuper.status);
+	check("bob can block meow's account, which only hides it from him", blockSuper.status === 200, blockSuper.status);
 	const adminOnB = await until(async () => (await B.db`select id::text from users where instance = ${idOf(A.origin)} and remote_id = ${admin.id}::bigint`)[0]?.id);
 	const blockRemoteAdmin = await bob.form("/1.1/blocks/create.json", { user_id: adminOnB ?? "0" });
 	check("bob can block A's admin, whose instance isn't his", blockRemoteAdmin.status === 200, { status: blockRemoteAdmin.status, adminOnB });

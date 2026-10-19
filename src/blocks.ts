@@ -57,7 +57,7 @@ export async function setBlock(blockerId: string, blockedId: string, on: boolean
 		await sql`delete from blocks where blocker_id = ${blockerId}::bigint and blocked_id = ${blockedId}::bigint`;
 		return true;
 	}
-	const [admin] = await sql`select 1 from users b join users t on t.id = ${blockedId}::bigint where b.id = ${blockerId}::bigint and b.instance is null and t.role = 'admin'`;
+	const [admin] = await sql`select 1 from users b join users t on t.id = ${blockedId}::bigint where b.id = ${blockerId}::bigint and b.instance is null and t.role = 'admin' and t.instance is null`;
 	if (admin) return false;
 	await sql.begin(async (tx) => {
 		await tx`insert into blocks (blocker_id, blocked_id) values (${blockerId}::bigint, ${blockedId}::bigint) on conflict do nothing`;
