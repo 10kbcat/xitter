@@ -75,7 +75,8 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	// they're from. Only the text changes, in place, so the client's own copy
 	// of it stays its own: when it writes the long one back, it's shortened again.
 	// a small tag with the instance follows the short handle, or five accounts
-	// would all read "@Roblox"
+	// would all read "@Roblox"; not inside a post's text, where a mention is part
+	// of a sentence (its link and tooltip still say who it is)
 	function shorten(box){
 		var spans=[box].concat([].slice.call(box.querySelectorAll("span, a")));
 		for(var i=0;i<spans.length;i++){
@@ -86,7 +87,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			el.setAttribute("data-xitter-handle",(m[1]+"@"+m[2]).toLowerCase());
 			el.title="@"+m[1]+"@"+m[2];
 			t.nodeValue="@"+m[1];
-			if(!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
+			if(!el.closest('[data-testid="tweetText"]')&&!(el.nextElementSibling&&el.nextElementSibling.hasAttribute("data-xitter-home"))){
 				var home=document.createElement("span");
 				home.setAttribute("data-xitter-home","");
 				home.textContent=m[2];
