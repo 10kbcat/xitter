@@ -85,8 +85,9 @@ bun scripts/drop-remote-media.ts
 A post from another instance names it after its time, for example
 `Xitter for Web - xit.example.org`.
 
-Anyone can hide accounts and organisations from other instances for
-themselves in Settings > Other instances (`/account/instances`). They then stay
+Anyone can hide accounts and organisations from all other instances, or only
+from the instances they pick, for themselves in Settings > Other instances
+(`/account/instances`). They then stay
 out of that person's timelines, replies, search and suggestions, except accounts
 they follow. Searching a full handle such as `@name@example.org` still finds
 them.
