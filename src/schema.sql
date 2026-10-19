@@ -1408,3 +1408,18 @@ end $$;
 drop trigger if exists users_admins_unblocked on users;
 create trigger users_admins_unblocked after update of role on users for each row execute function admins_unblocked();
 delete from blocks bl using users b, users t where b.id = bl.blocker_id and t.id = bl.blocked_id and b.instance is null and t.role = 'admin' and t.instance is null;
+
+-- Imports of X archives (archive-import.ts): one per account, the latest. The
+-- zip waits in ARCHIVE_DIR while it uploads and imports, and goes when done.
+create table if not exists archive_imports (
+	user_id bigint primary key references users (id) on delete cascade,
+	state text not null check (state in ('uploading', 'queued', 'running', 'done', 'failed')),
+	size bigint not null default 0,
+	options jsonb not null default '{}',
+	total int not null default 0,
+	posts int not null default 0,
+	media int not null default 0,
+	skipped int not null default 0,
+	error text,
+	updated_at timestamptz not null default now()
+);

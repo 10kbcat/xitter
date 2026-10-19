@@ -39,6 +39,7 @@ import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./rateli
 import { actingViewer, delegateMay } from "./delegation";
 import { automationRoute } from "./automation";
 import { instancesRoute } from "./federation-settings";
+import { importRoute, resumeImports } from "./archive-import";
 import { stickerImage, stickerPacks } from "./stickers";
 import { apiTokensRoute, publicApi } from "./public-api";
 import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken } from "./oauth";
@@ -258,6 +259,7 @@ setInterval(
 ).unref();
 await loadSettings();
 await resumeVideos(MEDIA_DIR);
+await resumeImports();
 
 // a request that throws is answered by Bun's error() below, which doesn't know
 // the request; caught here it is logged with its path and account
@@ -383,6 +385,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/notes/appeals" && viewer) return noteAppealsRoute(req, viewer);
 	if (p === "/account/automation" && viewer) return automationRoute(req, viewer);
 	if (p === "/account/instances" && viewer) return instancesRoute(req, viewer);
+	if ((p === "/account/import" || p === "/account/import/upload") && viewer) return importRoute(req, url, viewer);
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
