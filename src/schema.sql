@@ -622,6 +622,7 @@ create table if not exists scheduled_posts (
 );
 create index if not exists scheduled_posts_due_idx on scheduled_posts (execute_at) where kind = 'scheduled';
 create index if not exists scheduled_posts_user_idx on scheduled_posts (user_id, kind);
+alter table scheduled_posts add column if not exists attempts int not null default 0;
 
 alter table posts add column if not exists place_id text;
 
