@@ -3,7 +3,8 @@
 // instead of registering a client on every instance. The document names the
 // app and lists its redirect URLs, so one app signs in on any Xitter in one tap.
 import { lookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
+import { type RequestOptions, get } from "node:https";
+import { BlockList, type LookupFunction, isIP } from "node:net";
 import { PUBLIC_ORIGIN } from "./config";
 
 export type ClientMetadata = { url: string; name: string; redirects: string[] };
@@ -26,14 +27,16 @@ export function metadataClientId(value: string): URL | undefined {
 	}
 }
 
-// loopback, private, link-local, carrier-grade NAT, multicast and reserved
-// ranges: the server never fetches a client document from these
+// loopback, private, link-local, carrier-grade NAT, documentation, benchmark,
+// multicast and reserved ranges: the server never fetches a client document
+// from these
 const RESERVED = new BlockList();
-for (const [address, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const)
+for (const [address, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 3]] as const)
 	RESERVED.addSubnet(address, prefix, "ipv4");
 // (BlockList matches every IPv4 address against ::ffff:0:0/96, so mapped
 // addresses are unwrapped below rather than listed here)
-for (const [address, prefix] of [["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const)
+// Teredo (2001::/32) and 6to4 (2002::/16) can carry any IPv4 address inside
+for (const [address, prefix] of [["::", 127], ["64:ff9b::", 96], ["100::", 64], ["2001::", 32], ["2001:db8::", 32], ["2002::", 16], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const)
 	RESERVED.addSubnet(address, prefix, "ipv6");
 const reserved = (address: string) => {
 	const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
@@ -44,32 +47,56 @@ const reserved = (address: string) => {
 // tests swap the lookup out
 export const resolver = { lookup: (host: string) => lookup(host, { all: true, verbatim: true }) };
 
-async function publicHost(host: string): Promise<boolean> {
-	try {
-		const addresses = await resolver.lookup(host);
-		return addresses.length > 0 && addresses.every((a) => isIP(a.address) && !reserved(a.address));
-	} catch {
-		return false;
-	}
-}
+// The connection's own DNS lookup: it refuses a name with any reserved
+// address and connects to an address it just checked, so a host can't pass
+// the check and then answer with a private address for the connection
+export const publicLookup: LookupFunction = (host, options, callback) => {
+	resolver.lookup(host).then(
+		(addresses) => {
+			if (!addresses.length || !addresses.every((a) => isIP(a.address) && !reserved(a.address)))
+				return callback(Object.assign(new Error(`${host} isn't a public address`), { code: "ENOTFOUND" }), "", 0);
+			const usable = options.family ? addresses.filter((a) => a.family === options.family) : addresses;
+			if (!usable.length) return callback(Object.assign(new Error(`${host} has no usable address`), { code: "ENOTFOUND" }), "", 0);
+			if (options.all) return (callback as unknown as (e: null, a: typeof usable) => void)(null, usable);
+			callback(null, usable[0]!.address, usable[0]!.family);
+		},
+		(error) => callback(error, "", 0),
+	);
+};
 
-async function readCapped(res: Response): Promise<string | undefined> {
-	if (Number(res.headers.get("content-length") ?? 0) > MAX_BYTES || !res.body) return undefined;
-	const reader = res.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let size = 0;
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		size += value.byteLength;
-		if (size > MAX_BYTES) {
-			await reader.cancel().catch(() => {});
-			return undefined;
-		}
-		chunks.push(value);
-	}
-	return Buffer.concat(chunks).toString("utf8");
-}
+// GET over HTTPS through publicLookup: no redirects, 5 seconds, 16 KB; the
+// body only for a 200. Tests swap it out, or pass options to reach a local
+// test server.
+export const fetcher = {
+	get: (url: string, test: RequestOptions = {}) =>
+		new Promise<string | undefined>((resolve) => {
+			const req = get(url, { lookup: publicLookup, headers: { accept: "application/json" }, timeout: 5000, ...test }, (res) => {
+				if (res.statusCode !== 200 || Number(res.headers["content-length"] ?? 0) > MAX_BYTES) {
+					res.destroy();
+					return resolve(undefined);
+				}
+				const chunks: Buffer[] = [];
+				let size = 0;
+				res.on("data", (chunk: Buffer) => {
+					size += chunk.length;
+					if (size > MAX_BYTES) {
+						res.destroy();
+						return resolve(undefined);
+					}
+					chunks.push(chunk);
+				});
+				res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+				res.on("error", () => resolve(undefined));
+			});
+			req.on("timeout", () => req.destroy());
+			req.on("error", () => resolve(undefined));
+			// the timeout above is per idle socket; this bounds the whole request
+			setTimeout(() => {
+				req.destroy();
+				resolve(undefined);
+			}, 5000).unref();
+		}),
+};
 
 function parse(url: string, text: string): ClientMetadata | undefined {
 	let doc: Record<string, unknown>;
@@ -107,14 +134,8 @@ export async function clientMetadata(clientId: string): Promise<ClientMetadata |
 	if (!url) return undefined;
 	const hit = cache.get(url.href);
 	if (hit && Date.now() - hit.at < (hit.doc ? TTL : FAILED_TTL)) return hit.doc;
-	let doc: ClientMetadata | undefined;
-	if (await publicHost(url.hostname)) {
-		try {
-			const res = await fetch(url.href, { redirect: "manual", headers: { accept: "application/json" }, signal: AbortSignal.timeout(5000) });
-			const text = res.status === 200 ? await readCapped(res) : undefined;
-			doc = text === undefined ? undefined : parse(url.href, text);
-		} catch {}
-	}
+	const text = await fetcher.get(url.href).catch(() => undefined);
+	const doc = text === undefined ? undefined : parse(url.href, text);
 	if (cache.size > 500) cache.clear();
 	cache.set(url.href, { at: Date.now(), doc });
 	return doc;
