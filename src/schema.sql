@@ -1465,3 +1465,7 @@ alter table archive_imports add constraint archive_imports_state_check check (st
 
 -- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
 alter table users add column if not exists decor jsonb;
+
+alter table posts add column if not exists conversation_card jsonb;
+
+alter table posts add column if not exists conversation_card_post_id bigint references posts (id) on delete set null;
