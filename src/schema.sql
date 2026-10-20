@@ -86,6 +86,26 @@ create table if not exists login_challenges (
 	attempts int not null default 0,
 	created_at timestamptz not null default now()
 );
+-- passkeys (passkeys.ts): id is the credential id, public_key its SPKI, both base64url
+create table if not exists passkeys (
+	id text primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	public_key text not null,
+	alg int not null,
+	sign_count bigint not null default 0,
+	name text not null,
+	transports text[] not null default '{}',
+	backed_up boolean not null default false,
+	created_at timestamptz not null default now(),
+	last_used_at timestamptz
+);
+create index if not exists passkeys_user on passkeys (user_id);
+-- one per sign-in or set-up, used once; user_id only when adding a passkey
+create table if not exists passkey_challenges (
+	challenge text primary key,
+	user_id bigint references users (id) on delete cascade,
+	created_at timestamptz not null default now()
+);
 -- who has been shown a post (other than its author), once each
 create table if not exists post_views (
 	post_id bigint not null references posts (id) on delete cascade,
