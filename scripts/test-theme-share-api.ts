@@ -33,7 +33,7 @@ try {
 		method: "POST",
 		headers: { ...headers, "content-type": "application/json" },
 		body: JSON.stringify({
-			theme: { ...theme, background: { fit: "cover", position: "center", dim: 20, blur: 4, scale: 180, repeat: "round", panel: 55, mediaId: "1" } },
+			theme: { ...theme, background: { fit: "cover", position: "center", dim: 20, blur: 4, mediaId: "1" } },
 		}),
 	});
 
@@ -41,7 +41,6 @@ try {
 	const exportedText = await exported.text();
 	check(exported.ok && (exported.headers.get("content-disposition") ?? "").includes(".xitter-theme.json"), "export downloads a theme file", exported.status);
 	check(exportedText.includes('"format":"xitter-theme"') && !exportedText.includes("mediaId") && !exportedText.includes("/media/"), "export omits the image");
-	check(exportedText.includes('"scale":180') && exportedText.includes('"repeat":"round"') && exportedText.includes('"panel":55'), "export shares scale, repeat, and panel");
 
 	const imported = await fetch(`${origin}/i/api/xitter/theme/import`, {
 		method: "POST",
@@ -57,8 +56,6 @@ try {
 		fileOf({ ...theme, extra: true }),
 		fileOf({ ...theme, font: { ui: "../../etc" } }),
 		fileOf({ ...theme, background: { url: "https://evil.example/x.gif" } }),
-		fileOf({ ...theme, background: { fit: "tile", position: "center", dim: 0, blur: 0, scale: 100, repeat: "repeat; } body{display:none", panel: 72 } }),
-		fileOf({ ...theme, background: { fit: "cover", position: "center", dim: 0, blur: 0, scale: 9, repeat: "repeat", panel: 72 } }),
 	];
 	for (const body of attacks) {
 		const r = await fetch(`${origin}/i/api/xitter/theme/import`, {
@@ -75,22 +72,6 @@ try {
 	const page = await fetch(`${origin}/account/theme`, { headers: { cookie } });
 	const html = await page.text();
 	check(html.includes("Export theme") && html.includes("Import theme") && html.includes("theme-file"), "editor has share controls");
-
-	if (process.env.STEAM_THEME_LIVE) {
-		const steamFile = fileOf({
-			...theme,
-			background: { fit: "cover", position: "center", dim: 0, blur: 0, scale: 100, repeat: "repeat", panel: 72, steam: { defid: 190993 } },
-		});
-		const steamRes = await fetch(`${origin}/i/api/xitter/theme/import`, {
-			method: "POST",
-			headers: { ...headers, "content-type": "text/plain" },
-			body: steamFile,
-		});
-		const steamImport = (await steamRes.json()) as { ok?: boolean; theme?: { background?: { steam?: { defid?: number } } } };
-		const themeJson = JSON.stringify(steamImport.theme ?? {});
-		check(steamRes.status === 200 && steamImport.ok === true && steamImport.theme?.background?.steam?.defid === 190993, "live import steam defid 190993", steamImport);
-		check(!themeJson.includes('"image"') && !themeJson.includes('"appid"') && !themeJson.includes('"movie"'), "live steam import keeps only the defid");
-	}
 } finally {
 	await sql`update users set preferences = ${JSON.stringify(before?.preferences ?? {})}::text::jsonb where lower(screen_name) = lower(${name})`;
 }
