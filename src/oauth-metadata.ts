@@ -9,7 +9,7 @@ import { PUBLIC_ORIGIN } from "./config";
 export type ClientMetadata = { url: string; name: string; redirects: string[] };
 
 const MAX_BYTES = 16 * 1024;
-const TTL = 5 * 60_000;
+const TTL = 5 * 60_000, FAILED_TTL = 60_000;
 const cache = new Map<string, { at: number; doc: ClientMetadata | undefined }>();
 
 // a client_id that names a metadata document: https, a path, no query,
@@ -100,13 +100,13 @@ function parse(url: string, text: string): ClientMetadata | undefined {
 	return { url, name, redirects };
 }
 
-// the app's metadata document, fetched (and kept a few minutes), or undefined
+// the app's metadata document, fetched (and kept five minutes, a failure one), or undefined
 // when it can't be used
 export async function clientMetadata(clientId: string): Promise<ClientMetadata | undefined> {
 	const url = metadataClientId(clientId);
 	if (!url) return undefined;
 	const hit = cache.get(url.href);
-	if (hit && Date.now() - hit.at < TTL) return hit.doc;
+	if (hit && Date.now() - hit.at < (hit.doc ? TTL : FAILED_TTL)) return hit.doc;
 	let doc: ClientMetadata | undefined;
 	if (await publicHost(url.hostname)) {
 		try {

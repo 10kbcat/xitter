@@ -203,11 +203,11 @@ form.decide button{flex:1 1 0;min-width:0;min-height:44px;font-size:16px}
 `;
 
 async function appsPage(req: Request, viewer: Viewer, message = ""): Promise<Response> {
-	const grants = await sql`select t.id::text, t.scope, t.created_at, t.last_used_at, t.expires_at, c.name, c.id::text as client_id
+	const grants = await sql`select t.id::text, t.scope, t.created_at, t.last_used_at, t.expires_at, c.name, c.id::text as client_id, c.metadata_url
 		from api_tokens t join oauth_clients c on c.id = t.client_id where t.user_id = ${viewer.id}::bigint order by t.created_at desc`;
 	const hidden = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
 	return accountPage({ req, viewer, title: "Connected apps", referrer: "same-origin", body: `<h1>Connected apps</h1><p>Apps authorized to use your account. Removing one takes effect immediately.</p>
-${message ? `<p>${esc(message)}</p>` : ""}${grants.length ? grants.map((g) => `<div class="card split"><div><b>${esc(g.name)}</b><div class="dim">${g.scope === "write" ? "Read and write" : "Read only"} · expires ${esc(new Date(g.expires_at).toLocaleDateString())}</div></div><form method="post">${hidden}<input type="hidden" name="id" value="${g.id}"><button class="danger">Remove</button></form></div>`).join("") : `<p class="dim">No connected apps.</p>`}
+${message ? `<p>${esc(message)}</p>` : ""}${grants.length ? grants.map((g) => `<div class="card split"><div><b>${esc(g.name)}</b><div class="dim">${g.metadata_url ? `${esc(new URL(g.metadata_url).host)} · ` : ""}${g.scope === "write" ? "Read and write" : "Read only"} · expires ${esc(new Date(g.expires_at).toLocaleDateString())}</div></div><form method="post">${hidden}<input type="hidden" name="id" value="${g.id}"><button class="danger">Remove</button></form></div>`).join("") : `<p class="dim">No connected apps.</p>`}
 <p><a href="/account/apps/developer">Register an app you are building</a></p>` });
 }
 

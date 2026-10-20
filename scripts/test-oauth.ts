@@ -97,6 +97,7 @@ try {
 	assert.equal((await (await api("GET", "/me", docAccess)).json()).data.id, account, "its token works");
 	const [docClient] = await sql`select id::text, owner_id from oauth_clients where metadata_url = ${doc}`;
 	assert(docClient && docClient.owner_id === null, "approval made an ownerless client row");
+	assert((await (await connectedAppsRoute(new Request(`${origin}/account/apps`), user)).text()).includes(`mobile-${account}.example · Read and write`), "Connected apps shows the app's domain");
 	await approve(doc, "write", docRedirect);
 	assert.equal((await sql`select count(*)::int as n from oauth_clients where metadata_url = ${doc}`)[0].n, 1, "approving again reuses the row");
 	await sql`update oauth_clients set revoked = true where id = ${docClient.id}::bigint`;
