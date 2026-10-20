@@ -3,10 +3,28 @@
 
 import type { Viewer } from "./auth";
 import { fontSlug, prepareFonts, validateFamily } from "./fonts";
+import { isId } from "./ids";
 
 export type Gradient = { stops: string[]; angle: number };
 export type Fill = string | Gradient;
 export type ThemeFont = { ui?: string; display?: string };
+
+declare const mediaIdBrand: unique symbol;
+declare const dimBrand: unique symbol;
+declare const blurBrand: unique symbol;
+export type MediaId = string & { readonly [mediaIdBrand]: true };
+export type Dim = number & { readonly [dimBrand]: true };
+export type BlurPx = number & { readonly [blurBrand]: true };
+export type BgFit = "cover" | "contain" | "tile";
+export type BgPosition = "center" | "top" | "bottom";
+
+export type ThemeBackground = {
+	fit: BgFit;
+	position: BgPosition;
+	dim: Dim;
+	blur: BlurPx;
+	mediaId?: MediaId;
+};
 
 export type Theme = {
 	id: string;
@@ -43,37 +61,107 @@ export type Theme = {
 	badge?: string;
 	selection?: string;
 	font?: ThemeFont;
+	background?: ThemeBackground;
 };
 
 export type Sanitised = { theme: Theme; warnings: string[] };
 
-export const GRADIENT_FIELDS = ["bg", "surface", "button", "header", "menu", "secondaryButton"] as const;
 export const TEXT_FIELDS = ["text", "secondary", "muted", "link", "inputText", "buttonText", "secondaryButtonText"] as const;
-export const OPTIONAL_HEX = [
-	"link",
-	"secondary",
-	"muted",
-	"border",
-	"divider",
-	"hover",
-	"inputBg",
-	"inputText",
-	"inputBorder",
-	"tooltip",
-	"icon",
-	"iconActive",
-	"reply",
-	"repost",
-	"like",
-	"bookmark",
-	"views",
-	"secondaryButtonBorder",
-	"secondaryButtonText",
-	"buttonHover",
-	"badge",
-	"selection",
+
+export const THEME_FORMAT = "xitter-theme" as const;
+export const THEME_VERSION = 1 as const;
+export const THEME_FILE_MAX = 64 * 1024;
+export const THEME_DEPTH_MAX = 6;
+export const BACKGROUND_OMITTED = "background image not included; upload it again";
+
+export type ThemeError = { readonly path: string; readonly message: string };
+export type ThemeMode = "read" | "save" | "import";
+export type ParsedTheme =
+	| { readonly ok: true; readonly theme: Theme; readonly warnings: readonly string[] }
+	| { readonly ok: false; readonly errors: readonly ThemeError[] };
+
+export type SharedBackground = { fit: BgFit; position: BgPosition; dim: Dim; blur: BlurPx };
+export type ImportedTheme = Omit<Theme, "background"> & { background?: SharedBackground };
+export type ImportResult =
+	| { readonly ok: true; readonly theme: ImportedTheme; readonly warnings: readonly string[] }
+	| { readonly ok: false; readonly errors: readonly ThemeError[] };
+export type SharedTheme = Omit<Theme, "background"> & { readonly background?: SharedBackground };
+export type ThemeFile = { readonly format: typeof THEME_FORMAT; readonly version: typeof THEME_VERSION; readonly theme: SharedTheme };
+
+export type BackgroundPaint = {
+	readonly image: string;
+	readonly still: string | null;
+	readonly fit: BgFit;
+	readonly position: BgPosition;
+	readonly dim: Dim;
+	readonly blur: BlurPx;
+};
+
+type FieldKind = "id" | "base" | "hex" | "fill" | "gradient" | "font" | "background";
+type FieldSpec<K extends keyof Theme = keyof Theme> = { readonly key: K; readonly kind: FieldKind; readonly required: boolean; readonly share: boolean };
+
+const THEME_FIELDS = [
+	{ key: "id", kind: "id", required: true, share: true },
+	{ key: "base", kind: "base", required: true, share: true },
+	{ key: "bg", kind: "gradient", required: true, share: true },
+	{ key: "surface", kind: "fill", required: true, share: true },
+	{ key: "text", kind: "hex", required: true, share: true },
+	{ key: "accent", kind: "fill", required: true, share: true },
+	{ key: "button", kind: "gradient", required: true, share: true },
+	{ key: "buttonText", kind: "hex", required: true, share: true },
+	{ key: "link", kind: "hex", required: false, share: true },
+	{ key: "secondary", kind: "hex", required: false, share: true },
+	{ key: "muted", kind: "hex", required: false, share: true },
+	{ key: "border", kind: "hex", required: false, share: true },
+	{ key: "divider", kind: "hex", required: false, share: true },
+	{ key: "hover", kind: "hex", required: false, share: true },
+	{ key: "inputBg", kind: "hex", required: false, share: true },
+	{ key: "inputText", kind: "hex", required: false, share: true },
+	{ key: "inputBorder", kind: "hex", required: false, share: true },
+	{ key: "header", kind: "fill", required: false, share: true },
+	{ key: "menu", kind: "fill", required: false, share: true },
+	{ key: "tooltip", kind: "hex", required: false, share: true },
+	{ key: "icon", kind: "hex", required: false, share: true },
+	{ key: "iconActive", kind: "hex", required: false, share: true },
+	{ key: "reply", kind: "hex", required: false, share: true },
+	{ key: "repost", kind: "hex", required: false, share: true },
+	{ key: "like", kind: "hex", required: false, share: true },
+	{ key: "bookmark", kind: "hex", required: false, share: true },
+	{ key: "views", kind: "hex", required: false, share: true },
+	{ key: "secondaryButton", kind: "fill", required: false, share: true },
+	{ key: "secondaryButtonBorder", kind: "hex", required: false, share: true },
+	{ key: "secondaryButtonText", kind: "hex", required: false, share: true },
+	{ key: "buttonHover", kind: "hex", required: false, share: true },
+	{ key: "badge", kind: "hex", required: false, share: true },
+	{ key: "selection", kind: "hex", required: false, share: true },
+	{ key: "font", kind: "font", required: false, share: true },
+	{ key: "background", kind: "background", required: false, share: true },
+] as const satisfies readonly FieldSpec[];
+
+const BACKGROUND_FIELDS = [
+	{ key: "fit", share: true, onImport: "take" },
+	{ key: "position", share: true, onImport: "take" },
+	{ key: "dim", share: true, onImport: "take" },
+	{ key: "blur", share: true, onImport: "take" },
+	{ key: "mediaId", share: false, onImport: "forbid" },
 ] as const;
-export const OPTIONAL_FILL = ["header", "menu", "secondaryButton"] as const;
+
+const FONT_KEYS = ["ui", "display"] as const;
+const BANNED_KEYS = ["__proto__", "constructor", "prototype"] as const;
+const IMPORT_FORBIDDEN = ["mediaId", "url", "src", "href"] as const;
+const FITS = ["cover", "contain", "tile"] as const;
+const POSITIONS = ["center", "top", "bottom"] as const;
+const KEY_CAP = THEME_FIELDS.length + 8;
+const ARRAY_CAP = 5;
+
+type Listed = (typeof THEME_FIELDS)[number]["key"];
+type FieldsCoverTheme = Exclude<keyof Theme, Listed> extends never ? (Exclude<Listed, keyof Theme> extends never ? true : never) : never;
+const fieldsCoverTheme: FieldsCoverTheme = true;
+void fieldsCoverTheme;
+
+export const OPTIONAL_HEX = THEME_FIELDS.filter((f) => f.kind === "hex" && !f.required).map((f) => f.key);
+export const OPTIONAL_FILL = THEME_FIELDS.filter((f) => f.kind === "fill" && !f.required).map((f) => f.key);
+export const GRADIENT_FIELDS = THEME_FIELDS.filter((f) => f.kind === "gradient" || f.kind === "fill").map((f) => f.key);
 
 const HEX3 = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i;
 const HEX6 = /^#([0-9a-f]{6})$/i;
@@ -550,17 +638,56 @@ function fontFamilyCss(theme: Theme): string {
 	return css;
 }
 
-export function bootCss(theme: Theme): string {
+const PAGE_GATE = "html[data-xitter-theme]:not([data-xitter-decor])";
+const FIT_CSS: Record<BgFit, string> = { cover: "cover", contain: "contain", tile: "auto" };
+const POSITION_CSS: Record<BgPosition, string> = { center: "center", top: "top", bottom: "bottom" };
+
+function cssUrl(path: string): string {
+	if (!/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path)) return "none";
+	return `url("${path}")`;
+}
+
+export function pageChromeCss(paint?: BackgroundPaint): string {
+	if (!paint) return "";
+	const repeat = paint.fit === "tile" ? "repeat" : "no-repeat";
+	const still = paint.still ? cssUrl(paint.still) : cssUrl(paint.image);
+	return (
+		`html[data-xitter-theme]{--xt-bg-image:${cssUrl(paint.image)};--xt-bg-still:${still};--xt-bg-size:${FIT_CSS[paint.fit]};--xt-bg-position:${POSITION_CSS[paint.position]};--xt-bg-repeat:${repeat};--xt-bg-dim:${paint.dim / 100};--xt-bg-blur:${paint.blur}px}` +
+		`${PAGE_GATE} body{position:relative;z-index:0}` +
+		`${PAGE_GATE} body::before{content:"";position:fixed;inset:0;z-index:-1;background-image:var(--xt-bg-image);background-size:var(--xt-bg-size);background-position:var(--xt-bg-position);background-repeat:var(--xt-bg-repeat);filter:blur(var(--xt-bg-blur));pointer-events:none}` +
+		`${PAGE_GATE} body::after{content:"";position:fixed;inset:0;z-index:-1;background:rgb(0 0 0 / var(--xt-bg-dim));pointer-events:none}` +
+		`@media (prefers-reduced-motion:reduce){${PAGE_GATE} body::before{animation:none;background-image:var(--xt-bg-still)}}`
+	);
+}
+
+export function bootCss(theme: Theme, paint?: BackgroundPaint): string {
 	const vars = Object.entries(xtVars(theme))
 		.map(([k, v]) => `${k}:${v}`)
 		.join(";");
 	return (
 		`html[data-xitter-theme]{${vars}}` +
 		`html[data-xitter-theme] ::selection{background:var(--xt-selection)}` +
-		`html[data-xitter-theme]:not([data-xitter-decor]),html[data-xitter-theme]:not([data-xitter-decor]) body{background:var(--xt-bg)!important;background-attachment:fixed!important}` +
-		`html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}` +
+		`${PAGE_GATE},${PAGE_GATE} body{background:var(--xt-bg)!important;background-attachment:fixed!important}` +
+		`${PAGE_GATE} #react-root>div>div,${PAGE_GATE} #react-root>div>div>div:not([data-testid]){background-color:transparent!important}` +
+		pageChromeCss(paint) +
 		fontFamilyCss(theme)
 	);
+}
+
+export async function resolveBackground(userId: string, theme: Theme): Promise<BackgroundPaint | undefined> {
+	const bg = theme.background;
+	if (!bg?.mediaId) return;
+	const { ownedThemePhoto, themeMediaPath, themePosterPath } = await import("./media");
+	const photo = await ownedThemePhoto(userId, bg.mediaId);
+	if (!photo) return;
+	return {
+		image: themeMediaPath(bg.mediaId, photo.ext),
+		still: photo.poster ? themePosterPath(bg.mediaId) : null,
+		fit: bg.fit,
+		position: bg.position,
+		dim: bg.dim,
+		blur: bg.blur,
+	};
 }
 
 export function bootAccentCss(accent: Accent): string {
@@ -587,71 +714,400 @@ function clampFg(fg: string, bgs: string[]): string {
 	return readableOn(bgs);
 }
 
-function parseFont(v: unknown): ThemeFont | undefined {
-	if (!v || typeof v !== "object") return;
-	const o = v as Record<string, unknown>;
-	const ui = validateFamily(o.ui);
-	const display = validateFamily(o.display);
-	if (!ui && !display) return;
-	const font: ThemeFont = {};
-	if (ui) font.ui = ui;
-	if (display) font.display = display;
-	return font;
+const asMediaId = (v: string): MediaId => v as MediaId;
+const asDim = (n: number): Dim => n as Dim;
+const asBlur = (n: number): BlurPx => n as BlurPx;
+
+function pushError(errors: ThemeError[], path: string, message: string) {
+	errors.push({ path, message });
 }
 
-export function sanitiseTheme(input: unknown): Sanitised | null {
-	if (!input || typeof input !== "object") return null;
+function isBanned(key: string): boolean {
+	return (BANNED_KEYS as readonly string[]).includes(key);
+}
+
+function isForbiddenImport(key: string): boolean {
+	return (IMPORT_FORBIDDEN as readonly string[]).includes(key);
+}
+
+function checkShape(value: unknown, depth: number, path: string, mode: ThemeMode, errors: ThemeError[]) {
+	if (Array.isArray(value)) {
+		if (value.length > ARRAY_CAP) pushError(errors, path, "too many items");
+		const n = Math.min(value.length, ARRAY_CAP + 1);
+		for (let i = 0; i < n; i++) {
+			const child = `${path}[${i}]`;
+			if (depth + 1 > THEME_DEPTH_MAX) {
+				pushError(errors, child, "too deeply nested");
+				continue;
+			}
+			checkShape(value[i], depth + 1, child, mode, errors);
+		}
+		return;
+	}
+	if (!value || typeof value !== "object") return;
+	if (depth > THEME_DEPTH_MAX) {
+		pushError(errors, path, "too deeply nested");
+		return;
+	}
+	const keys = Object.keys(value);
+	if (keys.length > KEY_CAP) pushError(errors, path, "too many keys");
+	for (const key of keys) {
+		const childPath = path ? `${path}.${key}` : key;
+		if (isBanned(key)) {
+			if (mode !== "read") pushError(errors, childPath, "banned key");
+			if (mode === "read") continue;
+		} else if (mode === "import" && isForbiddenImport(key)) pushError(errors, childPath, "forbidden key");
+		const child = (value as Record<string, unknown>)[key];
+		if (depth + 1 > THEME_DEPTH_MAX && child && typeof child === "object") {
+			pushError(errors, childPath, "too deeply nested");
+			continue;
+		}
+		checkShape(child, depth + 1, childPath, mode, errors);
+	}
+}
+
+function hexOfMode(v: unknown, mode: ThemeMode): string | undefined {
+	if (typeof v !== "string") return;
+	const s = v.trim().toLowerCase();
+	const m6 = HEX6.exec(s);
+	if (m6) return `#${m6[1]}`;
+	if (mode === "import") return;
+	const m3 = HEX3.exec(s);
+	if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
+}
+
+function angleOfMode(v: unknown, mode: ThemeMode): number | undefined {
+	if (mode === "import") {
+		if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 360) return;
+		return v;
+	}
+	return intAngle(v);
+}
+
+function ownUnknown(value: object, allowed: readonly string[], path: string, mode: ThemeMode, errors: ThemeError[]) {
+	if (mode === "read") return;
+	for (const key of Object.keys(value)) {
+		if (allowed.includes(key) || isBanned(key) || (mode === "import" && isForbiddenImport(key))) continue;
+		pushError(errors, path ? `${path}.${key}` : key, "unknown key");
+	}
+}
+
+function gradientOf(v: unknown, mode: ThemeMode, path: string, errors: ThemeError[], bareHex: boolean): Gradient | undefined {
+	if (bareHex && mode !== "import") {
+		const h = hexOfMode(v, mode);
+		if (h) return { stops: [h], angle: 180 };
+	}
+	if (!v || typeof v !== "object" || Array.isArray(v)) return;
+	const g = v as Record<string, unknown>;
+	ownUnknown(g, ["stops", "angle"], path, mode, errors);
+	const min = mode === "import" ? 2 : 1;
+	if (!Array.isArray(g.stops) || g.stops.length < min || g.stops.length > 5) return;
+	const stops = g.stops.map((stop) => hexOfMode(stop, mode));
+	if (stops.some((s) => !s)) return;
+	const angle = angleOfMode(g.angle, mode);
+	if (angle === undefined) return;
+	return { stops: stops as string[], angle };
+}
+
+function fillOfMode(v: unknown, mode: ThemeMode, path: string, errors: ThemeError[]): Fill | undefined {
+	const h = hexOfMode(v, mode);
+	if (h) return h;
+	return gradientOf(v, mode, path, errors, false);
+}
+
+function copyTheme(theme: Theme): Theme {
+	const out = {} as Theme;
+	for (const field of THEME_FIELDS) {
+		const value = theme[field.key];
+		if (value !== undefined) (out as Record<string, unknown>)[field.key] = value;
+	}
+	return out;
+}
+
+function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
+	const errors: ThemeError[] = [];
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return { ok: false, errors: [{ path: "", message: "theme must be an object" }] };
+	}
+	checkShape(input, 1, "", mode, errors);
 	const o = input as Record<string, unknown>;
+	const known = new Set<string>(THEME_FIELDS.map((f) => f.key));
+	for (const key of Object.keys(o)) {
+		if (isBanned(key)) continue;
+		if (mode === "import" && isForbiddenImport(key)) continue;
+		if (!known.has(key) && mode !== "read") pushError(errors, key, "unknown key");
+	}
 	const preset = typeof o.id === "string" ? PRESETS[o.id] : undefined;
-	const base = o.base === "light" || o.base === "dark" ? o.base : preset?.base;
-	if (base !== "light" && base !== "dark") return null;
-	const bg = parseGradientOrHex(o.bg) ?? preset?.bg;
-	const button = parseGradientOrHex(o.button) ?? preset?.button;
-	const surface = ("surface" in o ? parseFill(o.surface) : undefined) ?? preset?.surface;
-	let text = parseHex(o.text) ?? preset?.text;
-	const accent = ("accent" in o ? parseFill(o.accent) : undefined) ?? preset?.accent;
-	let buttonText = parseHex(o.buttonText) ?? preset?.buttonText;
-	if (!bg || !button || !surface || !text || !accent || !buttonText) return null;
-	const theme: Theme = { id: typeof o.id === "string" && (o.id === "custom" || PRESETS[o.id]) ? o.id : "custom", base, bg, surface, text, accent, button, buttonText };
-	for (const k of OPTIONAL_HEX) {
-		if (k in o) {
-			if (o[k] && typeof o[k] === "object") continue;
-			const h = parseHex(o[k]);
-			if (h) (theme as any)[k] = h;
-		} else if (preset && (preset as any)[k]) (theme as any)[k] = (preset as any)[k];
+	const idKnown = typeof o.id === "string" && (o.id === "custom" || !!PRESETS[o.id]);
+	let id: string | undefined;
+	if (idKnown) id = o.id as string;
+	else if (mode === "import") pushError(errors, "id", "unknown theme");
+	else id = "custom";
+	const basePresent = "base" in o;
+	let base: "light" | "dark" | undefined;
+	if (o.base === "light" || o.base === "dark") base = o.base;
+	else if (mode === "import" && basePresent) pushError(errors, "base", "invalid base");
+	else base = preset?.base;
+	if (base !== "light" && base !== "dark" && !(mode === "import" && basePresent)) pushError(errors, "base", "invalid base");
+
+	const takeRequired = <T>(key: string, present: boolean, parsed: T | undefined, fallback: T | undefined, message: string): T | undefined => {
+		if (parsed) return parsed;
+		if (present && mode === "import") {
+			pushError(errors, key, message);
+			return;
+		}
+		if (fallback !== undefined && mode !== "import") return fallback;
+		if (fallback !== undefined && !present) return fallback;
+		pushError(errors, key, present ? message : "missing");
+		return;
+	};
+
+	const bg = takeRequired("bg", "bg" in o, gradientOf(o.bg, mode, "bg", errors, true), preset?.bg, "invalid colour");
+	const button = takeRequired("button", "button" in o, gradientOf(o.button, mode, "button", errors, true), preset?.button, "invalid colour");
+	const surface = takeRequired("surface", "surface" in o, "surface" in o ? fillOfMode(o.surface, mode, "surface", errors) : undefined, preset?.surface, "invalid colour");
+	let text = takeRequired("text", "text" in o, hexOfMode(o.text, mode), preset?.text, "invalid colour");
+	const accent = takeRequired("accent", "accent" in o, "accent" in o ? fillOfMode(o.accent, mode, "accent", errors) : undefined, preset?.accent, "invalid colour");
+	let buttonText = takeRequired("buttonText", "buttonText" in o, hexOfMode(o.buttonText, mode), preset?.buttonText, "invalid colour");
+
+	const theme = {} as Theme;
+	if (id) theme.id = id;
+	if (base === "light" || base === "dark") theme.base = base;
+	if (bg) theme.bg = bg;
+	if (surface) theme.surface = surface;
+	if (text) theme.text = text;
+	if (accent) theme.accent = accent;
+	if (button) theme.button = button;
+	if (buttonText) theme.buttonText = buttonText;
+
+	for (const field of THEME_FIELDS) {
+		if (field.required || (field.kind !== "hex" && field.kind !== "fill")) continue;
+		const key = field.key;
+		if (!(key in o)) {
+			const fallback = preset?.[key];
+			if (fallback !== undefined) (theme as Record<string, unknown>)[key] = fallback;
+			continue;
+		}
+		const parsed = field.kind === "hex" ? hexOfMode(o[key], mode) : fillOfMode(o[key], mode, key, errors);
+		if (parsed) (theme as Record<string, unknown>)[key] = parsed;
+		else if (mode === "import") pushError(errors, key, "invalid colour");
 	}
-	for (const k of OPTIONAL_FILL) {
-		if (k in o) {
-			const f = parseFill(o[k]);
-			if (f) (theme as any)[k] = f;
-		} else if (preset && (preset as any)[k]) (theme as any)[k] = (preset as any)[k];
-	}
+
 	if ("font" in o) {
-		const font = parseFont(o.font);
-		if (font) theme.font = font;
+		const fontValue = o.font;
+		if (!fontValue || typeof fontValue !== "object" || Array.isArray(fontValue)) {
+			if (mode !== "read") pushError(errors, "font", "invalid font");
+		} else {
+			const fontObj = fontValue as Record<string, unknown>;
+			ownUnknown(fontObj, FONT_KEYS, "font", mode, errors);
+			const font: ThemeFont = {};
+			for (const key of FONT_KEYS) {
+				if (!(key in fontObj)) continue;
+				const name = validateFamily(fontObj[key]);
+				if (name) font[key] = name;
+				else if (mode === "import") pushError(errors, `font.${key}`, "invalid font");
+			}
+			if (font.ui || font.display) theme.font = font;
+		}
 	} else if (preset?.font) theme.font = preset.font;
+
+	if ("background" in o) {
+		const raw = o.background;
+		if (raw === null && mode === "save") {
+			/* clear is applied by the save peel */
+		} else if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+			if (mode !== "read") pushError(errors, "background", "invalid background");
+		} else {
+			const bgObj = raw as Record<string, unknown>;
+			ownUnknown(bgObj, BACKGROUND_FIELDS.map((f) => f.key), "background", mode, errors);
+			const background = {} as ThemeBackground;
+			const fit = "fit" in bgObj ? bgObj.fit : "cover";
+			const position = "position" in bgObj ? bgObj.position : "center";
+			const dim = "dim" in bgObj ? bgObj.dim : 0;
+			const blur = "blur" in bgObj ? bgObj.blur : 0;
+			if ((FITS as readonly string[]).includes(fit as string)) background.fit = fit as BgFit;
+			else if (mode === "read") background.fit = "cover";
+			else pushError(errors, "background.fit", "invalid fit");
+			if ((POSITIONS as readonly string[]).includes(position as string)) background.position = position as BgPosition;
+			else if (mode === "read") background.position = "center";
+			else pushError(errors, "background.position", "invalid position");
+			const dimN = typeof dim === "number" && Number.isInteger(dim) && dim >= 0 && dim <= 80 ? dim : undefined;
+			const blurN = typeof blur === "number" && Number.isInteger(blur) && blur >= 0 && blur <= 20 ? blur : undefined;
+			if (dimN !== undefined) background.dim = asDim(dimN);
+			else if (mode === "read") background.dim = asDim(0);
+			else pushError(errors, "background.dim", "invalid dim");
+			if (blurN !== undefined) background.blur = asBlur(blurN);
+			else if (mode === "read") background.blur = asBlur(0);
+			else pushError(errors, "background.blur", "invalid blur");
+			if ("mediaId" in bgObj) {
+				if (mode === "import") pushError(errors, "background.mediaId", "forbidden key");
+				else if (isId(bgObj.mediaId)) background.mediaId = asMediaId(bgObj.mediaId);
+				else if (mode === "save") pushError(errors, "background.mediaId", "invalid media id");
+			}
+			if (background.fit && background.position && background.dim !== undefined && background.blur !== undefined && !errors.some((e) => e.path.startsWith("background")))
+				theme.background = background;
+		}
+	}
+
+	if (!theme.id || !theme.base || !theme.bg || !theme.surface || !theme.text || !theme.accent || !theme.button || !theme.buttonText) {
+		if (!errors.length) pushError(errors, "", "theme must be an object");
+		return { ok: false, errors };
+	}
+	if (errors.length) return { ok: false, errors };
+
 	const d = derived(theme);
-	const pageBgs = [...bg.stops, ...stopsOf(surface)];
-	const warnings = [
-		...warnPairs("text", text, pageBgs),
-		...warnPairs("button text", buttonText, button.stops),
-	];
-	text = clampFg(text, pageBgs);
-	buttonText = clampFg(buttonText, button.stops);
+	const pageBgs = [...theme.bg.stops, ...stopsOf(theme.surface)];
+	const warnings = [...warnPairs("text", text!, pageBgs), ...warnPairs("button text", buttonText!, theme.button.stops)];
+	text = clampFg(text!, pageBgs);
+	buttonText = clampFg(buttonText!, theme.button.stops);
 	theme.text = text;
 	theme.buttonText = buttonText;
 	const clampOpt = (key: keyof Theme, fg: string | undefined, bgs: string[], label: string, warnAt: number) => {
 		if (!fg) return;
 		warnings.push(...warnPairs(label, fg, bgs, warnAt));
-		const next = clampFg(fg, bgs);
-		(theme as any)[key] = next;
+		(theme as Record<string, unknown>)[key] = clampFg(fg, bgs);
 	};
 	clampOpt("secondary", theme.secondary, pageBgs, "secondary text", 4.5);
 	clampOpt("muted", theme.muted, pageBgs, "muted text", 3);
 	clampOpt("link", theme.link, pageBgs, "link", 4.5);
 	clampOpt("inputText", theme.inputText, [theme.inputBg ?? d.inputBg], "input text", 4.5);
 	clampOpt("secondaryButtonText", theme.secondaryButtonText, theme.secondaryButton ? stopsOf(theme.secondaryButton) : pageBgs, "secondary button text", 4.5);
-	return { theme, warnings };
+	return { ok: true, theme, warnings };
+}
+
+export function sanitiseTheme(input: unknown): Sanitised | null {
+	const got = parseTheme(input, "read");
+	if (!got.ok) return null;
+	return { theme: got.theme, warnings: [...got.warnings] };
+}
+
+function freshCopy(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map((item) => freshCopy(item));
+	if (!value || typeof value !== "object") return value;
+	const out = Object.create(null) as Record<string, unknown>;
+	for (const key of Object.keys(value)) {
+		Object.defineProperty(out, key, { value: freshCopy((value as Record<string, unknown>)[key]), enumerable: true, writable: true, configurable: true });
+	}
+	return out;
+}
+
+export function importTheme(text: string): ImportResult {
+	if (Buffer.byteLength(text) > THEME_FILE_MAX) return { ok: false, errors: [{ path: "", message: "file is too large" }] };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text, (key, value) => {
+			if (key === "__proto__" || key === "constructor" || key === "prototype") throw new Error("banned");
+			return value;
+		});
+	} catch (err) {
+		if (err instanceof Error && err.message === "banned") return { ok: false, errors: [{ path: "", message: "banned key" }] };
+		return { ok: false, errors: [{ path: "", message: "invalid json" }] };
+	}
+	const errors: ThemeError[] = [];
+	const root = freshCopy(parsed);
+	checkShape(root, 1, "", "import", errors);
+	if (!root || typeof root !== "object" || Array.isArray(root)) return { ok: false, errors: [{ path: "", message: "invalid file" }] };
+	const envelope = root as Record<string, unknown>;
+	for (const key of Object.keys(envelope)) {
+		if (isBanned(key)) continue;
+		if (key !== "format" && key !== "version" && key !== "theme") pushError(errors, key, "unknown key");
+	}
+	if (envelope.format !== THEME_FORMAT) pushError(errors, "format", "unknown format");
+	if (envelope.version !== THEME_VERSION) pushError(errors, "version", "unknown version");
+	if (errors.length) return { ok: false, errors };
+	const got = parseTheme(envelope.theme, "import");
+	if (!got.ok) return { ok: false, errors: got.errors.map((e) => ({ path: e.path ? `theme.${e.path}` : "theme", message: e.message })) };
+	const warnings = [...got.warnings];
+	if (got.theme.background) warnings.push(BACKGROUND_OMITTED);
+	const theme = copyTheme(got.theme) as ImportedTheme;
+	if (theme.background) {
+		const { fit, position, dim, blur } = theme.background;
+		theme.background = { fit, position, dim, blur };
+	}
+	return { ok: true, theme, warnings };
+}
+
+function shareFill(value: Fill): Fill {
+	if (typeof value === "string") return value;
+	const stops = value.stops.length === 1 ? [value.stops[0]!, value.stops[0]!] : [...value.stops];
+	return { stops, angle: value.angle };
+}
+
+export function exportTheme(theme: Theme): ThemeFile {
+	const shared = Object.create(null) as SharedTheme;
+	for (const field of THEME_FIELDS) {
+		if (!field.share) continue;
+		const value = theme[field.key];
+		if (value === undefined) continue;
+		if (field.kind === "gradient") {
+			shared[field.key] = shareFill(value as Gradient) as never;
+			continue;
+		}
+		if (field.kind === "fill") {
+			shared[field.key] = shareFill(value as Fill) as never;
+			continue;
+		}
+		if (field.kind === "background") {
+			const bg = value as ThemeBackground;
+			shared.background = { fit: bg.fit, position: bg.position, dim: bg.dim, blur: bg.blur };
+			continue;
+		}
+		(shared as Record<string, unknown>)[field.key] = value;
+	}
+	return { format: THEME_FORMAT, version: THEME_VERSION, theme: shared };
+}
+
+export function themeFileName(theme: Theme): `${string}.xitter-theme.json` {
+	const id = theme.id === "custom" || PRESETS[theme.id] ? theme.id : "custom";
+	return `${id}.xitter-theme.json`;
+}
+
+export async function themeImport(req: Request, _viewer: Viewer): Promise<Response> {
+	if (req.method !== "POST") return Response.json({ ok: false, errors: [{ path: "", message: "use POST" }] }, { status: 405 });
+	const announced = Number(req.headers.get("content-length"));
+	if (Number.isFinite(announced) && announced > THEME_FILE_MAX) return Response.json({ ok: false, errors: [{ path: "", message: "file is too large" }] }, { status: 400 });
+	const result = importTheme(await req.text());
+	if (!result.ok) return Response.json({ ok: false, errors: result.errors }, { status: 400 });
+	return Response.json({ ok: true, theme: result.theme, warnings: result.warnings });
+}
+
+export async function themeExport(req: Request, viewer: Viewer): Promise<Response> {
+	if (req.method !== "GET") return Response.json({ ok: false, errors: [{ path: "", message: "use GET" }] }, { status: 405 });
+	const prefs = await loadPrefs(viewer.id);
+	const theme = prefs.look?.kind === "painted" ? prefs.look.theme : null;
+	if (!theme) return Response.json({ ok: false, errors: [{ path: "theme", message: "no saved theme" }] }, { status: 404 });
+	const file = exportTheme(theme);
+	return new Response(JSON.stringify(file), {
+		headers: {
+			"content-type": "application/json; charset=utf-8",
+			"content-disposition": `attachment; filename="${themeFileName(theme)}"`,
+		},
+	});
+}
+
+export function mergeSavedBackground(previous: Theme | undefined, theme: Theme, peel: "keep" | "clear" | "frame", mediaIdSent: boolean): Theme {
+	if (peel === "keep") {
+		if (!previous?.background) return theme;
+		const next = copyTheme(theme);
+		next.background = previous.background;
+		return next;
+	}
+	if (peel === "clear") {
+		const next = copyTheme(theme);
+		delete next.background;
+		return next;
+	}
+	if (theme.background && !mediaIdSent && previous?.background?.mediaId) {
+		const next = copyTheme(theme);
+		next.background = {
+			fit: theme.background.fit,
+			position: theme.background.position,
+			dim: theme.background.dim,
+			blur: theme.background.blur,
+			mediaId: previous.background.mediaId,
+		};
+		return next;
+	}
+	return theme;
 }
 
 export function swatches(): { id: string; name: string; bg: Gradient; base: "dark" | "light" }[] {
@@ -691,12 +1147,12 @@ export type ClientLook = {
 export type LookWrite =
 	| { readonly type: "plain"; readonly mode: Mode }
 	| { readonly type: "clear" }
-	| { readonly type: "paint"; readonly theme: Theme }
+	| { readonly type: "paint"; readonly theme: Theme; readonly peel: "keep" | "clear" | "frame"; readonly mediaIdSent: boolean }
 	| { readonly type: "keep" };
 
 export type ParsedWrite =
 	| { readonly ok: true; readonly write: LookWrite; readonly accent?: Accent; readonly warnings: readonly string[] }
-	| { readonly ok: false; readonly error: string };
+	| { readonly ok: false; readonly error: string; readonly errors?: readonly ThemeError[] };
 
 export type AccountPalette = "light" | "dim" | "dark";
 
@@ -762,11 +1218,13 @@ export function parseLookWrite(body: unknown): ParsedWrite {
 	}
 	if (o.theme && typeof o.theme === "object" && !Array.isArray(o.theme)) {
 		const themeBody = o.theme as Record<string, unknown>;
-		const got = sanitiseTheme(themeBody);
-		if (!got) return { ok: false, error: "that isn't a theme" };
+		const got = parseTheme(themeBody, "save");
+		if (!got.ok) return { ok: false, error: "that isn't a theme", errors: got.errors };
 		if (hasMode && mode !== got.theme.base) return { ok: false, error: "invalid mode" };
 		const fromTheme = "accent" in themeBody ? parseAccent(themeBody.accent) ?? parseAccent(got.theme.accent) : undefined;
-		return { ok: true, write: { type: "paint", theme: got.theme }, warnings: got.warnings, accent: extra.accent ?? fromTheme };
+		const peel = !("background" in themeBody) ? "keep" : themeBody.background === null ? "clear" : "frame";
+		const mediaIdSent = peel === "frame" && !!themeBody.background && typeof themeBody.background === "object" && "mediaId" in themeBody.background;
+		return { ok: true, write: { type: "paint", theme: got.theme, peel, mediaIdSent }, warnings: got.warnings, accent: extra.accent ?? fromTheme };
 	}
 	if (hasMode) {
 		if (!mode) return { ok: false, error: "invalid mode" };
@@ -1018,6 +1476,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 			VAR_KEYS.forEach(function(k){if(!ACCENT_KEYS[k])h.style.removeProperty(k)});
 			if(sheet)sheet.textContent="";
 			applyFonts(null);
+			writeBase(false);
 			key="";
 			applyAccentVars();
 			paintAccent();
@@ -1026,6 +1485,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		h.setAttribute("data-xitter-theme",t.id||"custom");
 		var v=varsOf(t),k;
 		for(k in v)h.style.setProperty(k,v[k]);
+		var sameBg=t.background&&X.theme&&X.theme.background&&t.background.mediaId&&t.background.mediaId===X.theme.background.mediaId;
+		writeBase(!!sameBg);
 		applyFonts(t);
 		key="";
 		applyAccentVars();
@@ -1510,9 +1971,13 @@ export const THEME_SCRIPT = String.raw`(function(){
 	}
 	var base=document.createElement("style");
 	base.setAttribute("data-xitter-theme-base","");
-	base.textContent='html[data-xitter-theme] ::selection{background:var(--xt-selection)}'+
-		'html[data-xitter-theme]:not([data-xitter-decor]),html[data-xitter-theme]:not([data-xitter-decor]) body{background:var(--xt-bg)!important;background-attachment:fixed!important}'+
-		'html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
+	function writeBase(on){
+		base.textContent='html[data-xitter-theme] ::selection{background:var(--xt-selection)}'+
+			'html[data-xitter-theme]:not([data-xitter-decor]),html[data-xitter-theme]:not([data-xitter-decor]) body{background:var(--xt-bg)!important;background-attachment:fixed!important}'+
+			'html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}'+
+			(on&&typeof X.pageChrome==="string"?X.pageChrome:"");
+	}
+	writeBase(!!(theme&&theme.background));
 	document.head.appendChild(base);
 	seedThemeColor();
 	applyAccentVars();
@@ -1595,6 +2060,18 @@ details.adv summary{cursor:pointer;font-weight:700}
 .live .nav,.live .side{display:none}
 .live .feed{border-inline:0}
 }
+.share{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.share a,.file{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border-radius:9999px;border:1px solid var(--border);text-decoration:none;color:var(--text)}
+.file input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+#theme-import-errors{margin:0;padding:0;list-style:none;color:#f4212e}
+#theme-import-errors:not(:empty){padding:10px 12px;border:1px solid #f4212e;border-radius:12px;background:rgba(244,33,46,.08)}
+#theme-import-errors li.head{font-weight:700}
+#theme-import-errors li{margin:0 0 4px}
+.bgopt{display:grid;gap:8px}
+.bgopt .line{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bgopt select{min-height:36px;border-radius:8px;border:1px solid var(--outline);background:var(--field);color:var(--text)}
+#bg-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none}
+.live .stage{position:relative;z-index:1}
 .note{margin:0;padding:8px 10px;border-radius:8px;font-size:13px;line-height:16px;background:rgb(255 212 0 / .16);color:#8a5800}
 :root[data-theme="dark"] .note,:root[data-theme="dim"] .note{color:#e6b800;background:rgb(255 212 0 / .12)}
 .warns{display:grid;gap:4px}
@@ -1784,6 +2261,165 @@ const EDITOR_SCRIPT = String.raw`(function(){
 		var dark=f.querySelector('input[name="base"][value="dark"]');if(dark)dark.checked=true;
 		draw();
 	});
+	function csrf(){return (document.cookie.match(/(?:^|;\s*)ct0=([^;]+)/)||[])[1]||""}
+	function showErrors(errors){
+		var list=document.getElementById("theme-import-errors");
+		if(!list)return;
+		list.replaceChildren();
+		if(errors&&errors.length){var head=document.createElement("li");head.className="head";head.textContent="This theme file was rejected. Nothing was applied.";list.appendChild(head)}
+		(errors||[]).forEach(function(error){
+			var item=document.createElement("li");
+			item.textContent=error.path?error.path+": "+error.message:error.message;
+			list.appendChild(item);
+		});
+	}
+	function showWarnings(warnings){
+		var box=document.getElementById("theme-import-warnings");
+		if(!box)return;
+		box.replaceChildren();
+		(warnings||[]).forEach(function(w){
+			var p=document.createElement("p");
+			p.className="dim";
+			p.textContent=w;
+			box.appendChild(p);
+		});
+	}
+	function showBg(path){
+		var img=document.getElementById("bg-preview");
+		if(!/^\/media\/\d{1,19}\.(png|gif|webp|jpg)$/.test(path||"")){
+			if(img)img.remove();
+			return;
+		}
+		if(!img){
+			img=document.createElement("img");
+			img.id="bg-preview";
+			img.alt="";
+			prev.insertBefore(img, prev.firstChild);
+		}
+		var fit=val("bg_fit")||"cover";
+		img.style.objectFit=fit==="contain"?"contain":fit==="tile"?"none":"cover";
+		img.src=path;
+	}
+	function setStops(name, list){
+		var row=f.querySelector('[data-stops="'+name+'"]');
+		if(!row||!list||!list.length)return;
+		row.replaceChildren();
+		list.forEach(function(hex,i){
+			if(!/^#[0-9a-f]{6}$/.test(hex))return;
+			var inp=document.createElement("input");
+			inp.type="color";inp.name=name;inp.value=hex;
+			inp.setAttribute("aria-label","Stop "+(i+1));
+			row.appendChild(inp);
+		});
+	}
+	function applyImported(theme){
+		if(!theme||typeof theme!=="object")return;
+		if(theme.base==="light"||theme.base==="dark"){
+			var radio=f.querySelector('input[name="base"][value="'+theme.base+'"]');
+			if(radio)radio.checked=true;
+		}
+		if(theme.bg&&theme.bg.stops){setStops("bg",theme.bg.stops);setv("bg_angle",String(theme.bg.angle||180))}
+		if(theme.button&&theme.button.stops){setStops("button",theme.button.stops);setv("button_angle",String(theme.button.angle||180))}
+		["surface","text","accent","buttonText"].forEach(function(name){
+			var value=theme[name];
+			if(typeof value==="string"&&/^#[0-9a-f]{6}$/.test(value)){setv(name,value);hideGrad(name)}
+			else if(value&&value.stops){
+				setv(name,value.stops[0]);
+				setv(name+"_grad","1");
+				var tog=f.querySelector('[data-gtoggle="'+name+'"]');
+				if(tog)tog.setAttribute("aria-pressed","true");
+				var row=f.querySelector('[data-stops="'+name+'_stop"]');
+				if(row){row.hidden=false;row.replaceChildren();value.stops.forEach(function(hex,i){
+					if(!/^#[0-9a-f]{6}$/.test(hex))return;
+					var inp=document.createElement("input");
+					inp.type="color";inp.name=name+"_stop";inp.value=hex;
+					inp.setAttribute("aria-label","Stop "+(i+1));
+					row.appendChild(inp);
+				})}
+				setv(name+"_angle",String(value.angle||180));
+				var ang=f.querySelector('input[name="'+name+'_angle"]');
+				if(ang&&ang.parentElement)ang.parentElement.hidden=false;
+			}
+		});
+		ADV.forEach(function(name){
+			var value=theme[name];
+			if(typeof value==="string"&&/^#[0-9a-f]{6}$/.test(value)){flag(name,true);setv(name,value);hideGrad(name)}
+			else if(value&&value.stops){
+				flag(name,true);
+				setv(name+"_grad","1");
+				setv(name,value.stops[0]);
+			}
+		});
+		setv("font_ui",theme.font&&typeof theme.font.ui==="string"?theme.font.ui:"");
+		setv("font_display",theme.font&&typeof theme.font.display==="string"?theme.font.display:"");
+		if(theme.background){
+			setv("background_on","1");
+			setv("background_clear","");
+			setv("bg_fit",theme.background.fit||"cover");
+			setv("bg_position",theme.background.position||"center");
+			setv("bg_dim",String(theme.background.dim||0));
+			setv("bg_blur",String(theme.background.blur||0));
+		}
+		draw();
+	}
+	var file=document.getElementById("theme-file");
+	if(file)file.addEventListener("change",function(){
+		var picked=file.files&&file.files[0];
+		if(!picked)return;
+		if(picked.size>65536){showErrors([{path:"",message:"file is too large"}]);file.value="";return}
+		picked.text().then(function(text){
+			return fetch("/i/api/xitter/theme/import",{method:"POST",headers:{"x-csrf-token":csrf(),"content-type":"text/plain"},body:text}).then(function(r){return r.json()});
+		}).then(function(data){
+			if(!data||data.ok===false){showErrors(data&&data.errors);showWarnings([]);return}
+			showErrors([]);
+			showWarnings(data.warnings);
+			applyImported(data.theme);
+		}).catch(function(){showErrors([{path:"",message:"import failed"}])});
+		file.value="";
+	});
+	var bgFile=document.getElementById("bg-file");
+	if(bgFile)bgFile.addEventListener("change",function(){
+		var picked=bgFile.files&&bgFile.files[0];
+		if(!picked)return;
+		var note=document.getElementById("bg-note");
+		if(picked.size>8*1024*1024){if(note)note.textContent="image is too large";bgFile.value="";return}
+		if(note)note.textContent="";
+		var headers={"x-csrf-token":csrf()};
+		fetch("/i/media/upload.json?command=INIT&total_bytes="+picked.size+"&media_type="+encodeURIComponent(picked.type||"image/png")+"&media_category=theme_background",{method:"POST",headers:headers}).then(function(r){return r.json()}).then(function(init){
+			if(!init||!init.media_id_string)throw new Error((init&&init.error)||"upload failed");
+			var body=new FormData();
+			body.set("media",picked);
+			return fetch("/i/media/upload.json?command=APPEND&media_id="+init.media_id_string+"&segment_index=0",{method:"POST",headers:headers,body:body}).then(function(){
+				return fetch("/i/media/upload.json?command=FINALIZE&media_id="+init.media_id_string,{method:"POST",headers:headers}).then(function(r){return r.json()});
+			});
+		}).then(function(done){
+			if(!done||!done.media_id_string)throw new Error((done&&done.error)||"upload failed");
+			setv("background_on","1");
+			setv("background_clear","");
+			setv("background_media",done.media_id_string);
+			if(typeof done.theme_path==="string"){prev.setAttribute("data-bg",done.theme_path);showBg(done.theme_path)}
+		}).catch(function(err){if(note)note.textContent=err&&err.message?err.message:"upload failed"});
+		bgFile.value="";
+	});
+	var bgClear=document.getElementById("bg-clear");
+	if(bgClear)bgClear.addEventListener("click",function(){
+		setv("background_clear","1");
+		setv("background_on","");
+		setv("background_media","");
+		prev.removeAttribute("data-bg");
+		showBg("");
+	});
+	["bg_fit","bg_position","bg_dim","bg_blur"].forEach(function(name){
+		var el=f[name];
+		if(!el)return;
+		el.addEventListener("input",function(){
+			if(val("background_clear")!=="1")setv("background_on","1");
+			var num=document.querySelector('[data-num="'+name+'"]');
+			if(num)num.textContent=el.value;
+			showBg(prev.getAttribute("data-bg")||"");
+		});
+	});
+	showBg(prev.getAttribute("data-bg")||"");
 	draw();
 })();`;
 
@@ -1843,7 +2479,31 @@ function fromForm(f: FormData): { clear?: true; theme?: unknown } {
 	const ui = validateFamily(String(f.get("font_ui") ?? ""));
 	const display = validateFamily(String(f.get("font_display") ?? ""));
 	if (ui || display) theme.font = { ...(ui ? { ui } : {}), ...(display ? { display } : {}) };
+	if (String(f.get("background_clear") ?? "") === "1") theme.background = null;
+	else if (String(f.get("background_on") ?? "") === "1") {
+		const background: Record<string, unknown> = {
+			fit: String(f.get("bg_fit") ?? "cover"),
+			position: String(f.get("bg_position") ?? "center"),
+			dim: Number(f.get("bg_dim") ?? 0),
+			blur: Number(f.get("bg_blur") ?? 0),
+		};
+		const mediaId = String(f.get("background_media") ?? "");
+		if (mediaId) background.mediaId = mediaId;
+		theme.background = background;
+	}
 	return { theme };
+}
+
+async function keepOwnedBackground(userId: string, theme: Theme, warnings: string[]): Promise<Theme> {
+	const id = theme.background?.mediaId;
+	if (!id) return theme;
+	const { ownedThemePhoto } = await import("./media");
+	const owned = await ownedThemePhoto(userId, id);
+	if (owned) return theme;
+	warnings.push("that background image isn't on this account");
+	const next = copyTheme(theme);
+	next.background = { fit: theme.background!.fit, position: theme.background!.position, dim: theme.background!.dim, blur: theme.background!.blur };
+	return next;
 }
 
 async function commitLook(
@@ -1855,15 +2515,20 @@ async function commitLook(
 ): Promise<{ look: Look | null; accent: Accent; warnings: readonly string[] }> {
 	const nextWarnings = [...warnings];
 	let next = write;
-	if (write.type === "paint" && write.theme.font) {
-		const prep = await prepareFonts(write.theme.font);
-		nextWarnings.push(...prep.warnings);
-		if (prep.font.ui || prep.font.display) next = { type: "paint", theme: { ...write.theme, font: prep.font } };
-		else {
-			const theme = { ...write.theme };
-			delete theme.font;
-			next = { type: "paint", theme };
+	if (write.type === "paint") {
+		const stored = current.look?.kind === "painted" ? current.look.theme : undefined;
+		let theme = mergeSavedBackground(stored, write.theme, write.peel, write.mediaIdSent);
+		theme = await keepOwnedBackground(userId, theme, nextWarnings);
+		if (theme.font) {
+			const prep = await prepareFonts(theme.font);
+			nextWarnings.push(...prep.warnings);
+			if (prep.font.ui || prep.font.display) theme = { ...theme, font: prep.font };
+			else {
+				theme = { ...theme };
+				delete theme.font;
+			}
 		}
+		next = { type: "paint", theme, peel: write.peel, mediaIdSent: write.mediaIdSent };
 	}
 	const nextAccent = accent ?? current.accent;
 	const look = overlayAccent(applyWrite(current.look, next), nextAccent);
@@ -1909,10 +2574,17 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 	const opt = (label: string, name: keyof Theme, fallback: string) =>
 		colorRow(label, name, hex(typeof colors[name] === "string" ? (colors[name] as string) : fallback), set(name));
 	const fonts = FONT_SUGGESTIONS.map((n) => `<option value="${esc(n)}">`).join("");
+	const bg = current?.background;
+	const ownedBg = bg?.mediaId ? await resolveBackground(viewer.id, current!) : undefined;
+	const bgPath = ownedBg && /^\/media\/\d{1,19}\.(?:png|gif|webp|jpg)$/.test(ownedBg.image) ? ownedBg.image : "";
 	const body = `<h1>Theme</h1>
 	<p class="dim">X dropped Dim; this puts it back, and lets you pick a look of your own. Dark themes sit on Lights out, light ones on Default. A typeface rides with a theme — Default / Lights out is X's own and has no custom font. Organisation profile decor keeps its own colours on the profile column.</p>
 	${notices.error ? `<p class="error">${esc(notices.error)}</p>` : ""}
 	${(notices.warnings ?? []).map((w) => `<p class="dim">${esc(w)}</p>`).join("")}
+	<h2>Share</h2>
+	<p class="share"><a class="secondary" href="/i/api/xitter/theme/export">Export theme</a><label class="secondary file">Import theme<input type="file" id="theme-file" accept="application/json,.json"></label></p>
+	<ul id="theme-import-errors"></ul>
+	<div id="theme-import-warnings"></div>
 	<h2>Looks</h2>
 	${form(
 		`${pick("", "Default / Lights out (X's own)", { stops: ["#000000", "#ffffff"], angle: 90 }, !current)}
@@ -1926,7 +2598,7 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 			<label class="choice"><input type="radio" name="base" value="dark"${colors.base !== "light" ? " checked" : ""}>Dark</label>
 			<label class="choice"><input type="radio" name="base" value="light"${colors.base === "light" ? " checked" : ""}>Light</label>
 		</div>
-		<div class="live" id="preview">
+		<div class="live" id="preview" data-bg="${esc(bgPath)}">
 			<div class="stage">
 				<div class="nav"><span class="on">Home</span>Search<br>Profile</div>
 				<div class="feed">
@@ -2015,8 +2687,27 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 			</div>
 			<div class="warns" id="warns"></div>
 		</details>
+		<div class="bgopt">
+			<p class="h3">Background image</p>
+			<p class="dim">The picture is not in an exported file. Upload it here, then save.</p>
+			<input type="hidden" name="background_on" value="${bg ? "1" : ""}">
+			<input type="hidden" name="background_clear" value="">
+			<input type="hidden" name="background_media" value="${esc(bg?.mediaId ?? "")}">
+			<div class="line">
+				<label>Fit<select name="bg_fit"><option value="cover"${!bg || bg.fit === "cover" ? " selected" : ""}>Cover</option><option value="contain"${bg?.fit === "contain" ? " selected" : ""}>Contain</option><option value="tile"${bg?.fit === "tile" ? " selected" : ""}>Tile</option></select></label>
+				<label>Position<select name="bg_position"><option value="center"${!bg || bg.position === "center" ? " selected" : ""}>Center</option><option value="top"${bg?.position === "top" ? " selected" : ""}>Top</option><option value="bottom"${bg?.position === "bottom" ? " selected" : ""}>Bottom</option></select></label>
+			</div>
+			<label class="ang">Dim<input type="range" name="bg_dim" min="0" max="80" value="${bg?.dim ?? 0}"><span class="deg" data-num="bg_dim">${bg?.dim ?? 0}</span></label>
+			<label class="ang">Blur<input type="range" name="bg_blur" min="0" max="20" value="${bg?.blur ?? 0}"><span class="deg" data-num="bg_blur">${bg?.blur ?? 0}</span></label>
+			<div class="line">
+				<label class="secondary file">Upload image<input type="file" id="bg-file" accept="image/png,image/gif,image/webp,image/jpeg"></label>
+				<button type="button" class="secondary" id="bg-clear">Remove image</button>
+			</div>
+			<p class="dim" id="bg-note"></p>
+		</div>
 		<div class="savebar">
 			<button type="submit">Save theme</button>
+			<button type="submit">Apply</button>
 			<button type="button" class="secondary" data-reset-all>Reset all</button>
 		</div>`,
 		'id="custom" class="editor"',

@@ -12,7 +12,7 @@ import { ERROR_SCRIPT } from "./errors";
 import { BADGES_SCRIPT } from "./badges";
 import { DECOR_SCRIPT } from "./decor";
 import { DECORATIONS_SCRIPT } from "./decorations";
-import { THEME_SCRIPT, bootAccentCss, bootCss, clientLook, fontLinks, swatches, type Accent, type Look, DEFAULT_ACCENT, themeColorOf } from "./themes";
+import { THEME_SCRIPT, bootAccentCss, bootCss, clientLook, fontLinks, pageChromeCss, swatches, type Accent, type BackgroundPaint, type Look, DEFAULT_ACCENT, themeColorOf } from "./themes";
 import { NOTICE_SCRIPT } from "./automod-notice";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
@@ -259,7 +259,7 @@ let runtimePatched: { sha: string; text: string } | undefined;
 // With no user the client boots signed out, for the sign-in dialog.
 // `multi`: other accounts are signed in too (auth_multi), so the account menu
 // asks for them.
-export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = [], look: Look | null = null, accent: Accent = DEFAULT_ACCENT): string | undefined {
+export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = [], look: Look | null = null, accent: Accent = DEFAULT_ACCENT, paint?: BackgroundPaint): string | undefined {
 	const theme = look?.kind === "painted" ? look.theme : null;
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
@@ -281,10 +281,10 @@ html{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 @media (display-mode:standalone){body{overscroll-behavior-y:none}}${LOGO_CSS}
 ${hideCss()}
 ${FLAG_PICKER_CSS}
-${STICKER_PICKER_CSS}${bootAccentCss(accent)}${theme ? bootCss(theme) : ""}</style>
+${STICKER_PICKER_CSS}${bootAccentCss(accent)}${theme ? bootCss(theme, paint) : ""}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags, accent))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links), theme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches() })};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links), theme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches(), pageChrome: pageChromeCss(paint) })};
 ${user ? ERROR_SCRIPT : ""}
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}

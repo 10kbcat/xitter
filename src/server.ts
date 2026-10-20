@@ -53,7 +53,7 @@ import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 import { noteAppealsRoute } from "./note-appeals";
 import { decorCatalog, decorFor, decorRoute, decorShop, steamFile } from "./decor";
-import { nightModeCookies, readPrefs, themeApi, themeRoute } from "./themes";
+import { nightModeCookies, readPrefs, resolveBackground, themeApi, themeExport, themeImport, themeRoute } from "./themes";
 import { serveFont } from "./fonts";
 
 const MIME: Record<string, string> = {
@@ -211,6 +211,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/decor") return decorFor(url);
 	if (path === "/xitter/decor/shop") return decorShop(url);
 	if (path === "/xitter/decor/catalog") return decorCatalog();
+	if (path === "/xitter/theme/import") return themeImport(req, viewer);
+	if (path === "/xitter/theme/export") return themeExport(req, viewer);
 	if (path === "/xitter/theme") return themeApi(req, viewer);
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
@@ -442,7 +444,9 @@ async function route(req: Request): Promise<Response | undefined> {
 		: [[], [], []];
 	const prefs = readPrefs(flagRows[0]?.preferences);
 	const look = prefs.look;
-	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links, look, prefs.accent);
+	const painted = look?.kind === "painted" ? look.theme : null;
+	const paint = viewer && painted ? await resolveBackground(viewer.id, painted) : undefined;
+	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links, look, prefs.accent, paint);
 	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
 	// a guest token left from the signed-out page makes the signed-in client act
 	// as a guest (no csrf header, every write refused)
