@@ -118,9 +118,11 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 	}
 	const hidden = Object.entries({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirect, state: request.state, scope: request.scope, code_challenge: request.challenge, code_challenge_method: "S256", csrf: viewer.csrf })
 		.map(([key, val]) => `<input type="hidden" name="${key}" value="${esc(val)}">`).join("");
+	// what public-api.ts lets a token of this scope do; keep the two in step
+	const reads = ["Read posts, profiles, and timelines your account can see", "See who you follow and who follows you", "Search posts and people"];
 	const can = request.scope === "write"
-		? ["Read posts, profiles, and timelines your account can see", "See who you follow and who follows you", "Post and delete posts as you", "Like, repost, and follow accounts as you", "Upload photos and videos"]
-		: ["Read posts, profiles, and timelines your account can see", "See who you follow and who follows you", "Search posts and people"];
+		? [...reads, "Post and delete posts as you", "Like, repost, bookmark, and follow as you", "Upload photos and videos"]
+		: reads;
 	const cannot = ["See your password or email address", "Read your Direct Messages", "Change your account settings"];
 	const list = (items: string[], icon: string, cls: string) => `<ul class="perms ${cls}">${items.map((t) => `<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icon}"/></svg>${esc(t)}</li>`).join("")}</ul>`;
 	const initial = (s: string) => esc([...s.trim()][0]?.toUpperCase() ?? "?");
