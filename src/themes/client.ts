@@ -286,8 +286,10 @@ export const THEME_SCRIPT = String.raw`(function(){
 			iconActiveFill:{"231, 233, 234":1}
 		};
 	}
+	var glassOn=false;
 	function wrap(sel, pageBg){
 		var skip=sel+':not(img):not(svg[data-testid="icon-verified"]):not(svg[aria-label="Translator account"]):not(.xitter-deco):not([data-xitter-badges]):not([data-xitter-frame]):not([data-xitter-framed]):not([data-xitter-decor-bg]):not(:is(svg[data-testid="icon-verified"] *,svg[aria-label="Translator account"] *,[data-xitter-badges] *,[data-xitter-frame],[data-xitter-framed] *,[data-xitter-decor-bg] *,.xitter-deco,[aria-label="Color options"] *))';
+		if(glassOn)skip+=':not([data-testid="primaryColumn"]):not([data-testid="primaryColumn"] [role="tablist"]:not([data-testid="toolBar"] *)):not([data-testid="primaryColumn"] [style*="position: sticky"]):not(header[role="banner"]>div>div):not([data-testid="sidebarColumn"] section):not([data-testid="sidebarColumn"] aside[aria-label="Who to follow"]):not([role="search"]):not([data-testid="SearchBox_Search_Input"])';
 		if(pageBg)return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip;
 		return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip+',html[data-xitter-theme][data-xitter-decor] '+skip+':not([data-testid="primaryColumn"] *)';
 	}
@@ -364,7 +366,11 @@ export const THEME_SCRIPT = String.raw`(function(){
 			});
 		});
 		var css=[],k;
-		function add(kind,decl,pageBg){(found[kind]||[]).forEach(function(sel){css.push(wrap(sel,pageBg)+"{"+decl+"}")})}
+		function add(kind,decl,pageBg){
+			glassOn=!!(theme.background&&typeof X.pageChrome==="string"&&X.pageChrome&&decl.indexOf("background")>=0);
+			(found[kind]||[]).forEach(function(sel){css.push(wrap(sel,pageBg)+"{"+decl+"}")});
+			glassOn=false;
+		}
 		add("pagebg","background-color:transparent!important",true);
 		if((found.pagebg||[]).length&&posSels.length){
 			css.push(wrap(":is("+found.pagebg.join(",")+"):is("+posSels.join(",")+")") + "{background:var(--xt-menu)!important}");
@@ -375,7 +381,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		add("menu","background:var(--xt-menu)!important",false);
 		add("header","background-color:var(--xt-header)!important",false);
 		add("hover","background-color:var(--xt-hover)!important",false);
-		add("input","background-color:var(--xt-input)!important;color:var(--xt-input-text)!important;border-color:var(--xt-input-border)!important",false);
+		add("input","background-color:var(--xt-input)!important",false);
+		add("input","color:var(--xt-input-text)!important;border-color:var(--xt-input-border)!important",false);
 		add("tooltip","background-color:var(--xt-tooltip)!important",false);
 		add("text","color:var(--xt-text)!important",false);
 		add("secondary","color:var(--xt-secondary)!important",false);

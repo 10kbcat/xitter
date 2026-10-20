@@ -14,8 +14,11 @@ import {
 	type AccentId,
 	type BgFit,
 	type BgPosition,
+	type BgRepeat,
+	type BgScale,
 	type BlurPx,
 	type Dim,
+	type PanelOpacity,
 	type Fill,
 	type Gradient,
 	type MediaId,
@@ -40,7 +43,15 @@ export type ParsedTheme =
 	| { readonly ok: true; readonly theme: Theme; readonly warnings: readonly string[] }
 	| { readonly ok: false; readonly errors: readonly ThemeError[] };
 
-export type SharedBackground = { fit: BgFit; position: BgPosition; dim: Dim; blur: BlurPx };
+export type SharedBackground = {
+	fit: BgFit;
+	position: BgPosition;
+	dim: Dim;
+	blur: BlurPx;
+	scale: BgScale;
+	repeat: BgRepeat;
+	panel: PanelOpacity;
+};
 export type ImportedTheme = Omit<Theme, "background"> & { background?: SharedBackground };
 export type ImportResult =
 	| { readonly ok: true; readonly theme: ImportedTheme; readonly warnings: readonly string[] }
@@ -94,6 +105,9 @@ const BACKGROUND_FIELDS = [
 	{ key: "position", share: true, onImport: "take" },
 	{ key: "dim", share: true, onImport: "take" },
 	{ key: "blur", share: true, onImport: "take" },
+	{ key: "scale", share: true, onImport: "take" },
+	{ key: "repeat", share: true, onImport: "take" },
+	{ key: "panel", share: true, onImport: "take" },
 	{ key: "mediaId", share: false, onImport: "forbid" },
 ] as const;
 
@@ -102,6 +116,7 @@ const BANNED_KEYS = ["__proto__", "constructor", "prototype"] as const;
 const IMPORT_FORBIDDEN = ["mediaId", "url", "src", "href"] as const;
 const FITS = ["cover", "contain", "tile"] as const;
 const POSITIONS = ["center", "top", "bottom"] as const;
+const REPEATS = ["repeat", "space", "round"] as const;
 const KEY_CAP = THEME_FIELDS.length + 8;
 const ARRAY_CAP = 5;
 
@@ -109,6 +124,11 @@ type Listed = (typeof THEME_FIELDS)[number]["key"];
 type FieldsCoverTheme = Exclude<keyof Theme, Listed> extends never ? (Exclude<Listed, keyof Theme> extends never ? true : never) : never;
 const fieldsCoverTheme: FieldsCoverTheme = true;
 void fieldsCoverTheme;
+
+type ListedBg = (typeof BACKGROUND_FIELDS)[number]["key"];
+type BgCovered = Exclude<keyof ThemeBackground, ListedBg> extends never ? (Exclude<ListedBg, keyof ThemeBackground> extends never ? true : never) : never;
+const bgCovered: BgCovered = true;
+void bgCovered;
 
 export const OPTIONAL_HEX = THEME_FIELDS.filter((f) => f.kind === "hex" && !f.required).map((f) => f.key);
 export const OPTIONAL_FILL = THEME_FIELDS.filter((f) => f.kind === "fill" && !f.required).map((f) => f.key);
@@ -372,6 +392,30 @@ function clampFg(fg: string, bgs: string[]): string {
 const asMediaId = (v: string): MediaId => v as MediaId;
 const asDim = (n: number): Dim => n as Dim;
 const asBlur = (n: number): BlurPx => n as BlurPx;
+const asScale = (n: number): BgScale => n as BgScale;
+const asPanel = (n: number): PanelOpacity => n as PanelOpacity;
+
+function boundedInt(v: unknown, min: number, max: number): number | undefined {
+	if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) return;
+	return v;
+}
+
+function parseRepeat(v: unknown): BgRepeat | undefined {
+	if (typeof v !== "string" || !(REPEATS as readonly string[]).includes(v)) return;
+	return v as BgRepeat;
+}
+
+export function sharedBackground(bg: ThemeBackground): SharedBackground {
+	return {
+		fit: bg.fit,
+		position: bg.position,
+		dim: bg.dim,
+		blur: bg.blur,
+		scale: bg.scale,
+		repeat: bg.repeat,
+		panel: bg.panel,
+	};
+}
 
 function pushError(errors: ThemeError[], path: string, message: string) {
 	errors.push({ path, message });
@@ -579,6 +623,9 @@ function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
 			const position = "position" in bgObj ? bgObj.position : "center";
 			const dim = "dim" in bgObj ? bgObj.dim : 0;
 			const blur = "blur" in bgObj ? bgObj.blur : 0;
+			const scale = "scale" in bgObj ? bgObj.scale : 100;
+			const repeat = "repeat" in bgObj ? bgObj.repeat : "repeat";
+			const panel = "panel" in bgObj ? bgObj.panel : 72;
 			if ((FITS as readonly string[]).includes(fit as string)) background.fit = fit as BgFit;
 			else if (mode === "read") background.fit = "cover";
 			else pushError(errors, "background.fit", "invalid fit");
@@ -587,18 +634,39 @@ function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
 			else pushError(errors, "background.position", "invalid position");
 			const dimN = typeof dim === "number" && Number.isInteger(dim) && dim >= 0 && dim <= 80 ? dim : undefined;
 			const blurN = typeof blur === "number" && Number.isInteger(blur) && blur >= 0 && blur <= 20 ? blur : undefined;
+			const scaleN = boundedInt(scale, 10, 400);
+			const panelN = boundedInt(panel, 20, 90);
+			const repeatN = parseRepeat(repeat);
 			if (dimN !== undefined) background.dim = asDim(dimN);
 			else if (mode === "read") background.dim = asDim(0);
 			else pushError(errors, "background.dim", "invalid dim");
 			if (blurN !== undefined) background.blur = asBlur(blurN);
 			else if (mode === "read") background.blur = asBlur(0);
 			else pushError(errors, "background.blur", "invalid blur");
+			if (scaleN !== undefined) background.scale = asScale(scaleN);
+			else if (mode === "read") background.scale = asScale(100);
+			else pushError(errors, "background.scale", "invalid scale");
+			if (repeatN) background.repeat = repeatN;
+			else if (mode === "read") background.repeat = "repeat";
+			else pushError(errors, "background.repeat", "invalid repeat");
+			if (panelN !== undefined) background.panel = asPanel(panelN);
+			else if (mode === "read") background.panel = asPanel(72);
+			else pushError(errors, "background.panel", "invalid panel");
 			if ("mediaId" in bgObj) {
 				if (mode === "import") pushError(errors, "background.mediaId", "forbidden key");
 				else if (isId(bgObj.mediaId)) background.mediaId = asMediaId(bgObj.mediaId);
 				else if (mode === "save") pushError(errors, "background.mediaId", "invalid media id");
 			}
-			if (background.fit && background.position && background.dim !== undefined && background.blur !== undefined && !errors.some((e) => e.path.startsWith("background")))
+			if (
+				background.fit &&
+				background.position &&
+				background.dim !== undefined &&
+				background.blur !== undefined &&
+				background.scale !== undefined &&
+				background.repeat &&
+				background.panel !== undefined &&
+				!errors.some((e) => e.path.startsWith("background"))
+			)
 				theme.background = background;
 		}
 	}
@@ -674,10 +742,7 @@ export function importTheme(text: string): ImportResult {
 	const warnings = [...got.warnings];
 	if (got.theme.background) warnings.push(BACKGROUND_OMITTED);
 	const theme = copyTheme(got.theme) as ImportedTheme;
-	if (theme.background) {
-		const { fit, position, dim, blur } = theme.background;
-		theme.background = { fit, position, dim, blur };
-	}
+	if (theme.background) theme.background = sharedBackground(theme.background);
 	return { ok: true, theme, warnings };
 }
 
@@ -702,8 +767,7 @@ export function exportTheme(theme: Theme): ThemeFile {
 			continue;
 		}
 		if (field.kind === "background") {
-			const bg = value as ThemeBackground;
-			shared.background = { fit: bg.fit, position: bg.position, dim: bg.dim, blur: bg.blur };
+			shared.background = sharedBackground(value as ThemeBackground);
 			continue;
 		}
 		(shared as Record<string, unknown>)[field.key] = value;
@@ -736,13 +800,7 @@ export function mergeSavedBackground(previous: Theme | undefined, theme: Theme, 
 	}
 	if (theme.background && !mediaIdSent && previous?.background?.mediaId) {
 		const next = copyTheme(theme);
-		next.background = {
-			fit: theme.background.fit,
-			position: theme.background.position,
-			dim: theme.background.dim,
-			blur: theme.background.blur,
-			mediaId: previous.background.mediaId,
-		};
+		next.background = { ...sharedBackground(theme.background), mediaId: previous.background.mediaId };
 		return next;
 	}
 	return theme;

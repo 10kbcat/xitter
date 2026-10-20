@@ -1,7 +1,7 @@
 // Server-side CSS: deriveTokens, account/boot/page-chrome CSS, font links, background paint.
 
 import { fontSlug } from "../fonts";
-import { CHIRP, fillOfAccent, type Accent, type BgFit, type BgPosition, type BlurPx, type Dim, type Theme } from "./presets";
+import { CHIRP, fillOfAccent, type Accent, type BgFit, type BgPosition, type BgRepeat, type BgScale, type BlurPx, type Dim, type PanelOpacity, type Theme } from "./presets";
 import { INK, WHITE, derived, fillCss, mixHex, readableOn, rgba, solidOf } from "./validate";
 
 export type BackgroundPaint = {
@@ -11,6 +11,20 @@ export type BackgroundPaint = {
 	readonly position: BgPosition;
 	readonly dim: Dim;
 	readonly blur: BlurPx;
+	readonly scale: number;
+	readonly repeat: BgRepeat;
+	readonly panel: number;
+};
+
+export type ChromeSlots = {
+	root: string;
+	image: string;
+	imagePos: "fixed" | "absolute";
+	column: string;
+	nav: string;
+	header: string;
+	sidebar: string;
+	search: string;
 };
 
 export type AccountTokens = {
@@ -135,25 +149,102 @@ function fontFamilyCss(theme: Theme): string {
 }
 
 const PAGE_GATE = "html[data-xitter-theme]:not([data-xitter-decor])";
-const FIT_CSS: Record<BgFit, string> = { cover: "cover", contain: "contain", tile: "auto" };
-const POSITION_CSS: Record<BgPosition, string> = { center: "center", top: "top", bottom: "bottom" };
+
+export const PAGE_CHROME_SLOTS: ChromeSlots = {
+	root: "html[data-xitter-theme]",
+	image: `${PAGE_GATE} body`,
+	imagePos: "fixed",
+	column: `${PAGE_GATE} [data-testid="primaryColumn"]`,
+	nav: `${PAGE_GATE} header[role="banner"]>div>div`,
+	header: `${PAGE_GATE} [data-testid="primaryColumn"] [role="tablist"]:not([data-testid="toolBar"] *),${PAGE_GATE} [data-testid="primaryColumn"] [style*="position: sticky"]`,
+	sidebar: `${PAGE_GATE} [data-testid="sidebarColumn"] section,${PAGE_GATE} [data-testid="sidebarColumn"] aside[aria-label="Who to follow"]`,
+	search: `${PAGE_GATE} [role="search"],${PAGE_GATE} [data-testid="SearchBox_Search_Input"]`,
+};
+
+export const PREVIEW_CHROME_SLOTS: ChromeSlots = {
+	root: "#preview.live",
+	image: "#preview.live",
+	imagePos: "absolute",
+	column: "#preview.live .feed",
+	nav: "#preview.live .nav",
+	header: "#preview.live .tabs",
+	sidebar: "#preview.live .glass",
+	search: "#preview.live .search",
+};
 
 function cssUrl(path: string): string {
-	if (!/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path)) return "none";
+	if (typeof path !== "string" || !/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path)) return "none";
 	return `url("${path}")`;
 }
 
-export function pageChromeCss(paint?: BackgroundPaint): string {
-	if (!paint) return "";
-	const repeat = paint.fit === "tile" ? "repeat" : "no-repeat";
+function finiteOr(v: number | null | undefined, fallback: number): number {
+	return typeof v === "number" && v === v ? v : fallback;
+}
+
+function bgSize(fit: string | undefined, scale: number): string {
+	if (fit === "tile") return scale === 100 ? "auto" : `${scale}%`;
+	if (fit === "cover" || fit === "contain") return scale === 100 ? fit : `${scale}%`;
+	return "auto";
+}
+
+function tileRepeat(fit: string | undefined, repeat: string | undefined): string {
+	if (fit !== "tile") return "no-repeat";
+	if (repeat === "repeat" || repeat === "space" || repeat === "round") return repeat;
+	return "repeat";
+}
+
+function bgPosition(position: string | undefined): string {
+	if (position === "top" || position === "bottom" || position === "center") return position;
+	return "center";
+}
+
+export function pageChromeVars(paint: BackgroundPaint): Record<string, string> {
+	const scale = finiteOr(paint.scale, 100);
+	const panel = finiteOr(paint.panel, 72);
+	const dim = finiteOr(paint.dim, 0);
+	const blur = finiteOr(paint.blur, 0);
 	const still = paint.still ? cssUrl(paint.still) : cssUrl(paint.image);
+	return {
+		"--xt-bg-image": cssUrl(paint.image),
+		"--xt-bg-still": still,
+		"--xt-bg-size": bgSize(paint.fit, scale),
+		"--xt-bg-position": bgPosition(paint.position),
+		"--xt-bg-repeat": tileRepeat(paint.fit, paint.repeat),
+		"--xt-bg-dim": String(dim / 100),
+		"--xt-bg-blur": `${blur}px`,
+		"--xt-bg-panel": `${panel}%`,
+	};
+}
+
+function glassSel(slots: ChromeSlots, sel: string): string {
+	if (slots.imagePos !== "absolute") return sel;
+	return sel.replaceAll("#preview.live", "#preview.live[data-bg]");
+}
+
+export function pageChromeRules(slots: ChromeSlots): string {
+	const img = slots.image;
+	const pos = slots.imagePos;
+	const soft = `${glassSel(slots, slots.column)},${glassSel(slots, slots.header)}`;
+	const hard = `${glassSel(slots, slots.nav)},${glassSel(slots, slots.sidebar)},${glassSel(slots, slots.search)}`;
+	const tint = "background:color-mix(in srgb,var(--xt-surface) var(--xt-bg-panel),transparent)!important;";
 	return (
-		`html[data-xitter-theme]{--xt-bg-image:${cssUrl(paint.image)};--xt-bg-still:${still};--xt-bg-size:${FIT_CSS[paint.fit]};--xt-bg-position:${POSITION_CSS[paint.position]};--xt-bg-repeat:${repeat};--xt-bg-dim:${paint.dim / 100};--xt-bg-blur:${paint.blur}px}` +
-		`${PAGE_GATE} body{position:relative;z-index:0}` +
-		`${PAGE_GATE} body::before{content:"";position:fixed;inset:0;z-index:-1;background-image:var(--xt-bg-image);background-size:var(--xt-bg-size);background-position:var(--xt-bg-position);background-repeat:var(--xt-bg-repeat);filter:blur(var(--xt-bg-blur));pointer-events:none}` +
-		`${PAGE_GATE} body::after{content:"";position:fixed;inset:0;z-index:-1;background:rgb(0 0 0 / var(--xt-bg-dim));pointer-events:none}` +
-		`@media (prefers-reduced-motion:reduce){${PAGE_GATE} body::before{animation:none;background-image:var(--xt-bg-still)}}`
+		`${img}{position:relative;z-index:0}` +
+		`${img}::before{content:"";position:${pos};inset:0;z-index:-1;background-image:var(--xt-bg-image);background-size:var(--xt-bg-size);background-position:var(--xt-bg-position);background-repeat:var(--xt-bg-repeat);filter:blur(var(--xt-bg-blur));pointer-events:none}` +
+		`${img}::after{content:"";position:${pos};inset:0;z-index:-1;background:rgb(0 0 0 / var(--xt-bg-dim));pointer-events:none}` +
+		`@media (prefers-reduced-motion:reduce){${img}::before{animation:none;background-image:var(--xt-bg-still)}}` +
+		`${soft}{${tint}-webkit-backdrop-filter:blur(2px)!important;backdrop-filter:blur(2px)!important}` +
+		`${hard}{${tint}-webkit-backdrop-filter:blur(14px)!important;backdrop-filter:blur(14px)!important}` +
+		`@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){${soft},${hard}{background:color-mix(in srgb,var(--xt-surface) 92%,transparent)!important}}`
 	);
+}
+
+export function pageChromeCss(paint?: BackgroundPaint, slots: ChromeSlots = PAGE_CHROME_SLOTS): string {
+	if (!paint) return "";
+	const vars = pageChromeVars(paint);
+	const block = Object.keys(vars)
+		.map((k) => `${k}:${vars[k]}`)
+		.join(";");
+	return `${slots.root}{${block}}` + pageChromeRules(slots);
 }
 
 export function bootCss(theme: Theme, paint?: BackgroundPaint): string {
@@ -183,6 +274,9 @@ export async function resolveBackground(userId: string, theme: Theme): Promise<B
 		position: bg.position,
 		dim: bg.dim,
 		blur: bg.blur,
+		scale: bg.scale ?? (100 as BgScale),
+		repeat: bg.repeat ?? "repeat",
+		panel: bg.panel ?? (72 as PanelOpacity),
 	};
 }
 

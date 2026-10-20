@@ -7,17 +7,25 @@ export type ThemeFont = { ui?: string; display?: string };
 declare const mediaIdBrand: unique symbol;
 declare const dimBrand: unique symbol;
 declare const blurBrand: unique symbol;
+declare const scaleBrand: unique symbol;
+declare const panelBrand: unique symbol;
 export type MediaId = string & { readonly [mediaIdBrand]: true };
 export type Dim = number & { readonly [dimBrand]: true };
 export type BlurPx = number & { readonly [blurBrand]: true };
+export type BgScale = number & { readonly [scaleBrand]: true };
+export type PanelOpacity = number & { readonly [panelBrand]: true };
 export type BgFit = "cover" | "contain" | "tile";
 export type BgPosition = "center" | "top" | "bottom";
+export type BgRepeat = "repeat" | "space" | "round";
 
 export type ThemeBackground = {
 	fit: BgFit;
 	position: BgPosition;
 	dim: Dim;
 	blur: BlurPx;
+	scale: BgScale;
+	repeat: BgRepeat;
+	panel: PanelOpacity;
 	mediaId?: MediaId;
 };
 
