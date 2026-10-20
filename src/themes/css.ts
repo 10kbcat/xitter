@@ -314,8 +314,10 @@ export async function resolveBackground(userId: string, theme: Theme): Promise<B
 	};
 }
 
+// Hung off the accent attribute, like every accent rule, so that a decorated
+// profile, which takes the attribute away, takes these values with it.
 export function bootAccentCss(accent: Accent): string {
-	return `html{${accentVars(accent)}}`;
+	return `html[data-xitter-accent]{${accentVars(accent)}}`;
 }
 
 export function fontLinks(theme: Theme | null): string {

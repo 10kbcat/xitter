@@ -108,6 +108,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 	}
 	function applyAccentVars(){
 		var a=resolveAccent(accentWire),h=document.documentElement,hover=mix(hexRgb(a.solid),hexRgb("#0f1419"),0.12);
+		// on a decorated profile only the choice is kept, for when the theme comes back
+		if(held){resolved=a;forcedColor=a.custom?"blue500":a.id;return}
 		h.style.setProperty("--xt-accent",a.solid);
 		h.style.setProperty("--xt-accent-fill",a.fill);
 		h.style.setProperty("--xt-accent-soft",rgba(a.solid,0.1));
@@ -161,15 +163,18 @@ export const THEME_SCRIPT = String.raw`(function(){
 		return "url(#"+id+")";
 	}
 	function paintChecks(){
+		if(held)return;
 		var fill=accentGradUrl(),color=resolved.solid;
 		document.querySelectorAll('svg[data-testid="icon-verified"]').forEach(function(svg){
 			if(svg.closest("[data-xitter-badges],[data-xitter-frame],[data-xitter-framed],.xitter-deco,[data-xitter-decor-bg]"))return;
 			if(keptCheck(svg))return;
+			svg.setAttribute("data-xitter-tinted","");
 			svg.style.setProperty("color",color,"important");
 			svg.style.setProperty("fill",fill,"important");
 			svg.querySelectorAll("path,g").forEach(function(n){
 				var k=rgbKey(getComputedStyle(n).fill);
 				if(GOLD[k]||GREY[k])return;
+				n.setAttribute("data-xitter-tinted","");
 				n.style.setProperty("fill",fill,"important");
 			});
 		});
@@ -210,8 +215,34 @@ export const THEME_SCRIPT = String.raw`(function(){
 	}
 	var VAR_KEYS=["--xt-bg","--xt-surface","--xt-text","--xt-secondary","--xt-muted","--xt-link","--xt-border","--xt-divider","--xt-accent","--xt-accent-fill","--xt-button","--xt-button-text","--xt-button-hover","--xt-header","--xt-hover","--xt-input","--xt-input-text","--xt-input-border","--xt-menu","--xt-tooltip","--xt-icon","--xt-icon-active","--xt-reply","--xt-repost","--xt-like","--xt-bookmark","--xt-views","--xt-secondary-button","--xt-secondary-button-border","--xt-secondary-button-text","--xt-badge","--xt-selection","--xt-accent-soft","--xt-reply-soft","--xt-repost-soft","--xt-like-soft","--xt-bookmark-soft"];
 	var ACCENT_KEYS={"--xt-accent":1,"--xt-accent-fill":1,"--xt-accent-soft":1,"--xt-accent-hover":1};
+	// An organization's decor owns its profile. While the decor script marks the
+	// page with data-xitter-decor, the viewer's theme and accent step aside
+	// whole: no theme or accent attribute (every rule here and in the boot CSS
+	// hangs off one), no --xt-* values, no tinted ticks, no theme video. Leaving
+	// the profile, the decor script drops its mark and the theme comes back.
+	var held=false;
+	function stepAside(){
+		var h=document.documentElement;
+		held=true;
+		h.removeAttribute("data-xitter-theme");
+		h.removeAttribute("data-xitter-accent");
+		VAR_KEYS.concat(["--xt-accent-hover","--xt-accent-tint","--xt-accent-text"]).forEach(function(k){h.style.removeProperty(k)});
+		document.querySelectorAll("[data-xitter-tinted]").forEach(function(n){n.style.removeProperty("color");n.style.removeProperty("fill");n.removeAttribute("data-xitter-tinted")});
+		var v=document.body&&document.body.querySelector(":scope > [data-xitter-theme-bg]");
+		if(v)v.remove();
+	}
+	function syncDecor(){
+		var on=document.documentElement.hasAttribute("data-xitter-decor");
+		if(on&&!held)stepAside();
+		else if(!on&&held){
+			held=false;
+			if(theme)apply(theme);
+			else{applyAccentVars();paintAccent()}
+		}
+	}
 	function apply(t){
 		theme=t;
+		if(held)return;
 		var h=document.documentElement;
 		if(!t){
 			h.removeAttribute("data-xitter-theme");
@@ -799,7 +830,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 	function syncThemeVideo(){
 		if(!document.body)return;
 		var motion=X.steamMotion;
-		var b=theme&&theme.background;
+		var b=!held&&theme&&theme.background;
 		var same=bgMatches(theme)&&motion&&b&&b.steam&&String(motion.defid)===String(b.steam.defid);
 		if(!same){
 			var gone=document.body.querySelector(":scope > [data-xitter-theme-bg]");
@@ -812,7 +843,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		if(found&&STEAM_STILL.test(found[1]))poster=found[1];
 		mountThemeVideo(document.body,{defid:motion.defid,movie:motion.movie,mp4:motion.mp4,image:poster},b);
 	}
-	function tick(){if(theme)paint();paintAccent();display();syncThemeVideo()}
+	function tick(){syncDecor();if(theme)paint();paintAccent();display();syncThemeVideo()}
 	tick();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;tick()},150)}).observe(document.documentElement,{childList:true,subtree:true});
+	new MutationObserver(syncDecor).observe(document.documentElement,{attributes:true,attributeFilter:["data-xitter-decor"]});
 })();`;

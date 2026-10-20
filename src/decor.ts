@@ -472,7 +472,9 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		if(!k||(!k.background&&!k.theme)){if(current)clearProfile();return}
 		if(current===n)return;
 		clearProfile();current=n;
-		var light=/^rgb\(255, 255, 255/.test(getComputedStyle(document.body).backgroundColor);
+		// X's own colour sits on the body inline: a viewer's theme paints over the
+		// computed one, and the decor follows X's mode, not the theme it replaces
+		var light=/^rgb\(255, 255, 255/.test(document.body.style.backgroundColor||getComputedStyle(document.body).backgroundColor);
 		document.documentElement.setAttribute("data-xitter-decor","");
 		var css="";
 		if(k.background){
