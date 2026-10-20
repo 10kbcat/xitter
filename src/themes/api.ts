@@ -15,7 +15,7 @@ import {
 	importTheme,
 	lookView,
 	modeOf,
-	sharedBackground,
+	backgroundKnobs,
 	overlayAccent,
 	parseLookWrite,
 	readPrefs,
@@ -84,7 +84,7 @@ async function keepOwnedBackground(userId: string, theme: Theme, warnings: strin
 	if (owned) return theme;
 	warnings.push("that background image isn't on this account");
 	const next = copyTheme(theme);
-	next.background = sharedBackground(theme.background!);
+	next.background = backgroundKnobs(theme.background!);
 	return next;
 }
 

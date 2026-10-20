@@ -416,9 +416,8 @@ export function backgroundKnobs(bg: BackgroundKnobs): BackgroundKnobs {
 }
 
 export function sharedBackground(bg: ThemeBackground | BackgroundKnobs): SharedBackground {
-	const out: SharedBackground = backgroundKnobs(bg);
-	if ("steam" in bg && bg.steam) out.steam = { defid: bg.steam.defid };
-	return out;
+	const knobs = backgroundKnobs(bg);
+	return "steam" in bg && bg.steam ? { ...knobs, steam: { defid: bg.steam.defid } } : knobs;
 }
 
 function pushError(errors: ThemeError[], path: string, message: string) {
@@ -537,7 +536,12 @@ export function parseTheme(input: unknown, mode: "read"): { ok: true; theme: The
 export function parseTheme(input: unknown, mode: "save" | "import"):
 	| { ok: true; theme: ThemeFrame; source: BackgroundSource; warnings: readonly string[] }
 	| { ok: false; errors: readonly ThemeError[] };
-export function parseTheme(input: unknown, mode: ThemeMode) {
+export function parseTheme(
+	input: unknown,
+	mode: ThemeMode,
+):
+	| { ok: true; theme: Theme | ThemeFrame; source?: BackgroundSource; warnings: readonly string[] }
+	| { ok: false; errors: readonly ThemeError[] } {
 	const errors: ThemeError[] = [];
 	let source: BackgroundSource = { tag: "none" };
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
