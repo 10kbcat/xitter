@@ -74,7 +74,9 @@ copy during setup, and it stays on that machine.
   (those that don't are left out and counted) and count toward the post rate
   limit, so the import waits on it. Retweets and likes stay behind, mentions
   stay as text, imported posts aren't sent to other instances, and an upload
-  that isn't imported within a day is deleted
+  that isn't imported within a day is deleted. By default only accounts a
+  week old can import, and staff approve each import first (Admin > Settings,
+  Import from X)
 - Polls with a photo on each choice
 - Previews when a public post or profile is shared in other apps (Discord,
   Slack, iMessage…): OpenGraph and Twitter card tags and oEmbed, for active,

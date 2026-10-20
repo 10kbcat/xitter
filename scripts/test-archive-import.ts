@@ -2,8 +2,8 @@
 // checks what lands: posts with their X ids and dates, a thread kept together,
 // a photo, a video streamed to disk, the profile, nothing sent to other
 // instances, a post with a blocked phrase left out, and a second import that
-// adds nothing. Then the zip reader's size checks, and the tidying of uploads
-// left behind.
+// adds nothing. Then the zip reader's size checks, a declined import, and the
+// tidying of uploads left behind.
 // DATABASE_URL=postgres://localhost/xitter_test bun scripts/test-archive-import.ts
 import { strict as assert } from "node:assert";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ process.env.ARCHIVE_DIR = join(scratch, "imports");
 process.env.MEDIA_DIR = join(scratch, "media");
 const { sql } = await import("../src/db");
 const { newId } = await import("../src/ids");
-const { runImport, tidyImports } = await import("../src/archive-import");
+const { decideImport, runImport, tidyImports } = await import("../src/archive-import");
 const { settings } = await import("../src/settings");
 const { Zip, ZipError } = await import("../src/zip");
 const { sourceFile } = await import("../src/video");
@@ -150,6 +150,16 @@ try {
 	await assert.rejects(liar.extract(liar.entries[0], 1024, join(scratch, "out")), ZipError);
 	assert(!existsSync(join(scratch, "out")), "a refused extract leaves nothing behind");
 	assert(existsSync(sourceFile(process.env.MEDIA_DIR!, video.id)), "the video was written to disk");
+
+	// one waiting for staff, declined: the account is told why, the zip goes
+	await sql`update archive_imports set state = 'pending' where user_id = ${user}::bigint`;
+	writeFileSync(join(process.env.ARCHIVE_DIR!, `${user}.zip`), archive);
+	assert.equal(await decideImport(user, false, "looks hand-made"), true);
+	const [declined] = await sql`select state, error from archive_imports where user_id = ${user}::bigint`;
+	assert.equal(declined.state, "failed");
+	assert.match(declined.error, /looks hand-made/);
+	assert(!existsSync(join(process.env.ARCHIVE_DIR!, `${user}.zip`)), "a declined archive is deleted");
+	assert.equal(await decideImport(user, true), false, "only a waiting import can be decided");
 
 	// an upload that never got imported, and a zip no import is waiting on
 	await sql`update archive_imports set state = 'uploading', updated_at = now() - interval '2 days' where user_id = ${user}::bigint`;

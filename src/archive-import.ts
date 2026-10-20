@@ -1,13 +1,16 @@
 // Settings > Import from X (/account/import): someone uploads the archive they
 // downloaded from x.com (Settings > Your account > Download an archive), and
 // their posts, photos, videos and profile come over with their original dates.
-// It's off until an admin turns it on (Admin > Settings, feature switches).
+// It's off until an admin turns it on (Admin > Settings, feature switches),
+// and then open to accounts at least min_age_days old, each import waiting
+// for staff to approve it unless an admin turned that off (Admin > Settings,
+// Import from X). Staff accounts skip both.
 //
 // The zip can be gigabytes, past the server's request size, so the page sends
 // it in pieces (POST /account/import/upload?offset=n) to ARCHIVE_DIR, then
 // starts the import. A few run at a time, in the background; the page shows
 // their progress, and one cut off by a restart carries on. An upload nobody
-// started importing is deleted after a day.
+// started importing is deleted after a day, one staff didn't approve after a week.
 //
 // Imported posts go through what a post written here does: the length limit,
 // automod (a hit is a strike, once per import), the admin's blocked phrases,
@@ -53,7 +56,7 @@ const EPOCH = 1288834974657n;
 const fileOf = (userId: string) => join(DIR, `${userId}.zip`);
 
 type Options = { replies: boolean; profile: boolean };
-type State = "uploading" | "queued" | "running" | "done" | "failed";
+type State = "uploading" | "pending" | "queued" | "running" | "done" | "failed";
 type Row = { state: State; size: number; options: Options; total: number; posts: number; media: number; skipped: number; refused: number; waiting_until: Date | null; error: string | null };
 
 async function row(userId: string): Promise<Row | undefined> {
@@ -247,6 +250,16 @@ async function importProfile(userId: string, zip: Zip) {
 
 const canPost = (u: any) => !!u && u.status === "active" && !u.deactivated_at;
 
+// why this account can't import yet, if it can't: too new (Admin > Settings)
+async function tooNew(viewer: Viewer): Promise<string | undefined> {
+	const days = settings().archive_import.min_age_days;
+	if (viewer.role || !days) return undefined;
+	const [u] = await sql`select created_at from users where id = ${viewer.id}::bigint`;
+	const from = new Date(new Date(u?.created_at ?? Date.now()).getTime() + days * 86_400_000);
+	if (from.getTime() <= Date.now()) return undefined;
+	return `Accounts can import from X once they're ${plural(days, "day", "days")} old. Yours can from ${from.toISOString().slice(0, 10)}.`;
+}
+
 // the import of the archive waiting in ARCHIVE_DIR for this account, with the
 // options its archive_imports row holds (scripts/test-archive-import.ts calls it)
 export async function runImport(userId: string) {
@@ -381,7 +394,8 @@ const enqueue = (userId: string) => {
 	next();
 };
 
-// Uploads left unfinished or never imported for a day are deleted, with any
+// Uploads left unfinished or never imported for a day are deleted, and ones
+// staff haven't approved in a week, with any
 // zip no import is waiting on (one whose account was deleted, say); an hour's
 // grace keeps an upload that just started from being taken for one of those
 export async function tidyImports() {
@@ -389,8 +403,12 @@ export async function tidyImports() {
 			error = 'The upload wasn''t imported within a day, so it was deleted. Upload it again.'
 		where state = 'uploading' and updated_at < now() - interval '1 day' returning user_id::text`)
 		rmSync(fileOf(r.user_id), { force: true });
+	for (const r of await sql`update archive_imports set state = 'failed', updated_at = now(),
+			error = 'No one on staff approved the import within a week, so the archive was deleted. Upload it again, or ask the staff.'
+		where state = 'pending' and updated_at < now() - interval '7 days' returning user_id::text`)
+		rmSync(fileOf(r.user_id), { force: true });
 	if (!existsSync(DIR)) return;
-	const live = new Set((await sql`select user_id::text from archive_imports where state in ('uploading', 'queued', 'running')`).map((r: any) => r.user_id));
+	const live = new Set((await sql`select user_id::text from archive_imports where state in ('uploading', 'pending', 'queued', 'running')`).map((r: any) => r.user_id));
 	for (const name of readdirSync(DIR)) {
 		const m = /^(\d+)\.zip$/.exec(name);
 		if (!m || live.has(m[1])) continue;
@@ -409,12 +427,32 @@ export async function resumeImports() {
 	}
 }
 
+// ── staff approval (Admin > Settings, Import from X) ──────────────────────
+
+export async function pendingImports() {
+	return sql`select a.user_id::text, u.screen_name, u.name, u.created_at, a.size::float8 as size, a.options, a.updated_at
+		from archive_imports a join users u on u.id = a.user_id where a.state = 'pending' order by a.updated_at`;
+}
+
+// true when it was waiting: approved, it joins the queue; declined, the zip goes
+export async function decideImport(userId: string, approve: boolean, reason = ""): Promise<boolean> {
+	const error = `The staff didn't approve this import${reason ? `: ${reason}` : "."}`;
+	const [r] = approve
+		? await sql`update archive_imports set state = 'queued', updated_at = now() where user_id = ${userId}::bigint and state = 'pending' returning 1`
+		: await sql`update archive_imports set state = 'failed', error = ${error}, updated_at = now() where user_id = ${userId}::bigint and state = 'pending' returning 1`;
+	if (!r) return false;
+	if (approve) enqueue(userId);
+	else rmSync(fileOf(userId), { force: true });
+	return true;
+}
+
 // ── the page ───────────────────────────────────────────────────────────────
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 async function page(req: Request, viewer: Viewer, r: Row | undefined, error = "") {
-	const busy = r?.state === "queued" || r?.state === "running";
+	const busy = r?.state === "pending" || r?.state === "queued" || r?.state === "running";
+	const notYet = busy ? undefined : await tooNew(viewer);
 	const summary =
 		r &&
 		`${plural(r.posts, "post", "posts")} and ${plural(r.media, "photo or video", "photos and videos")} imported` +
@@ -422,7 +460,9 @@ async function page(req: Request, viewer: Viewer, r: Row | undefined, error = ""
 			(r.refused ? `, ${plural(r.refused, "post", "posts")} left out by this instance's rules (too long, a blocked phrase or automod)` : "");
 	const waitingUntil = r?.waiting_until ? new Date(r.waiting_until) : null;
 	const wait = waitingUntil && waitingUntil.getTime() > Date.now() ? ` Waiting for your post limit (${limitOf("post")} posts every 15 minutes) until ${waitingUntil.toISOString().slice(11, 16)} UTC.` : "";
-	const status = busy
+	const status = r?.state === "pending"
+		? `<div class="card"><b>Waiting for the staff to approve the import</b><div class="meta">Imports on this instance are checked by a person first. This page shows when it starts; if no one approves it within a week, the archive is deleted.</div></div>`
+		: busy
 		? `<div class="card"><b>${r!.state === "queued" ? "Waiting for other imports to finish…" : "Importing…"}</b><div class="meta">${r!.total ? `${(r!.posts + r!.skipped + r!.refused).toLocaleString("en-US")} of ${plural(r!.total, "post", "posts")} done. ` : ""}${summary}.${wait} Videos are converted after the posts are in.</div></div>`
 		: r?.state === "done"
 			? `<div class="card success"><b>Import finished</b><div class="meta">${summary}. Videos may take a while longer to appear.</div></div>`
@@ -431,6 +471,8 @@ async function page(req: Request, viewer: Viewer, r: Row | undefined, error = ""
 				: "";
 	const form = busy
 		? ""
+		: notYet
+		? `<p class="dim">${esc(notYet)}</p>`
 		: `<form id="import" method="post" action="/account/import">
 	<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">
 	<label for="file">Your X archive (.zip, up to ${Math.round(MAX_BYTES / MB)} MB)</label>
@@ -473,7 +515,7 @@ async function page(req: Request, viewer: Viewer, r: Row | undefined, error = ""
 	${form}`,
 	});
 	// while it runs, the page reloads itself to show the progress
-	if (busy) res.headers.set("refresh", "5");
+	if (busy) res.headers.set("refresh", r?.state === "pending" ? "60" : "5");
 	return res;
 }
 
@@ -486,11 +528,13 @@ export async function importRoute(req: Request, url: URL, viewer: Viewer): Promi
 		return accountPage({ req, viewer, title: "Import from X", status: 404, body: `<h1>Import from X</h1><p class="dim">Importing from X is turned off on this instance.</p>` });
 	}
 	const r = await row(viewer.id);
-	const busy = r?.state === "queued" || r?.state === "running";
+	const busy = r?.state === "pending" || r?.state === "queued" || r?.state === "running";
 	if (p === "/account/import/upload") {
 		if (req.method !== "POST") return json({ error: "Use POST." }, 405);
 		if (req.headers.get("x-csrf-token") !== viewer.csrf) return json({ error: "That page is out of date. Reload it and try again." }, 403);
 		if (busy) return json({ error: "An import is already running." }, 409);
+		const young = await tooNew(viewer);
+		if (young) return json({ error: young }, 403);
 		const offset = Number(url.searchParams.get("offset"));
 		const data = new Uint8Array(await req.arrayBuffer());
 		if (!Number.isSafeInteger(offset) || offset < 0 || data.length > CHUNK_BYTES) return json({ error: "Bad upload piece." }, 400);
@@ -518,6 +562,8 @@ export async function importRoute(req: Request, url: URL, viewer: Viewer): Promi
 	if (r?.state !== "uploading" || !existsSync(fileOf(viewer.id))) return page(req, viewer, r, "Upload your archive first.");
 	const [me] = await sql`select status, deactivated_at from users where id = ${viewer.id}::bigint`;
 	if (!canPost(me)) return page(req, viewer, r, "Your account can't post right now, so it can't import posts either.");
+	const young = await tooNew(viewer);
+	if (young) return page(req, viewer, r, young);
 	try {
 		await Zip.open(fileOf(viewer.id));
 	} catch (e) {
@@ -526,7 +572,9 @@ export async function importRoute(req: Request, url: URL, viewer: Viewer): Promi
 		return new Response(null, { status: 303, headers: { location: "/account/import" } });
 	}
 	const options: Options = { replies: f?.get("replies") === "1", profile: f?.get("profile") === "1" };
-	await sql`update archive_imports set state = 'queued', options = ${JSON.stringify(options)}::text::jsonb, updated_at = now() where user_id = ${viewer.id}::bigint`;
-	enqueue(viewer.id);
+	// staff approve each import first, unless an admin turned that off
+	const approval = settings().archive_import.approval && !viewer.role;
+	await sql`update archive_imports set state = ${approval ? "pending" : "queued"}, options = ${JSON.stringify(options)}::text::jsonb, updated_at = now() where user_id = ${viewer.id}::bigint`;
+	if (!approval) enqueue(viewer.id);
 	return new Response(null, { status: 303, headers: { location: "/account/import" } });
 }

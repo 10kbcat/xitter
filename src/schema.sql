@@ -1459,6 +1459,9 @@ create table if not exists archive_imports (
 -- rate limit) carries on
 alter table archive_imports add column if not exists refused int not null default 0;
 alter table archive_imports add column if not exists waiting_until timestamptz;
+-- 'pending': waiting for staff to approve it (Admin > Settings, Import from X)
+alter table archive_imports drop constraint if exists archive_imports_state_check;
+alter table archive_imports add constraint archive_imports_state_check check (state in ('uploading', 'pending', 'queued', 'running', 'done', 'failed'));
 
 -- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
 alter table users add column if not exists decor jsonb;

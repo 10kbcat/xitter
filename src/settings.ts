@@ -86,6 +86,8 @@ const DEFAULTS = {
 	backups: { daily: false, keep: 7 },
 	// member-invites.ts: invites members make themselves, while sign-up is by invite
 	invite_quota: { enabled: false, per_month: 3, uses: 1, min_age_days: 7 },
+	// archive-import.ts: who may import from X, while the feature is on; staff skip both
+	archive_import: { min_age_days: 7, approval: true },
 	// the client's own feature switches, set by an admin (Admin > Feature
 	// switches); they win over the build's values and Xitter's own (shell.ts)
 	switch_overrides: {} as Record<string, unknown>,
