@@ -65,6 +65,8 @@ const CODE = "M320-240 80-480l240-240 57 57-184 184 183 183-56 56Zm320 0-57-57 1
 const BUILDING = "M4 21V3h11v4h5v14H4zm2-2h3v-3h2v3h2V5H6v14zm9 0h3V9h-3v10zM8 7h3v2H8V7zm0 4h3v2H8v-2z";
 const SHIELD = "M12 1.5 3.5 5v6c0 5.2 3.6 10 8.5 11.5 4.9-1.5 8.5-6.3 8.5-11.5V5L12 1.5zm0 2.2 6.5 2.7V11c0 4.2-2.8 8.2-6.5 9.4-3.7-1.2-6.5-5.2-6.5-9.4V6.4L12 3.7zM11 7h2v6h-2V7zm0 8h2v2h-2v-2z";
 const ROBOT = "M11 2h2v3h5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5V2zM6 7v11h12V7H6zm3 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm-6 5h6v1.5H9V15z";
+// Material Symbols "upload"
+const UPLOAD = "M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z";
 // Material Symbols "public"
 const PALETTE = "M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-220 40q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120-160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm200 0q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120 160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z";
 const TONE = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 1.8v14.4a7.2 7.2 0 0 0 0-14.4z";
@@ -94,6 +96,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD, where: "both" });
 	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/passkeys", text: "Passkeys", description: "Sign in with your fingerprint, face or screen lock instead of a password.", icon: KEY, viewBox: "0 -960 960 960", where: "settings" });
+	if (feature("archive_import")) links.push({ href: "/account/import", text: "Import from X", description: "Bring your posts, photos and videos over from your X archive.", icon: UPLOAD, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD, where: "settings" });
 	return links;
@@ -330,6 +333,20 @@ export const TIDY_SCRIPT = `(function(){
 		});
 		document.querySelectorAll('[role="menu"] [role="menuitem"]').forEach(function(m){
 			if(T.menuItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
+		});
+		// signed out on a phone, X's page leads with "Get the app", which opens X's
+		// own app or its store page and looks like being sent to x.com; here
+		// signing in is the way in, so its link takes the button's place
+		document.querySelectorAll("button").forEach(function(b){
+			if(b.innerText.trim()!=="Get the app"||b.style.display==="none")return;
+			b.style.display="none";
+			var box=b.parentElement;
+			while(box&&!box.querySelector('a[href="/i/flow/login"]'))box=box.parentElement;
+			if(!box)return;
+			box.querySelectorAll("span").forEach(function(n){if(n.innerText.trim()==="Already have an account?")n.style.display="none"});
+			var a=box.querySelector('a[href="/i/flow/login"]');
+			a.style.backgroundColor="#eff3f4";a.style.borderColor="#eff3f4";
+			a.querySelectorAll("span,div").forEach(function(n){n.style.color="#0f1419"});
 		});
 		// the verified-badge popup's "Upgrade to get verified": nothing to upgrade to here
 		document.querySelectorAll('a,button,[role="button"]').forEach(function(b){

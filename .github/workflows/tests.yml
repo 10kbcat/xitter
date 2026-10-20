@@ -67,6 +67,7 @@ jobs:
           bun scripts/test-federated-search.ts
           bun scripts/test-public-api-input.ts
           bun scripts/test-data-export.ts
+          bun scripts/test-archive-import.ts
           DB_POOL_MAX=1 bun scripts/test-data-export-chat.ts
           bun scripts/test-scheduled-validation.ts
           bun scripts/test-bookmark-pagination.ts
