@@ -163,7 +163,7 @@ export const PASSKEY_SCRIPT = `${CLIENT}
 		var light=getComputedStyle(document.body).backgroundColor==="rgb(255, 255, 255)";
 		var box=document.createElement("div");
 		box.setAttribute("data-xitter-passkey","");
-		box.style.cssText="display:flex;flex-direction:column;width:100%;margin:0 0 4px";
+		box.style.cssText="display:flex;flex-direction:column;box-sizing:border-box;width:100%;margin:0 0 4px;align-self:flex-start";
 		var b=document.createElement("button");
 		b.type="button";
 		b.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px;margin-right:8px;fill:currentColor;flex:none"><path d="${KEY_ICON}"/></svg><span>Sign in with a passkey</span>';
@@ -177,6 +177,15 @@ export const PASSKEY_SCRIPT = `${CLIENT}
 		or.innerHTML='<div style="flex:1;height:1px;background:'+line+'"></div><span>or</span><div style="flex:1;height:1px;background:'+line+'"></div>';
 		box.appendChild(b);box.appendChild(or);
 		block.parentElement.insertBefore(box,block);
+		// as wide as the textbox and lined up with it, which is narrower than the column
+		function fit(){
+			var f=label.getBoundingClientRect(),p=box.parentElement&&box.parentElement.getBoundingClientRect();
+			if(!p||!f.width)return;
+			box.style.width=f.width+"px";
+			box.style.marginLeft=(f.left-p.left-parseFloat(getComputedStyle(box.parentElement).paddingLeft||"0"))+"px";
+		}
+		fit();
+		if(window.ResizeObserver)new ResizeObserver(fit).observe(label);
 	}
 	new MutationObserver(look).observe(document.documentElement,{childList:true,subtree:true});
 	look();
