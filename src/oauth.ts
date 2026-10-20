@@ -133,7 +133,7 @@ const CONSENT_CSS = `
 .avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;background:var(--surface);font-weight:700}
 .app{border:1px solid var(--border);border-radius:16px;padding:12px 16px;flex-wrap:wrap}
 .app>div{flex:1 1 160px;min-width:0}
-.mark{width:48px;height:48px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--accent);color:#fff;font-size:22px;font-weight:800}
+.mark{width:48px;height:48px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--accent-fill,var(--accent));color:var(--accent-text,#fff);font-size:22px;font-weight:800}
 .pill{border:1px solid var(--outline);border-radius:9999px;padding:2px 10px;font-size:13px;font-weight:700;white-space:nowrap}
 main h1{margin-top:4px}
 section h2{margin:4px 0 8px;font-size:17px;line-height:20px}
