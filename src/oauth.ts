@@ -169,8 +169,8 @@ section h2{margin:4px 0 8px;font-size:17px;line-height:20px}
 .perms.yes svg{fill:var(--success)}
 .perms.no svg{fill:var(--muted)}
 .perms.no li{color:var(--muted)}
-form.decide{justify-items:stretch;gap:12px;margin-top:8px}
-form.decide button{min-height:44px;font-size:16px}
+form.decide{display:flex;gap:12px;margin-top:8px}
+form.decide button{flex:1 1 0;min-width:0;min-height:44px;font-size:16px}
 .fine{color:var(--muted);font-size:13px;line-height:16px}
 .fine code{word-break:break-all}
 `;
