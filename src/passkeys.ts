@@ -64,7 +64,10 @@ function deviceName(req: Request): string {
 export async function passkeySignInRoute(req: Request, path: string): Promise<Response | undefined> {
 	if (path === "/account/passkey" && req.method === "GET") return signInPage(req);
 	if (req.method !== "POST" || !sameOrigin(req)) return undefined;
-	if (!hit("auth", requestIp(req) ?? "unknown").ok) return fail("Too many tries from here. Wait 15 minutes.", 429);
+	// The dialog asks for a challenge each time it opens (for the autofill), so
+	// that has its own bucket; only answers spend sign-in tries
+	const ip = requestIp(req) ?? "unknown";
+	if (!hit(path === "/account/passkey/options" ? "passkey" : "auth", ip).ok) return fail("Too many tries from here. Wait 15 minutes.", 429);
 	if (path === "/account/passkey/options") {
 		return Response.json({ challenge: await newChallenge(null), rpId: PUBLIC_HOSTNAME, userVerification: "required", timeout: TIMEOUT }, { headers: { "cache-control": "no-store" } });
 	}
@@ -92,17 +95,19 @@ export async function passkeySignInRoute(req: Request, path: string): Promise<Re
 		// the account lock first, as password changes and two-factor sign-ins take it
 		const [u] = await tx`select status, deactivated_at, deactivated_at > now() - interval '30 days' as returning
 			from users where id = ${key.user_id}::bigint for update`;
-		if (!u) return { error: "This passkey isn't on any account here." };
+		// a password change or reset may have removed it while this was checked
+		const [still] = await tx`select sign_count from passkeys where id = ${id} and user_id = ${key.user_id}::bigint`;
+		if (!u || !still) return { error: "This passkey isn't on any account here. It may have been removed.", status: 400 };
 		// A counter that didn't move forward means a copied authenticator
 		// (passkeys that sync always report 0, and are let through)
 		const [p] = await tx`update passkeys set sign_count = ${count}, last_used_at = now()
-			where id = ${id} and user_id = ${key.user_id}::bigint and (${count} = 0 or sign_count < ${count}) returning id`;
+			where id = ${id} and (${count} = 0 or sign_count < ${count}) returning id`;
 		if (!p) return { error: "This passkey looks like a copy, so it was refused. Sign in with your password." };
 		if (u.returning) await tx`update users set status = 'active', deactivated_at = null where id = ${key.user_id}::bigint`;
 		else if (u.status === "suspended" || u.deactivated_at) return { error: "This account is suspended." };
 		return { session: await startSession(key.user_id, tx) };
 	});
-	if (!result.session) return fail(result.error!, 403);
+	if (!result.session) return fail(result.error!, result.status ?? 403);
 	const headers = new Headers({ "cache-control": "no-store" });
 	for (const c of await signInCookies(req, result.session)) headers.append("set-cookie", c);
 	return Response.json({ ok: true }, { headers });
@@ -284,6 +289,8 @@ export async function passkeysRoute(req: Request, url: URL, viewer: Viewer): Pro
 		const name = (typeof b.name === "string" ? b.name.trim().slice(0, 50) : "") || deviceName(req);
 		const added = await sql.begin(async (tx) => {
 			await tx`select id from users where id = ${viewer.id}::bigint for update`;
+			// a password change or reset in the meantime signed this session out
+			if (!(await tx`select 1 from sessions where token = ${viewer.token}`).length) return false;
 			const [{ n }] = await tx`select count(*)::int as n from passkeys where user_id = ${viewer.id}::bigint`;
 			if (n >= MAX_PASSKEYS) return false;
 			const rows = await tx`insert into passkeys (id, user_id, public_key, alg, sign_count, name, transports, backed_up)
@@ -296,6 +303,7 @@ export async function passkeysRoute(req: Request, url: URL, viewer: Viewer): Pro
 	}
 	if (req.method === "POST" && sub === "/remove") {
 		const form = await req.formData().catch(() => undefined);
+		if (String(form?.get("csrf") ?? "") !== viewer.csrf) return new Response("That form is out of date. Go back and try again.", { status: 403 });
 		await sql`delete from passkeys where id = ${String(form?.get("id") ?? "")} and user_id = ${viewer.id}::bigint`;
 		return new Response(null, { status: 303, headers: { location: "/account/passkeys" } });
 	}
@@ -306,7 +314,7 @@ export async function passkeysRoute(req: Request, url: URL, viewer: Viewer): Pro
 				.map(
 					(k: any) => `<div class="card split"><div><p><strong>${esc(k.name)}</strong></p>
 <p class="meta">Added ${when(k.created_at)} · last used ${when(k.last_used_at)}${k.backed_up ? " · synced" : ""}</p></div>
-<form method="post" action="/account/passkeys/remove" class="inline" onsubmit="return confirm('Remove this passkey? You won\\'t be able to sign in with it any more.')"><input type="hidden" name="id" value="${esc(k.id)}"><button class="secondary small" type="submit">Remove</button></form></div>`,
+<form method="post" action="/account/passkeys/remove" class="inline" onsubmit="return confirm('Remove this passkey? You won\\'t be able to sign in with it any more.')"><input type="hidden" name="csrf" value="${esc(viewer.csrf)}"><input type="hidden" name="id" value="${esc(k.id)}"><button class="secondary small" type="submit">Remove</button></form></div>`,
 				)
 				.join("\n")
 		: `<p class="dim">You haven't added any passkeys yet.</p>`;
@@ -316,6 +324,7 @@ export async function passkeysRoute(req: Request, url: URL, viewer: Viewer): Pro
 		title: "Passkeys",
 		body: `<h1>Passkeys</h1>
 <p>A passkey signs you in with your fingerprint, face or screen lock instead of your password and two-factor code. It's kept by your device or password manager and only works on ${esc(PUBLIC_HOSTNAME)}, so it can't be phished.</p>
+<p class="dim">Changing or resetting your password removes all your passkeys, so nobody else who added one keeps a way in.</p>
 ${list}
 <h2>Add a passkey</h2>
 <form id="add"><label for="pk-name">Name (optional)</label><input id="pk-name" name="name" maxlength="50" placeholder="${esc(deviceName(req))}" autocomplete="off">

@@ -1,8 +1,10 @@
 // Passkeys against a running server (PUBLIC_ORIGIN must be its address):
 // adding one on /account/passkeys, signing in with it, a reused challenge, a
-// copied authenticator, removing it. Makes its own account and removes it.
+// copied authenticator, removing it (with the form's csrf token), and a
+// password change or reset removing them all. Makes its own account and removes it.
 // usage: bun scripts/test-passkeys.ts
 
+import { createHash } from "node:crypto";
 import { createUser } from "../src/auth";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "../src/config";
 import { sql } from "../src/db";
@@ -61,8 +63,33 @@ try {
 	check("a suspended account can't", (await signIn(20)).status === 403);
 	await sql`update users set status = 'active' where id = ${id}::bigint`;
 
-	await fetch(`${origin}/account/passkeys/remove`, { method: "POST", body: new URLSearchParams({ id: key.id }), headers: { cookie: cookies } });
-	check("removes it", (await signIn(30)).status === 400);
+	const csrf = /(?:^|; )ct0=([^;]+)/.exec(cookies)![1]!;
+	const remove = (body: Record<string, string>) => fetch(`${origin}/account/passkeys/remove`, { method: "POST", body: new URLSearchParams(body), headers: { cookie: cookies }, redirect: "manual" });
+	check("removing needs the form's csrf token", (await remove({ id: key.id })).status === 403 && (await signIn(25)).ok);
+	check("removes it", (await remove({ id: key.id, csrf })).status === 303 && (await signIn(30)).status === 400);
+
+	// changing the password takes every passkey with it
+	const again = await (await post("/account/passkeys/options", { password: "testpass123" }, cookies)).json();
+	const second = authenticator(KINDS.EdDSA!, { challenge: again.challenge, origin, rpId: PUBLIC_HOSTNAME });
+	check("adds another", (await post("/account/passkeys/add", encode(second.create()), cookies)).ok);
+	const changed = await fetch(`${origin}/i/api/i/account/change_password.json`, {
+		method: "POST",
+		headers: { cookie: cookies, "x-csrf-token": csrf },
+		body: new URLSearchParams({ current_password: "testpass123", new_password: "newpass456", password_confirmation: "newpass456" }),
+	});
+	const [{ left }] = await sql`select count(*)::int as left from passkeys where user_id = ${id}::bigint`;
+	check("a password change removes the passkeys", changed.ok && left === 0, { status: changed.status, left });
+
+	// and so does a reset by email link
+	const fresh = await fetch(`${origin}/login`, { method: "POST", body: new URLSearchParams({ username: name, password: "newpass456" }), redirect: "manual" });
+	const cookies2 = fresh.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+	const third = await (await post("/account/passkeys/options", { password: "newpass456" }, cookies2)).json();
+	check("adds a third", (await post("/account/passkeys/add", encode(authenticator(KINDS.ES256!, { challenge: third.challenge, origin, rpId: PUBLIC_HOSTNAME }).create()), cookies2)).ok);
+	const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+	await sql`insert into password_resets (token_hash, user_id) values (${createHash("sha256").update(token).digest("hex")}, ${id}::bigint)`;
+	const reset = await fetch(`${origin}/account/reset`, { method: "POST", body: new URLSearchParams({ token, password: "another789", confirm: "another789" }) });
+	const [{ after }] = await sql`select count(*)::int as after from passkeys where user_id = ${id}::bigint`;
+	check("a password reset removes the passkeys", reset.ok && after === 0, { status: reset.status, after });
 } finally {
 	await sql`delete from users where id = ${id}::bigint`;
 	await sql.close();

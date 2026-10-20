@@ -56,7 +56,8 @@ copy during setup, and it stays on that machine.
   with its app and address), two-factor sign-in with an
   authenticator app and backup codes, passkeys (Settings > Passkeys; the
   sign-in dialog offers them in the username field and with a button, and
-  `/account/passkey` has one too), password reset by email
+  `/account/passkey` has one too; changing or resetting the password removes
+  them), password reset by email
 - Reporting posts and accounts
 - Account analytics (Overview, Content and each post's page) from the
   instance's own counts
