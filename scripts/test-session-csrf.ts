@@ -17,12 +17,12 @@ test("CSRF cookie repair uses the same scope and flags as sign-in", () => {
 
 shellTest("signed-in client receives its session CSRF token without exposing the authentication token", () => {
 	const user = { id: "1", screen_name: "alice", name: "Alice", bio: "", location: "", avatar_url: null, banner_url: null, verified_type: null, created_at: new Date() };
-	const page = shell(user, false, false, {}, [], "active-session-csrf")!;
+	const page = shell(user, false, false, {}, [], null, undefined, undefined, "active-session-csrf")!;
 	expect(page).toContain('"csrf":"active-session-csrf"');
 	expect(page).not.toContain('"token":');
 });
 
 shellTest("signed-out pages do not expose a session CSRF token", () => {
-	const page = shell(null, false, false, {}, [], "must-not-be-included")!;
+	const page = shell(null, false, false, {}, [], null, undefined, undefined, "must-not-be-included")!;
 	expect(page).not.toContain("must-not-be-included");
 });
