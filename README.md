@@ -359,4 +359,4 @@ panel's Settings).
 
 ## Stars
 
-[![Star history](https://api.star-history.com/svg?repos=Xittered/xitter&type=Date)](https://star-history.com/#Xittered/xitter&Date)
+[![GitHub stars](https://img.shields.io/github/stars/Xittered/xitter?style=for-the-badge&logo=github&label=stars)](https://github.com/Xittered/xitter/stargazers)
