@@ -178,6 +178,17 @@ test("paint keeps page-bg overlays on the menu surface", () => {
 	expect(paint).toContain('r.style.position==="fixed"||r.style.position==="absolute"');
 });
 
+test("overlay menu rules carry the same frost skip as the transparent page-bg rule", () => {
+	// With an image background the transparent page-bg rule gets a long :not() chain.
+	// If the overlay rules lack it they lose on specificity and the typeahead goes see-through.
+	const paint = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function paint()"), THEME_SCRIPT.indexOf("function wrapAccent"));
+	const block = paint.slice(paint.indexOf("if((found.pagebg||[]).length&&posSels.length){"), paint.indexOf('add("surface"'));
+	const on = block.indexOf('glassOn=!!(theme.background&&typeof X.pageChrome==="string"&&X.pageChrome)');
+	expect(on).toBeGreaterThan(0);
+	expect(on).toBeLessThan(block.indexOf("{background:var(--xt-menu)!important}"));
+	expect(block.lastIndexOf("glassOn=false")).toBeGreaterThan(block.lastIndexOf("{background:var(--xt-menu)!important}"));
+});
+
 const attacks = [
 	"#fff;}body{display:none",
 	"red",

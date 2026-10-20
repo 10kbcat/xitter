@@ -373,9 +373,13 @@ export const THEME_SCRIPT = String.raw`(function(){
 		}
 		add("pagebg","background-color:transparent!important",true);
 		if((found.pagebg||[]).length&&posSels.length){
+			// Same frost skip as the transparent rule above, so these win on order
+			// instead of losing to its longer :not() chain on specificity.
+			glassOn=!!(theme.background&&typeof X.pageChrome==="string"&&X.pageChrome);
 			css.push(wrap(":is("+found.pagebg.join(",")+"):is("+posSels.join(",")+")") + "{background:var(--xt-menu)!important}");
 			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: fixed\"]") + "{background:var(--xt-menu)!important}");
 			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: absolute\"]") + "{background:var(--xt-menu)!important}");
+			glassOn=false;
 		}
 		add("surface","background:var(--xt-surface)!important",false);
 		add("menu","background:var(--xt-menu)!important",false);

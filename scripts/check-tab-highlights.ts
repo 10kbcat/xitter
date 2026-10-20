@@ -24,7 +24,12 @@ const looks = [
 	{ name: "Lights out", body: { mode: "dark" } },
 	{ name: "custom-navy", body: NAVY },
 	{ name: "custom-accent", body: { mode: "dark", accent: "#ff3d7f" } },
-] as const;
+	// BG_MEDIA_ID: an uploaded theme_background image, so the frosted-panel rules
+	// are live while the floating-layer checks run.
+	...(process.env.BG_MEDIA_ID
+		? [{ name: "custom-image", body: { theme: { ...NAVY.theme, background: { mediaId: process.env.BG_MEDIA_ID, fit: "tile", position: "center", dim: 20, blur: 0, scale: 25, repeat: "repeat", panel: 80 } } } }]
+		: []),
+];
 
 const paths = [
 	"/home",
@@ -94,7 +99,10 @@ await page.goto(`${origin}/home`, { waitUntil: "networkidle2", timeout: 60000 })
 	page.goto(`${origin}/home`, { waitUntil: "domcontentloaded", timeout: 60000 }),
 );
 
+// LOOKS=a,b limits the run to those look names.
+const only = process.env.LOOKS ? process.env.LOOKS.split(",") : null;
 for (const look of looks) {
+	if (only && !only.includes(look.name)) continue;
 	await postLook(look.body);
 	for (const width of widths) {
 		await page.setViewport({ width, height: 900 });
@@ -221,7 +229,7 @@ for (const look of looks) {
 							const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/.exec(s);
 							return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] == null ? 1 : +m[4] } : null;
 						};
-						const node = [...document.querySelectorAll("div")].find((el) => {
+						const node = document.querySelector('[role="search"] [role="listbox"]') || [...document.querySelectorAll("div")].find((el) => {
 							const t = (el.textContent || "").replace(/\s+/g, " ");
 							return /Search for/.test(t) && t.length < 120 && getComputedStyle(el).position === "fixed";
 						});
