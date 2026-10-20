@@ -28,6 +28,7 @@ import { badgeImage, expireSanctions } from "./moderation";
 import { appealRoute, noticesApi, noticesPage } from "./staff-notices";
 import { forgotRoute, resetRoute } from "./password-reset";
 import { twoFactorRoute } from "./two-factor";
+import { passkeySignInRoute, passkeysRoute } from "./passkeys";
 import { extraBadges, instanceCard } from "./badges";
 import { decorationFile, decorationsFor } from "./decorations";
 import { decorationRoute } from "./decoration-settings";
@@ -382,6 +383,11 @@ async function route(req: Request): Promise<Response | undefined> {
 	}
 	if (p === "/account/email" || p === "/account/email/confirm") return emailRoute(req, url, viewer);
 	if (p.startsWith("/account/2fa") && viewer) return twoFactorRoute(req, url, viewer);
+	if ((p === "/account/passkeys" || p.startsWith("/account/passkeys/")) && viewer && !viewer.instance) return passkeysRoute(req, url, viewer);
+	if (p === "/account/passkey" || p.startsWith("/account/passkey/")) {
+		const done = await passkeySignInRoute(req, p);
+		if (done) return done;
+	}
 	if (p === "/account/notices" && viewer) return noticesPage(req, viewer);
 	if (p === "/account/invites" && viewer) return memberInvitesRoute(req, viewer);
 	if (p === "/account/api" && viewer) return apiTokensRoute(req, viewer);
