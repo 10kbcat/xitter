@@ -161,12 +161,18 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		}
 		return true;
 	}
-	// name + check (+ x's badge / translator globe). never the follow button:
-	// hover cards and user cells have one, and the first dir=ltr in those is its label.
+	// last bit of the nearest name row that holds every name, check, x badge, and globe found in the box.
+	// never the follow button: hover cards and user cells have one, and the first dir=ltr in those is its label.
 	function anchor(box){
-		var mark=pick(box,'div[style*="height: calc(1.0625em)"]')||pick(box,'svg[aria-label="Translator account"]')||pick(box,'svg[data-testid="icon-verified"]')||leafName(box);
-		if(!mark)return null;
-		var n=mark,p,bit,btn;
+		var marks=[],i,el,last,n,p,bit,btn,all;
+		el=leafName(box);if(el)marks.push(el);
+		el=pick(box,'svg[data-testid="icon-verified"]');if(el)marks.push(el);
+		el=pick(box,'div[style*="height: calc(1.0625em)"]');if(el)marks.push(el);
+		el=pick(box,'svg[aria-label="Translator account"]');if(el)marks.push(el);
+		if(!marks.length)return null;
+		last=marks[0];
+		for(i=1;i<marks.length;i++)if(last.compareDocumentPosition(marks[i])&Node.DOCUMENT_POSITION_FOLLOWING)last=marks[i];
+		n=last;
 		while(n&&n.parentElement&&own(n.parentElement,box)){
 			p=n.parentElement;
 			if(followish(p,box))return null;
@@ -174,8 +180,12 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			if(btn&&p!==box){n=p;continue}
 			if(p.tagName==="A"&&p.querySelector("img")&&!namey(p))return null;
 			if(namey(p)){
-				bit=lastBit(p);
-				return bit&&canSit(bit,box)?bit:null;
+				all=true;
+				for(i=0;i<marks.length;i++)if(!p.contains(marks[i])){all=false;break}
+				if(all){
+					bit=lastBit(p);
+					return bit&&canSit(bit,box)?bit:null;
+				}
 			}
 			n=p;
 		}
@@ -190,13 +200,6 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		var mine=[].filter.call(box.querySelectorAll("[data-xitter-badges]"),function(r){return r.closest(SEL)===box});
 		var after=anchor(box);
 		if(!after){mine.forEach(function(r){r.remove()});return}
-		// already sitting after the check / x badge / globe (globe can sit between)
-		var here=null,n;
-		for(n=after.nextElementSibling;n;n=n.nextElementSibling){
-			if(n.hasAttribute("data-xitter-badges")&&n.closest(SEL)===box){here=n;break}
-		}
-		if(here){mine.forEach(function(r){if(r!==here)r.remove()});return}
-		// a row put in the name before x's badge box (or before the check) appeared
 		var row=mine[0];
 		if(row)mine.forEach(function(r){if(r!==row)r.remove()});
 		else{
@@ -210,7 +213,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 				row.appendChild(img);
 			});
 		}
-		after.after(row);
+		if(after.nextElementSibling!==row)after.after(row);
 	}
 	function scan(){
 		document.querySelectorAll(SEL).forEach(function(box){
