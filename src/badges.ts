@@ -2,29 +2,33 @@
 // (affiliates_highlighted_label); model.ts puts the first of an account's
 // badges in it, and this page script adds the others right after it, wherever
 // the client shows that badge: posts, profiles, account lists, hover cards.
+// A bot's extra labels (hiddenLabels in model.ts) go on the same "Automated
+// by" line, after a middle dot.
 
 import { sql } from "./db";
 import { ID_RE, INSTANCE_ID, baseUrl, listedInstance } from "./federation";
 import { STAFF_HANDLE } from "./invites";
-import { badgeList, labelTakesSlot } from "./model";
+import { badgeList, hiddenLabels, labelTakesSlot } from "./model";
 import { toUser, userCols } from "./users";
 
-// GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold }, ... },
-// only accounts that wear more than one badge, or a gold translator globe
-// (X's yellow "moderator" globe, recoloured for translator moderators)
+// GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold, labels: [{ text, url? }] }, ... },
+// only accounts that wear more than one badge, a gold translator globe
+// (X's yellow "moderator" globe, recoloured for translator moderators),
+// or a label the client's one slot hid
 export async function extraBadges(viewerId: string, url: URL): Promise<Response> {
 	const names = [...new Set((url.searchParams.get("names") ?? "").split(",").map((n) => n.trim().toLowerCase()).filter((n) => {
 		const at = n.indexOf("@");
 		return at < 0 ? STAFF_HANDLE.test(n) : STAFF_HANDLE.test(n.slice(0, at)) && /^[a-z0-9.-]{1,253}(?::\d{1,5})?$/.test(n.slice(at + 1));
 	}))].slice(0, 50);
-	const out: Record<string, { badges: { url: string; description: string }[]; gold: boolean }> = {};
+	const out: Record<string, { badges: { url: string; description: string }[]; gold: boolean; labels: { text: string; url?: string }[] }> = {};
 	if (names.length) {
 		const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")})`;
 		for (const r of rows) {
 			const u = toUser(r);
 			const badges = badgeList(u).slice(labelTakesSlot(u) ? 0 : 1).map(({ url, description }) => ({ url, description }));
 			const gold = u.translator === "moderator";
-			if (badges.length || gold) out[u.screen_name.toLowerCase()] = { badges, gold };
+			const labels = hiddenLabels(u);
+			if (badges.length || gold || labels.length) out[u.screen_name.toLowerCase()] = { badges, gold, labels };
 		}
 	}
 	return Response.json(out, { headers: { "cache-control": "private, max-age=60" } });
@@ -91,10 +95,56 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		}
 		if(full.length)box.title=full.join(", ");
 	}
+	// a bot's extra labels, on the same "Automated by @owner" line
+	function around(box){
+		return box.closest('article[data-testid="tweet"],[data-testid="UserCell"],[data-testid="HoverCard"]');
+	}
+	function findLine(root){
+		if(!root)return;
+		var nodes=root.querySelectorAll('div[dir="ltr"]');
+		for(var i=0;i<nodes.length;i++){
+			var el=nodes[i];
+			if((el.textContent||"").indexOf("Automated by @")!==0)continue;
+			var nest=el.closest('article[data-testid="tweet"]');
+			if(nest&&nest!==root&&root.contains(nest))continue;
+			return el;
+		}
+	}
+	function profileLine(box){
+		var col=box.closest('[data-testid="primaryColumn"]');
+		var un=col&&col.querySelector('[data-testid="UserName"]');
+		if(!un||(box!==un&&!un.contains(box)&&!box.contains(un)&&!box.querySelector('[data-testid="UserName"]')))return;
+		var n=un.parentElement;
+		while(n&&n!==col&&n.parentElement&&n.parentElement!==col&&!n.parentElement.querySelector('article[data-testid="tweet"]'))n=n.parentElement;
+		var line=n&&!n.querySelector('article[data-testid="tweet"]')?findLine(n):null;
+		if(line)return line;
+		for(var s=un.nextElementSibling;s;s=s.nextElementSibling){
+			if(s.querySelector&&s.querySelector('article[data-testid="tweet"]'))break;
+			line=findLine(s);
+			if(line)return line;
+		}
+	}
+	function drawLabels(box,labels){
+		var line=findLine(around(box))||profileLine(box);
+		if(!line||line.querySelector("[data-xitter-labels]"))return;
+		var extra=document.createElement("span");
+		extra.setAttribute("data-xitter-labels","");
+		labels.forEach(function(l){
+			extra.appendChild(document.createTextNode(" · "));
+			if(l.url){
+				var a=document.createElement("a");
+				a.href=l.url;a.textContent=l.text;
+				extra.appendChild(a);
+			}else extra.appendChild(document.createTextNode(l.text));
+		});
+		line.appendChild(extra);
+		line.title=line.textContent;
+	}
 	function draw(box,name){
 		var k=known[name];
 		// the translator globe X draws (its label is the client's "Translator account")
 		if(k.gold)box.querySelectorAll('svg[aria-label="Translator account"]').forEach(function(g){g.style.setProperty("color","#d4a72c","important")});
+		if(k.labels&&k.labels.length)drawLabels(box,k.labels);
 		if(!k.badges.length)return;
 		// X's own badge: a square box sized to the text, after the name
 		var slot=box.querySelector('div[style*="height: calc(1.0625em)"]');
@@ -210,7 +260,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	document.addEventListener("keydown",function(e){if(e.key==="Escape")closeCard()});
 	addEventListener("scroll",closeCard,true);
 	var style=document.createElement("style");
-	style.textContent='img[src*="/public/globe.svg?from="]{cursor:pointer}';
+	style.textContent='img[src*="/public/globe.svg?from="]{cursor:pointer}[data-xitter-labels] a{color:inherit;text-decoration:none}[data-xitter-labels] a:hover{text-decoration:underline}';
 	document.head.appendChild(style);
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;scan()},120)}).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
 })();`;

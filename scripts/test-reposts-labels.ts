@@ -26,7 +26,7 @@ const author = await session(authorName);
 const other = await session(otherName);
 const otherId = (await sql`select id::text from users where screen_name = ${otherName}`)[0].id as string;
 const made: string[] = [];
-const [savedLabel] = await sql`select parody_label, parody_label_at from users where id = ${otherId}::bigint`;
+const [savedLabel] = await sql`select parody_label, parody_label_at, automated_by::text from users where id = ${otherId}::bigint`;
 
 try {
 	// ---- a repost's own id
@@ -76,6 +76,11 @@ try {
 	check(r.errors?.length, "a change inside the lock is refused", r);
 	r = await other.gql("AccountParodyScreenImplV2ParodyLabelMutation", { parodyProfileLabel: "Satire" });
 	check(r.errors?.length, "unknown labels are refused", r);
+	const authorId = (await sql`select id::text from users where screen_name = ${authorName}`)[0].id as string;
+	await sql`update users set automated_by = ${authorId}::bigint where id = ${otherId}::bigint`;
+	const extra = (await (await fetch(`${origin}/i/api/xitter/badges?names=${otherName}`, { headers: author.headers })).json()) as any;
+	check(extra[otherName.toLowerCase()]?.labels?.some((l: { text: string }) => l.text === "Fan account"), "an automated parody account still sends its parody label", extra);
+	await sql`update users set automated_by = ${savedLabel.automated_by}::bigint where id = ${otherId}::bigint`;
 
 	// ---- the account list's pictures
 	const list = await fetch(`${origin}/i/api/1.1/account/multi/list.json`, { headers: { cookie: `auth_token=${author.token}; auth_multi=${other.token}` } });
@@ -89,7 +94,7 @@ try {
 	check((await begin("abc")).includes("at least 4"), "a short name says it's too short");
 } finally {
 	for (const id of made) await author.gql("DeleteTweet", { tweet_id: id });
-	await sql`update users set parody_label = ${savedLabel.parody_label}, parody_label_at = ${savedLabel.parody_label_at} where id = ${otherId}::bigint`;
+	await sql`update users set parody_label = ${savedLabel.parody_label}, parody_label_at = ${savedLabel.parody_label_at}, automated_by = ${savedLabel.automated_by}::bigint where id = ${otherId}::bigint`;
 }
 
 console.log(failed ? `${failed} failed` : "all passed");
