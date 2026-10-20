@@ -64,7 +64,11 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		var spans=box.querySelectorAll("span");
 		for(var i=0;i<spans.length;i++){var full=spans[i].getAttribute("data-xitter-handle");if(full)return full;var m=/^@([^\s\/\?#@%,:]{1,50}(?:@[a-zA-Z0-9.-]{1,253}(?::\d{1,5})?)?)$/.exec(spans[i].textContent);if(m)return m[1].toLowerCase()}
 		// a profile's top bar has the name but no handle: the page's address does
-		if(box.tagName==="H2"&&box.querySelector('div[style*="height: calc(1.0625em)"]')){var p=/^\/([^\/?#]{1,150})(?:\/|$)/.exec(location.pathname);if(p)try{return decodeURIComponent(p[1]).toLowerCase()}catch(e){}}
+		if(box.tagName==="H2"){
+			var p=/^\/([^\/?#]{1,150})(?:\/|$)/.exec(location.pathname);
+			var profile=/^\/[^\/?#]+\/?$/.test(location.pathname);
+			if(p&&(box.querySelector('div[style*="height: calc(1.0625em)"]')||box.querySelector('svg[data-testid="icon-verified"]')||profile&&box.getAttribute("dir")))try{return decodeURIComponent(p[1]).toLowerCase()}catch(e){}
+		}
 	}
 	// names show "@name" for someone from another instance; the whole handle
 	// stays on the element (and its tooltip), and the globe badge says where
@@ -91,43 +95,122 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		}
 		if(full.length)box.title=full.join(", ");
 	}
+	function own(el,box){return el&&el.closest(SEL)===box}
+	function followish(el,box){
+		for(;el&&el!==box;el=el.parentElement){
+			var tid=el.getAttribute("data-testid")||"";
+			if(tid.slice(-7)==="-follow"||tid.slice(-9)==="-unfollow"||tid==="userActions"||tid==="placementTracking")return true;
+		}
+		return false;
+	}
+	function namey(el){
+		var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),t,s="";
+		while((t=w.nextNode())){
+			if(t.parentElement&&t.parentElement.closest("[data-xitter-badges],[data-xitter-labels]"))continue;
+			s+=t.nodeValue;
+		}
+		s=s.replace(/\s+/g," ").trim();
+		return s&&s.charAt(0)!=="@"&&!/^(Follow|Following|Pending|Blocked|Follows you)$/.test(s);
+	}
+	function leafName(box){
+		var spans=box.querySelectorAll("span"),i,el,t,c,b;
+		for(i=0;i<spans.length;i++){
+			el=spans[i];
+			if(!own(el,box)||followish(el,box))continue;
+			b=el.closest("button,[role=button]");
+			if(b&&b!==box)continue;
+			if(el.closest("a")&&el.closest("a").querySelector("img")&&!namey(el.closest("a")))continue;
+			t="";
+			for(c=el.firstChild;c;c=c.nextSibling) if(c.nodeType===3) t+=c.nodeValue;
+			t=t.replace(/\s+/g," ").trim();
+			if(!t||t.charAt(0)==="@"||/^(Follow|Following|Pending|Blocked|Follows you|Show more)$/.test(t))continue;
+			return el;
+		}
+	}
+	function interesting(el){
+		var st=el.getAttribute("style")||"";
+		return el.getAttribute("data-testid")==="icon-verified"||el.querySelector('svg[data-testid="icon-verified"]')||
+			st.indexOf("height: calc(1.0625em)")>=0||el.querySelector('div[style*="height: calc(1.0625em)"]')||
+			el.getAttribute("aria-label")==="Translator account"||el.querySelector('svg[aria-label="Translator account"]')||
+			namey(el);
+	}
+	function lastBit(parent){
+		var last,i,k;
+		for(i=0;i<parent.children.length;i++){
+			k=parent.children[i];
+			if(k.hasAttribute("data-xitter-badges")||k.hasAttribute("data-xitter-labels")||k.querySelector("[data-xitter-labels]"))continue;
+			if(interesting(k))last=k;
+		}
+		return last;
+	}
+	function pick(box,sel){
+		var found=null;
+		box.querySelectorAll(sel).forEach(function(el){if(own(el,box)&&!followish(el,box))found=el});
+		return found;
+	}
+	function canSit(bit,box){
+		var p=bit&&bit.parentElement,btn,a,t;
+		if(!p||!own(p,box)||followish(p,box))return false;
+		btn=p.closest("button,[role=button]");
+		if(btn&&btn!==box)return false;
+		a=p.closest("a");
+		if(a&&a!==box&&own(a,box)){
+			t=(a.textContent||"").replace(/\s+/g," ").trim();
+			if(t.charAt(0)==="@")return false;
+			if(a.querySelector("img")&&!namey(a))return false;
+		}
+		return true;
+	}
+	// name + check (+ x's badge / translator globe). never the follow button:
+	// hover cards and user cells have one, and the first dir=ltr in those is its label.
+	function anchor(box){
+		var mark=pick(box,'div[style*="height: calc(1.0625em)"]')||pick(box,'svg[aria-label="Translator account"]')||pick(box,'svg[data-testid="icon-verified"]')||leafName(box);
+		if(!mark)return null;
+		var n=mark,p,bit,btn;
+		while(n&&n.parentElement&&own(n.parentElement,box)){
+			p=n.parentElement;
+			if(followish(p,box))return null;
+			btn=p.tagName==="BUTTON"||p.getAttribute("role")==="button";
+			if(btn&&p!==box){n=p;continue}
+			if(p.tagName==="A"&&p.querySelector("img")&&!namey(p))return null;
+			if(namey(p)){
+				bit=lastBit(p);
+				return bit&&canSit(bit,box)?bit:null;
+			}
+			n=p;
+		}
+		return null;
+	}
 	function draw(box,name){
 		var k=known[name];
 		// the translator globe X draws (its label is the client's "Translator account")
 		if(k.gold)box.querySelectorAll('svg[aria-label="Translator account"]').forEach(function(g){g.style.setProperty("color","#d4a72c","important")});
 		if(!k.badges.length)return;
-		// X's own badge: a square box sized to the text, after the name
-		var slot=box.querySelector('div[style*="height: calc(1.0625em)"]');
-		var holder,inside;
 		// this name's rows, not those of a name inside it (a hover card's)
 		var mine=[].filter.call(box.querySelectorAll("[data-xitter-badges]"),function(r){return r.closest(SEL)===box});
-		if(slot){
-			holder=slot.parentElement;
-			// anywhere in the row, not only right after: the client can draw its
-			// translator globe between X's badge and ours, and ours came twice
-			var here=holder.parentElement&&holder.parentElement.querySelector(":scope > [data-xitter-badges]");
-			// a row put at the end of the name before X's badge box was drawn goes,
-			// or the badges show twice
-			mine.forEach(function(r){if(r!==here)r.remove()});
-			if(here)return;
-		}else{
-			if(mine.length)return;
-			// no check and the slot taken by a label (automated, parody, staff-made):
-			// X draws no badge box, so the badges go at the end of the name itself
-			var nameDiv=box.querySelector('div[dir="ltr"]');
-			inside=nameDiv&&nameDiv.firstElementChild;
-			if(!inside||inside.querySelector("[data-xitter-badges]"))return;
+		var after=anchor(box);
+		if(!after){mine.forEach(function(r){r.remove()});return}
+		// already sitting after the check / x badge / globe (globe can sit between)
+		var here=null,n;
+		for(n=after.nextElementSibling;n;n=n.nextElementSibling){
+			if(n.hasAttribute("data-xitter-badges")&&n.closest(SEL)===box){here=n;break}
 		}
-		var row=document.createElement("span");
-		row.setAttribute("data-xitter-badges","");
-		row.style.cssText="display:inline-flex;align-items:center;vertical-align:text-bottom";
-		k.badges.forEach(function(b){
-			var img=document.createElement("img");
-			img.src=b.url;img.alt=b.description;img.title=b.description;img.draggable=false;
-			img.style.cssText="height:1.0625em;width:1.0625em;object-fit:contain;margin-left:2px;border-radius:2px";
-			row.appendChild(img);
-		});
-		if(holder)holder.after(row);else inside.appendChild(row);
+		if(here){mine.forEach(function(r){if(r!==here)r.remove()});return}
+		// a row put in the name before x's badge box (or before the check) appeared
+		var row=mine[0];
+		if(row)mine.forEach(function(r){if(r!==row)r.remove()});
+		else{
+			row=document.createElement("span");
+			row.setAttribute("data-xitter-badges","");
+			row.style.cssText="display:inline-flex;align-items:center;vertical-align:text-bottom";
+			k.badges.forEach(function(b){
+				var img=document.createElement("img");
+				img.src=b.url;img.alt=b.description;img.title=b.description;img.draggable=false;
+				img.style.cssText="height:1.0625em;width:1.0625em;object-fit:contain;margin-left:2px;border-radius:2px";
+				row.appendChild(img);
+			});
+		}
+		after.after(row);
 	}
 	function scan(){
 		document.querySelectorAll(SEL).forEach(function(box){
