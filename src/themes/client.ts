@@ -287,7 +287,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 		};
 	}
 	function wrap(sel, pageBg){
-		var skip=sel+':not(img):not(svg[data-testid="icon-verified"]):not(svg[aria-label="Translator account"]):not(.xitter-deco):not([data-xitter-badges]):not([data-xitter-frame]):not([data-xitter-framed]):not([data-xitter-decor-bg]):not(:is(svg[data-testid="icon-verified"] *,svg[aria-label="Translator account"] *,[data-xitter-badges] *,[data-xitter-frame],[data-xitter-framed] *,[data-xitter-decor-bg] *,.xitter-deco))';
+		var skip=sel+':not(img):not(svg[data-testid="icon-verified"]):not(svg[aria-label="Translator account"]):not(.xitter-deco):not([data-xitter-badges]):not([data-xitter-frame]):not([data-xitter-framed]):not([data-xitter-decor-bg]):not(:is(svg[data-testid="icon-verified"] *,svg[aria-label="Translator account"] *,[data-xitter-badges] *,[data-xitter-frame],[data-xitter-framed] *,[data-xitter-decor-bg] *,.xitter-deco,[aria-label="Color options"] *))';
 		if(pageBg)return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip;
 		return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip+',html[data-xitter-theme][data-xitter-decor] '+skip+':not([data-testid="primaryColumn"] *)';
 	}
@@ -654,7 +654,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		dim.addEventListener("click",function(e){
 			e.preventDefault();e.stopPropagation();
 			picking=true;
-			try{lightsCard.click()}catch(err){}
+			var lightsInp=lightsCard.querySelector("input");
+			try{(lightsInp||lightsCard).click()}catch(err){}
 			picking=false;
 			post({theme:{id:"dim"}},function(ok,d){
 				if(ok&&d&&d.theme)apply(d.theme);else apply({id:"dim",base:"dark",bg:{stops:["#15202b"],angle:180},surface:"#1e2732",text:"#f7f9f9",accent:"#1d9bf0",button:{stops:["#eff3f4"],angle:180},buttonText:"#0f1419",muted:"#8b98a5",border:"#38444d"});
@@ -714,7 +715,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 		base.textContent='html[data-xitter-theme] ::selection{background:var(--xt-selection)}'+
 			'html[data-xitter-theme]:not([data-xitter-decor]),html[data-xitter-theme]:not([data-xitter-decor]) body{background:var(--xt-bg)!important;background-attachment:fixed!important}'+
 			'html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}'+
-			(on&&typeof X.pageChrome==="string"?X.pageChrome:"");
+			(on&&typeof X.pageChrome==="string"?X.pageChrome:"html[data-xitter-theme]{--xt-bg-image:none;--xt-bg-still:none}");
 	}
 	writeBase(!!(theme&&theme.background));
 	document.head.appendChild(base);

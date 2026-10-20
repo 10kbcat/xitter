@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { THEME_SCRIPT } from "../src/themes/client";
 import { bootCss, pageChromeCss, type BackgroundPaint } from "../src/themes/css";
 import { type Theme } from "../src/themes/presets";
 import {
@@ -93,6 +94,48 @@ test("a colour save keeps the stored picture", () => {
 	const next = mergeSavedBackground(previous, custom, "keep", false);
 	expect(next.background?.mediaId).toBe("123");
 	expect(mergeSavedBackground(previous, custom, "clear", false).background).toBeUndefined();
+});
+
+test("peel keeps a picture only on custom themes", () => {
+	const previous = sanitiseTheme({
+		...custom,
+		background: { fit: "cover", position: "center", dim: 30, blur: 2, mediaId: "123" },
+	})!.theme;
+	const dim = parseLookWrite({ theme: { id: "dim" } });
+	expect(dim.ok).toBe(true);
+	if (!dim.ok || dim.write.type !== "paint") return;
+	expect(mergeSavedBackground(previous, dim.write.theme, dim.write.peel, dim.write.mediaIdSent).background).toBeUndefined();
+	const sunset = parseLookWrite({ theme: { id: "sunset" } });
+	expect(sunset.ok).toBe(true);
+	if (!sunset.ok || sunset.write.type !== "paint") return;
+	expect(mergeSavedBackground(previous, sunset.write.theme, sunset.write.peel, sunset.write.mediaIdSent).background).toBeUndefined();
+	const painted = parseLookWrite({
+		theme: {
+			id: "custom",
+			base: "dark",
+			bg: { stops: ["#0a0a12"], angle: 120 },
+			surface: "#121018",
+			text: "#ffffff",
+			accent: "#1d9bf0",
+			button: { stops: ["#ffffff"], angle: 180 },
+			buttonText: "#000000",
+		},
+	});
+	expect(painted.ok).toBe(true);
+	if (!painted.ok || painted.write.type !== "paint") return;
+	expect(mergeSavedBackground(previous, painted.write.theme, painted.write.peel, painted.write.mediaIdSent).background?.mediaId).toBe("123");
+	const light = parseLookWrite({ mode: "light" });
+	const dark = parseLookWrite({ mode: "dark" });
+	expect(light.ok && light.write.type === "plain").toBe(true);
+	expect(dark.ok && dark.write.type === "plain").toBe(true);
+});
+
+test("painted wrap skips Color options the same way accent wrap does", () => {
+	const wrapFn = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function wrap(sel, pageBg)"), THEME_SCRIPT.indexOf("function paint()"));
+	const wrapAccentFn = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function wrapAccent(sel)"), THEME_SCRIPT.indexOf("function paintAccent()"));
+	expect(wrapAccentFn).toContain('[aria-label="Color options"] *');
+	expect(wrapFn).toContain('[aria-label="Color options"] *');
+	expect(THEME_SCRIPT).toContain('lightsCard.querySelector("input")');
 });
 
 const attacks = [

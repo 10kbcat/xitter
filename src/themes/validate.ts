@@ -717,6 +717,12 @@ export function themeFileName(theme: Theme): `${string}.xitter-theme.json` {
 }
 
 export function mergeSavedBackground(previous: Theme | undefined, theme: Theme, peel: "keep" | "clear" | "frame", mediaIdSent: boolean): Theme {
+	if (PRESETS[theme.id]) {
+		if (!theme.background) return theme;
+		const next = copyTheme(theme);
+		delete next.background;
+		return next;
+	}
 	if (peel === "keep") {
 		if (!previous?.background) return theme;
 		const next = copyTheme(theme);
