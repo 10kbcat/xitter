@@ -1,7 +1,7 @@
 // Builds the objects the client expects. Field sets follow the captured
 // responses; fields for features we do not have are constants.
 
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { bioEntities, urlEntities as linkEntities } from "./links";
 import type { User } from "./auth";
@@ -142,15 +142,42 @@ function parodyMask(): string {
 	return mask;
 }
 
+// the same mask for a bot's extra label (badges.ts), which always wants one:
+// a fresh instance hasn't downloaded the svg yet, but the pinned main bundle
+// names it, and the server fetches it on first use. "" isn't kept, so a client
+// fetched later is found
+let bundleMask: string | undefined;
+function parodyMaskIcon(): string {
+	if (parodyMask()) return parodyMask();
+	if (bundleMask !== undefined) return bundleMask;
+	try {
+		const build = JSON.parse(readFileSync(join(CLIENT_DIR, "build.json"), "utf8"));
+		const main = (build.scripts as string[] | undefined)?.find((p) => /(?:^|\/)main\.\w+\.js$/.test(p));
+		if (!main) return "";
+		const found = readFileSync(join(CLIENT_DIR, "abs", main.replace(/^\//, "")), "utf8").match(/parody-mask\.\w+\.svg/);
+		bundleMask = found ? `${PUBLIC_ORIGIN}/abs/responsive-web/client-web/${found[0]}` : "";
+		return bundleMask;
+	} catch {
+		return "";
+	}
+}
+
 const PCF_TEXT: Record<string, string> = { Parody: "Parody account", Commentary: "Commentary account", Fan: "Fan account" };
 const parodyText = (u: User) => PCF_TEXT[u.parody_label!] ?? `${u.parody_label} account`;
 
-// labels the client's one slot hides when "Automated by @owner" takes it
-export function hiddenLabels(u: User): { text: string; url?: string }[] {
+// labels the client's one slot hides when "Automated by @owner" takes it;
+// badges.ts draws each as its own badge on that row
+export function hiddenLabels(u: User): { text: string; url?: string; icon?: string }[] {
 	if (!u.automated_by) return [];
-	const out: { text: string; url?: string }[] = [];
-	if (hasParodyLabel(u)) out.push({ text: parodyText(u), url: `${PUBLIC_ORIGIN}/rules` });
-	if (u.label) out.push({ text: u.label.text, ...(u.label.url ? { url: u.label.url } : {}) });
+	const out: { text: string; url?: string; icon?: string }[] = [];
+	if (hasParodyLabel(u)) {
+		const icon = parodyMaskIcon();
+		out.push({ text: parodyText(u), url: `${PUBLIC_ORIGIN}/rules`, ...(icon ? { icon } : {}) });
+	}
+	if (u.label) {
+		const icon = u.label.badge_id ? `${PUBLIC_ORIGIN}/public/badge-${u.label.badge_id}.png` : parodyMaskIcon();
+		out.push({ text: u.label.text, ...(u.label.url ? { url: u.label.url } : {}), ...(icon ? { icon } : {}) });
+	}
 	return out;
 }
 

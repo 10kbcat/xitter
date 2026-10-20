@@ -79,7 +79,9 @@ try {
 	const authorId = (await sql`select id::text from users where screen_name = ${authorName}`)[0].id as string;
 	await sql`update users set automated_by = ${authorId}::bigint where id = ${otherId}::bigint`;
 	const extra = (await (await fetch(`${origin}/i/api/xitter/badges?names=${otherName}`, { headers: author.headers })).json()) as any;
-	check(extra[otherName.toLowerCase()]?.labels?.some((l: { text: string }) => l.text === "Fan account"), "an automated parody account still sends its parody label", extra);
+	const fan = extra[otherName.toLowerCase()]?.labels?.find((l: { text: string; icon?: string }) => l.text === "Fan account");
+	check(!!fan, "an automated parody account still sends its parody label", extra);
+	check(!fan?.icon || /\/parody-mask\.\w+\.svg$/.test(fan.icon), "and the parody mask icon when the client bundle is there", fan);
 	await sql`update users set automated_by = ${savedLabel.automated_by}::bigint where id = ${otherId}::bigint`;
 
 	// ---- the account list's pictures
