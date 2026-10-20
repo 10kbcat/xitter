@@ -3,11 +3,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	ACCENTS,
+	DEFAULT_ACCENT,
 	LINK_SCOPES,
 	NIGHT_MODE_ATTR,
 	PRESETS,
 	SWATCH_IDS,
 	THEME_SCRIPT,
+	accentWire,
 	applyWrite,
 	contrast,
 	derived,
@@ -16,10 +19,13 @@ import {
 	modeOf,
 	nightModeCookies,
 	paletteOf,
+	parseAccent,
 	parseHex,
 	parseLookWrite,
 	readLook,
+	readPrefs,
 	sanitiseTheme,
+	themeColorOf,
 } from "../src/themes";
 import {
 	ensureFont,
@@ -496,4 +502,82 @@ test("display posts a mode and link scopes repaint accent text with the link col
 	expect(THEME_SCRIPT).toContain('svg[data-testid="icon-verified"]');
 	expect(THEME_SCRIPT).toContain("data-xitter-decor");
 	expect(THEME_SCRIPT).toContain(NIGHT_MODE_ATTR);
+	expect(THEME_SCRIPT).toContain('aria-label="Color options"');
+	expect(THEME_SCRIPT).toContain("post({accent:id}");
+	expect(THEME_SCRIPT).toContain("data-xitter-color");
+	expect(THEME_SCRIPT).toContain("seedThemeColor");
+	expect(THEME_SCRIPT).toContain("paintChecks");
+});
+
+test("accent ids map to X's 500s and unknown values are refused", () => {
+	expect(parseAccent("purple500")).toEqual({ kind: "named", id: "purple500" });
+	expect(parseAccent(ACCENTS.purple500)).toEqual({ kind: "named", id: "purple500" });
+	expect(parseAccent("#FF3D7F")).toEqual({ kind: "custom", fill: "#ff3d7f" });
+	expect(parseAccent({ stops: ["#ff3d7f", "#7856ff"], angle: 90 })).toEqual({
+		kind: "custom",
+		fill: { stops: ["#ff3d7f", "#7856ff"], angle: 90 },
+	});
+	expect(parseAccent("blue")).toBeNull();
+	expect(parseAccent("nope")).toBeNull();
+	expect(parseAccent({ stops: ["red"], angle: 90 })).toBeNull();
+	expect(parseAccent({ stops: ["#ff3d7f", "#7856ff", "#00ba7c", "#ffd400", "#ff7a00", "#1d9bf0"], angle: 90 })).toBeNull();
+	expect(themeColorOf({ kind: "named", id: "yellow500" })).toBe("yellow500");
+	expect(themeColorOf({ kind: "custom", fill: "#ff3d7f" })).toBe("blue500");
+	expect(accentWire(DEFAULT_ACCENT)).toBe("blue500");
+});
+
+test("preferences.accent overlays a painted theme and survives a mode write", () => {
+	const painted = readPrefs({ theme: { id: "dim" }, accent: "purple500" });
+	expect(painted.look?.kind).toBe("painted");
+	if (painted.look?.kind === "painted") expect(painted.look.theme.accent).toBe(ACCENTS.purple500);
+	expect(painted.accent).toEqual({ kind: "named", id: "purple500" });
+	const native = readPrefs({ mode: "light", accent: "#ff3d7f" });
+	expect(native.look).toEqual({ kind: "native", mode: "light" });
+	expect(native.accent).toEqual({ kind: "custom", fill: "#ff3d7f" });
+	const keep = parseLookWrite({ accent: "yellow500" });
+	expect(keep.ok).toBe(true);
+	if (!keep.ok) return;
+	expect(keep.write).toEqual({ type: "keep" });
+	expect(keep.accent).toEqual({ kind: "named", id: "yellow500" });
+	expect(applyWrite({ kind: "painted", theme: PRESETS.dim! }, keep.write)?.kind).toBe("painted");
+	const mode = parseLookWrite({ mode: "dark" });
+	expect(mode.ok).toBe(true);
+	if (mode.ok) expect(mode.accent).toBeUndefined();
+	const dim = parseLookWrite({ theme: { id: "dim" } });
+	expect(dim.ok).toBe(true);
+	if (dim.ok) expect(dim.accent).toBeUndefined();
+	const custom = parseLookWrite({
+		theme: {
+			id: "custom",
+			base: "dark",
+			bg: { stops: ["#000000"], angle: 180 },
+			surface: "#111111",
+			text: "#ffffff",
+			accent: "#ff3d7f",
+			button: { stops: ["#ffffff"], angle: 180 },
+			buttonText: "#000000",
+		},
+	});
+	expect(custom.ok).toBe(true);
+	if (custom.ok) expect(custom.accent).toEqual({ kind: "custom", fill: "#ff3d7f" });
+	expect(parseLookWrite({ accent: "nope" }).ok).toBe(false);
+	expect(readLook({ theme: { id: "dim" } })).toEqual(readPrefs({ theme: { id: "dim" } }).look);
+});
+
+test("a custom theme may store a gradient accent and derived uses a solid for text", () => {
+	const got = sanitiseTheme({
+		id: "custom",
+		base: "dark",
+		bg: { stops: ["#000000"], angle: 180 },
+		surface: "#111111",
+		text: "#ffffff",
+		accent: { stops: ["#ff3d7f", "#7856ff"], angle: 45 },
+		button: { stops: ["#ffffff"], angle: 180 },
+		buttonText: "#000000",
+	});
+	expect(got).not.toBeNull();
+	expect(got!.theme.accent).toEqual({ stops: ["#ff3d7f", "#7856ff"], angle: 45 });
+	expect(derived(got!.theme).accent).toBe("#bc4abf");
+	expect(derived(got!.theme).accentFill).toBe("linear-gradient(45deg,#ff3d7f,#7856ff)");
+	expect(derived(got!.theme).link).toBe("#bc4abf");
 });

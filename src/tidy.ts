@@ -50,7 +50,7 @@ const ALWAYS = [
 export function hideCss(): string {
 	const off = (Object.keys(BY_FEATURE) as Feature[]).filter((f) => !feature(f)).flatMap((f) => BY_FEATURE[f]);
 	return `${[...ALWAYS, ...off].join(",")}{display:none!important}
-#xitter-announcement{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;background:rgb(29,155,240);color:#fff;font:15px TwitterChirp,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+#xitter-announcement{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;background:var(--xt-accent-fill,var(--xt-accent,#1d9bf0));color:#fff;font:15px TwitterChirp,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 #xitter-announcement a{color:#fff;text-decoration:underline}
 #xitter-announcement span{flex:1;white-space:pre-wrap}
 #xitter-announcement button{border:0;background:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 4px}`;

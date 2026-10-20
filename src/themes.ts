@@ -14,7 +14,7 @@ export type Theme = {
 	bg: Gradient;
 	surface: Fill;
 	text: string;
-	accent: string;
+	accent: Fill;
 	button: Gradient;
 	buttonText: string;
 	link?: string;
@@ -206,6 +206,63 @@ export function stopsOf(f: Fill): string[] {
 	return typeof f === "string" ? [f] : f.stops;
 }
 
+export const ACCENT_IDS = ["blue500", "yellow500", "magenta500", "purple500", "orange500", "green500"] as const;
+export type AccentId = (typeof ACCENT_IDS)[number];
+export const ACCENTS: Record<AccentId, string> = {
+	blue500: "#1d9bf0",
+	yellow500: "#ffd400",
+	magenta500: "#f91880",
+	purple500: "#7856ff",
+	orange500: "#ff7a00",
+	green500: "#00ba7c",
+};
+const ACCENT_ID_SET = new Set<string>(ACCENT_IDS);
+const HEX_TO_ACCENT = Object.fromEntries(ACCENT_IDS.map((id) => [ACCENTS[id], id])) as Record<string, AccentId>;
+
+export type NamedAccent = { readonly kind: "named"; readonly id: AccentId };
+export type CustomAccent = { readonly kind: "custom"; readonly fill: Fill };
+export type Accent = NamedAccent | CustomAccent;
+export const DEFAULT_ACCENT: NamedAccent = { kind: "named", id: "blue500" };
+
+export type Prefs = {
+	readonly look: Look | null;
+	readonly accent: Accent;
+};
+
+export function fillOfAccent(a: Accent): Fill {
+	return a.kind === "named" ? ACCENTS[a.id] : a.fill;
+}
+
+export function themeColorOf(a: Accent): AccentId {
+	return a.kind === "named" ? a.id : "blue500";
+}
+
+export function accentWire(a: Accent): string | Gradient {
+	if (a.kind === "named") return a.id;
+	return a.fill;
+}
+
+export function parseAccent(v: unknown): Accent | null {
+	if (typeof v === "string" && ACCENT_ID_SET.has(v)) return { kind: "named", id: v as AccentId };
+	const fill = parseFill(v);
+	if (!fill) return null;
+	if (typeof fill === "string") {
+		const id = HEX_TO_ACCENT[fill];
+		return id ? { kind: "named", id } : { kind: "custom", fill };
+	}
+	if (fill.stops.length === 1) {
+		const id = HEX_TO_ACCENT[fill.stops[0]!];
+		if (id) return { kind: "named", id };
+		return { kind: "custom", fill: fill.stops[0]! };
+	}
+	return { kind: "custom", fill };
+}
+
+export function overlayAccent(look: Look | null, accent: Accent): Look | null {
+	if (!look || look.kind !== "painted") return look;
+	return { kind: "painted", theme: { ...look.theme, accent: fillOfAccent(accent) } };
+}
+
 export const PRESET_NAMES: Record<string, string> = {
 	dim: "Dim",
 	midnight: "Midnight",
@@ -284,6 +341,7 @@ export type Resolved = {
 	surface: string;
 	text: string;
 	accent: string;
+	accentFill: string;
 	button: string;
 	buttonText: string;
 	link: string;
@@ -324,9 +382,9 @@ export function derived(theme: Theme): Resolved {
 	const text = theme.text;
 	const muted = theme.muted ?? mixHex(text, avg, 0.45);
 	const border = theme.border ?? mixHex(text, avg, 0.82);
-	const accent = theme.accent;
-	const reply = theme.reply ?? accent;
-	const bookmark = theme.bookmark ?? accent;
+	const accentSolid = solidOf(theme.accent);
+	const reply = theme.reply ?? accentSolid;
+	const bookmark = theme.bookmark ?? accentSolid;
 	const like = theme.like ?? LIKE;
 	const repost = theme.repost ?? REPOST;
 	const tr = rgb(text);
@@ -334,10 +392,11 @@ export function derived(theme: Theme): Resolved {
 		bg: fillCss(theme.bg),
 		surface: fillCss(theme.surface),
 		text,
-		accent,
+		accent: accentSolid,
+		accentFill: fillCss(theme.accent),
 		button: fillCss(theme.button),
 		buttonText: theme.buttonText,
-		link: theme.link ?? accent,
+		link: theme.link ?? accentSolid,
 		secondary: theme.secondary ?? mixHex(text, avg, 0.28),
 		muted,
 		border,
@@ -360,9 +419,9 @@ export function derived(theme: Theme): Resolved {
 		secondaryButtonBorder: theme.secondaryButtonBorder ?? border,
 		secondaryButtonText: theme.secondaryButtonText ?? text,
 		buttonHover: theme.buttonHover ?? mixHex(solidOf(theme.button), text, 0.12),
-		badge: theme.badge ?? accent,
-		selection: theme.selection ?? rgba(accent, 0.28),
-		accentSoft: rgba(accent, 0.1),
+		badge: theme.badge ?? accentSolid,
+		selection: theme.selection ?? rgba(accentSolid, 0.28),
+		accentSoft: rgba(accentSolid, 0.1),
 		replySoft: rgba(reply, 0.1),
 		repostSoft: rgba(repost, 0.1),
 		likeSoft: rgba(like, 0.1),
@@ -389,7 +448,7 @@ export type AccountTokens = {
 
 export function deriveTokens(theme: Theme): AccountTokens {
 	const d = derived(theme);
-	const accentHover = mixHex(theme.accent, INK, 0.12);
+	const accentHover = mixHex(d.accent, INK, 0.12);
 	return {
 		bg: d.bg,
 		bar: d.header,
@@ -420,6 +479,7 @@ export function xtVars(theme: Theme): Record<string, string> {
 		"--xt-border": d.border,
 		"--xt-divider": d.divider,
 		"--xt-accent": d.accent,
+		"--xt-accent-fill": d.accentFill,
 		"--xt-button": d.button,
 		"--xt-button-text": d.buttonText,
 		"--xt-button-hover": d.buttonHover,
@@ -450,8 +510,16 @@ export function xtVars(theme: Theme): Record<string, string> {
 	};
 }
 
+export function accentVars(accent: Accent): string {
+	const fill = fillOfAccent(accent);
+	const solid = solidOf(fill);
+	const hover = mixHex(solid, INK, 0.12);
+	return `--xt-accent:${solid};--xt-accent-fill:${fillCss(fill)};--xt-accent-soft:${rgba(solid, 0.1)};--xt-accent-hover:${hover};--accent:${solid};--accent-fill:${fillCss(fill)};--accent-hover:${hover};--accent-text:${readableOn([solid])}`;
+}
+
 export function accountVars(theme: Theme): string {
 	const tkn = deriveTokens(theme);
+	const d = derived(theme);
 	const rows: Record<string, string> = {
 		bg: tkn.bg,
 		bar: tkn.bar,
@@ -464,6 +532,7 @@ export function accountVars(theme: Theme): string {
 		hover: tkn.hover,
 		logo: tkn.logo,
 		accent: tkn.accent,
+		"accent-fill": d.accentFill,
 		"accent-hover": tkn.accentHover,
 		"accent-text": /^#[0-9a-f]{6}$/i.test(tkn.accent) ? readableOn([tkn.accent]) : WHITE,
 	};
@@ -492,6 +561,10 @@ export function bootCss(theme: Theme): string {
 		`html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}` +
 		fontFamilyCss(theme)
 	);
+}
+
+export function bootAccentCss(accent: Accent): string {
+	return `html{${accentVars(accent)}}`;
 }
 
 export function fontLinks(theme: Theme | null): string {
@@ -536,7 +609,7 @@ export function sanitiseTheme(input: unknown): Sanitised | null {
 	const button = parseGradientOrHex(o.button) ?? preset?.button;
 	const surface = ("surface" in o ? parseFill(o.surface) : undefined) ?? preset?.surface;
 	let text = parseHex(o.text) ?? preset?.text;
-	const accent = parseHex(o.accent) ?? preset?.accent;
+	const accent = ("accent" in o ? parseFill(o.accent) : undefined) ?? preset?.accent;
 	let buttonText = parseHex(o.buttonText) ?? preset?.buttonText;
 	if (!bg || !button || !surface || !text || !accent || !buttonText) return null;
 	const theme: Theme = { id: typeof o.id === "string" && (o.id === "custom" || PRESETS[o.id]) ? o.id : "custom", base, bg, surface, text, accent, button, buttonText };
@@ -605,20 +678,24 @@ export type Look = NativeLook | PaintedLook;
 export type LookView = {
 	readonly mode: Mode | null;
 	readonly theme: Theme | null;
+	readonly accent: string | Gradient;
 };
 
 export type ClientLook = {
 	readonly night: "0" | "2";
 	readonly theme: Theme | null;
+	readonly accent: string | Gradient;
+	readonly themeColor: AccentId;
 };
 
 export type LookWrite =
 	| { readonly type: "plain"; readonly mode: Mode }
 	| { readonly type: "clear" }
-	| { readonly type: "paint"; readonly theme: Theme };
+	| { readonly type: "paint"; readonly theme: Theme }
+	| { readonly type: "keep" };
 
 export type ParsedWrite =
-	| { readonly ok: true; readonly write: LookWrite; readonly warnings: readonly string[] }
+	| { readonly ok: true; readonly write: LookWrite; readonly accent?: Accent; readonly warnings: readonly string[] }
 	| { readonly ok: false; readonly error: string };
 
 export type AccountPalette = "light" | "dim" | "dark";
@@ -636,7 +713,21 @@ export function modeOf(look: Look): Mode {
 	return look.kind === "native" ? look.mode : look.theme.base;
 }
 
-export function readLook(preferences: unknown): Look | null {
+export function readAccent(preferences: unknown, look: Look | null): Accent {
+	const row = preferences && typeof preferences === "object" && !Array.isArray(preferences) ? (preferences as Record<string, unknown>) : null;
+	const fromPref = row && "accent" in row ? parseAccent(row.accent) : null;
+	if (fromPref) return fromPref;
+	if (look?.kind === "painted") return parseAccent(look.theme.accent) ?? DEFAULT_ACCENT;
+	return DEFAULT_ACCENT;
+}
+
+export function readPrefs(preferences: unknown): Prefs {
+	const look = readLookRaw(preferences);
+	const accent = readAccent(preferences, look);
+	return { look: overlayAccent(look, accent), accent };
+}
+
+function readLookRaw(preferences: unknown): Look | null {
 	if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return null;
 	const row = preferences as Record<string, unknown>;
 	const theme = sanitiseTheme(row.theme)?.theme;
@@ -645,40 +736,59 @@ export function readLook(preferences: unknown): Look | null {
 	return null;
 }
 
+export function readLook(preferences: unknown): Look | null {
+	return readPrefs(preferences).look;
+}
+
+function accentFromBody(o: Record<string, unknown>): { accent?: Accent; error?: string } {
+	if (!("accent" in o)) return {};
+	if (o.accent === null) return { accent: DEFAULT_ACCENT };
+	const accent = parseAccent(o.accent);
+	if (!accent) return { error: "that isn't an accent" };
+	return { accent };
+}
+
 export function parseLookWrite(body: unknown): ParsedWrite {
 	if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "that isn't a theme" };
 	const o = body as Record<string, unknown>;
 	const mode = o.mode === "light" || o.mode === "dark" ? o.mode : undefined;
 	const hasMode = "mode" in o;
+	const gotAccent = accentFromBody(o);
+	if (gotAccent.error) return { ok: false, error: gotAccent.error };
+	const extra = gotAccent.accent ? { accent: gotAccent.accent } : {};
 	if (o.clear === true) {
 		if (hasMode) return { ok: false, error: "invalid mode" };
-		return { ok: true, write: { type: "clear" }, warnings: [] };
+		return { ok: true, write: { type: "clear" }, warnings: [], ...extra };
 	}
 	if (o.theme && typeof o.theme === "object" && !Array.isArray(o.theme)) {
-		const got = sanitiseTheme(o.theme);
+		const themeBody = o.theme as Record<string, unknown>;
+		const got = sanitiseTheme(themeBody);
 		if (!got) return { ok: false, error: "that isn't a theme" };
 		if (hasMode && mode !== got.theme.base) return { ok: false, error: "invalid mode" };
-		return { ok: true, write: { type: "paint", theme: got.theme }, warnings: got.warnings };
+		const fromTheme = "accent" in themeBody ? parseAccent(themeBody.accent) ?? parseAccent(got.theme.accent) : undefined;
+		return { ok: true, write: { type: "paint", theme: got.theme }, warnings: got.warnings, accent: extra.accent ?? fromTheme };
 	}
 	if (hasMode) {
 		if (!mode) return { ok: false, error: "invalid mode" };
 		if ("theme" in o && o.theme !== null) return { ok: false, error: "that isn't a theme" };
-		return { ok: true, write: { type: "plain", mode }, warnings: [] };
+		return { ok: true, write: { type: "plain", mode }, warnings: [], ...extra };
 	}
-	if (o.theme === null) return { ok: true, write: { type: "clear" }, warnings: [] };
+	if (o.theme === null) return { ok: true, write: { type: "clear" }, warnings: [], ...extra };
+	if (extra.accent) return { ok: true, write: { type: "keep" }, warnings: [], ...extra };
 	return { ok: false, error: "that isn't a theme" };
 }
 
 export function applyWrite(current: Look | null, write: LookWrite): Look | null {
+	if (write.type === "keep") return current;
 	if (write.type === "plain") return { kind: "native", mode: write.mode };
 	if (write.type === "paint") return { kind: "painted", theme: write.theme };
 	if (!current || current.kind === "native") return current;
 	return { kind: "native", mode: current.theme.base };
 }
 
-export function lookView(look: Look | null): LookView {
-	if (!look) return { mode: null, theme: null };
-	return { mode: modeOf(look), theme: look.kind === "painted" ? look.theme : null };
+export function lookView(look: Look | null, accent: Accent = DEFAULT_ACCENT): LookView {
+	if (!look) return { mode: null, theme: null, accent: accentWire(accent) };
+	return { mode: modeOf(look), theme: look.kind === "painted" ? look.theme : null, accent: accentWire(accent) };
 }
 
 export function nightModeCookies(look: Look | null): readonly string[] {
@@ -686,8 +796,13 @@ export function nightModeCookies(look: Look | null): readonly string[] {
 	return [`night_mode=${modeOf(look) === "light" ? "0" : "2"}; ${NIGHT_MODE_ATTR}`];
 }
 
-export function clientLook(look: Look): ClientLook {
-	return { night: modeOf(look) === "light" ? "0" : "2", theme: look.kind === "painted" ? look.theme : null };
+export function clientLook(look: Look | null, accent: Accent = DEFAULT_ACCENT): ClientLook {
+	return {
+		night: look ? (modeOf(look) === "light" ? "0" : "2") : "2",
+		theme: look?.kind === "painted" ? look.theme : null,
+		accent: accentWire(accent),
+		themeColor: themeColorOf(accent),
+	};
 }
 
 export function paletteOf(look: Look | null, nightCookie?: string): AccountPalette | undefined {
@@ -702,11 +817,17 @@ export const THEME_SCRIPT = String.raw`(function(){
 	var X=window.__XITTER__||{};
 	var theme=X.theme||null;
 	var look=X.look||null;
+	var accents=${JSON.stringify(ACCENTS)};
+	var accentIds=${JSON.stringify(ACCENT_IDS)};
+	var accentWire=X.accent!=null?X.accent:(look&&look.accent!=null?look.accent:null);
+	var forcedColor=(look&&look.themeColor)||X.themeColor||"blue500";
 	var scopes=${JSON.stringify(LINK_SCOPES)};
 	var presets=X.themePresets||[];
-	var sheet,fontSheet,at=0,timer,key="";
+	var sheet,fontSheet,accentSheet,at=0,timer,key="",accentKey="";
 	var CHIRP='TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
 	var TICK='<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.64 18.952l-5.55-4.861 1.317-1.504 3.951 3.459 8.459-10.948L19.4 6.32 9.64 18.952z"></path></g></svg>';
+	var GOLD={"226, 183, 25":1,"212, 167, 44":1};
+	var GREY={"130, 154, 171":1};
 	function csrf(){return(document.cookie.match(/(?:^|;\s*)ct0=([^;]+)/)||[])[1]||""}
 	function hexRgb(h){
 		h=String(h||"").replace("#","");
@@ -733,14 +854,134 @@ export const THEME_SCRIPT = String.raw`(function(){
 	function rgba(h,a){var c=hexRgb(h);return "rgba("+c[0]+", "+c[1]+", "+c[2]+", "+a+")"}
 	function fontOk(n){return typeof n==="string"&&/^[A-Za-z0-9 ]{1,40}$/.test(n)}
 	function slugOf(n){return String(n).toLowerCase().replace(/ /g,"-")}
+	function namedHex(id){return accents[id]||"#1d9bf0"}
+	function resolveAccent(w){
+		if(w==null)return {solid:"#1d9bf0",fill:"#1d9bf0",id:"blue500",custom:false};
+		if(typeof w==="string"&&accents[w])return {solid:accents[w],fill:accents[w],id:w,custom:false};
+		if(typeof w==="string"){
+			var id=null,k;
+			for(k in accents)if(accents[k]===w)id=k;
+			return {solid:w,fill:w,id:id||"blue500",custom:!id};
+		}
+		var solid=hexOf(w),fl=fill(w)||solid;
+		return {solid:solid,fill:fl,id:"blue500",custom:true};
+	}
+	var resolved=resolveAccent(accentWire);
+	function lockLocal(obj){
+		if(!obj||typeof obj!=="object")return obj;
+		try{
+			Object.defineProperty(obj,"themeColor",{configurable:true,enumerable:true,get:function(){return forcedColor},set:function(){}});
+		}catch(e){obj.themeColor=forcedColor}
+		return obj;
+	}
+	function seedThemeColor(){
+		try{
+			var s=window.__INITIAL_STATE__;
+			if(s&&s.settings){
+				s.settings._xtLocal=lockLocal(s.settings.local||{});
+				try{
+					Object.defineProperty(s.settings,"local",{
+						configurable:true,
+						get:function(){return s.settings._xtLocal},
+						set:function(v){s.settings._xtLocal=lockLocal(v||{})}
+					});
+				}catch(e){s.settings.local=s.settings._xtLocal}
+			}
+		}catch(e){}
+		try{
+			var req=indexedDB.open("localforage");
+			req.onsuccess=function(){
+				var db=req.result;
+				if(!db.objectStoreNames.contains("keyvaluepairs"))return;
+				var tx=db.transaction("keyvaluepairs","readwrite");
+				var store=tx.objectStore("keyvaluepairs");
+				var g=store.get("device:rweb.settings");
+				g.onsuccess=function(){
+					var v=g.result;
+					if(!v||typeof v!=="object")v={local:{}};
+					if(!v.local||typeof v.local!=="object")v.local={};
+					v.local.themeColor=forcedColor;
+					store.put(v,"device:rweb.settings");
+				};
+			};
+		}catch(e){}
+	}
+	function applyAccentVars(){
+		var a=resolveAccent(accentWire),h=document.documentElement,hover=mix(hexRgb(a.solid),hexRgb("#0f1419"),0.12);
+		h.style.setProperty("--xt-accent",a.solid);
+		h.style.setProperty("--xt-accent-fill",a.fill);
+		h.style.setProperty("--xt-accent-soft",rgba(a.solid,0.1));
+		h.style.setProperty("--xt-accent-hover",hover);
+		h.style.setProperty("--xt-accent-tint",mix(hexRgb(a.solid),hexRgb("#ffffff"),0.5));
+		h.style.setProperty("--xt-accent-text",(hexRgb(a.solid)[0]*299+hexRgb(a.solid)[1]*587+hexRgb(a.solid)[2]*114)/1000>160?"#0f1419":"#ffffff");
+		h.setAttribute("data-xitter-accent",a.custom?"custom":a.id);
+		resolved=a;
+		forcedColor=a.custom?"blue500":a.id;
+	}
+	function rgbKey(s){
+		var m=/rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(s||"");
+		return m?m[1]+", "+m[2]+", "+m[3]:"";
+	}
+	function keptCheck(svg){
+		if(svg.querySelector("linearGradient,stop"))return true;
+		var nodes=[svg].concat([].slice.call(svg.querySelectorAll("*"))),i,k,c;
+		for(i=0;i<nodes.length;i++){
+			c=getComputedStyle(nodes[i]);
+			k=rgbKey(c.fill)||rgbKey(c.color);
+			if(GOLD[k]||GREY[k])return true;
+		}
+		return false;
+	}
+	function accentGradUrl(){
+		var a=resolved,id="xitter-accent-grad",ns="http://www.w3.org/2000/svg";
+		if(!resolved.custom||resolved.fill.indexOf("gradient")<0)return resolved.solid;
+		var g=document.getElementById(id);
+		if(!g){
+			var svg=document.createElementNS(ns,"svg");
+			svg.setAttribute("width","0");svg.setAttribute("height","0");
+			svg.style.cssText="position:absolute;width:0;height:0";
+			var defs=document.createElementNS(ns,"defs");
+			g=document.createElementNS(ns,"linearGradient");
+			g.id=id;
+			defs.appendChild(g);svg.appendChild(defs);
+			document.documentElement.appendChild(svg);
+		}
+		var w=accentWire,stops=w&&w.stops?w.stops:[resolved.solid],ang=(w&&w.angle)||180,rad=ang*Math.PI/180;
+		g.setAttribute("x1",String(0.5-0.5*Math.cos(rad)));
+		g.setAttribute("y1",String(0.5-0.5*Math.sin(rad)));
+		g.setAttribute("x2",String(0.5+0.5*Math.cos(rad)));
+		g.setAttribute("y2",String(0.5+0.5*Math.sin(rad)));
+		g.textContent="";
+		stops.forEach(function(s,i){
+			var st=document.createElementNS(ns,"stop");
+			st.setAttribute("offset",stops.length===1?"0%":String(Math.round(i/(stops.length-1)*100))+"%");
+			st.setAttribute("stop-color",s);
+			g.appendChild(st);
+		});
+		return "url(#"+id+")";
+	}
+	function paintChecks(){
+		var fill=accentGradUrl(),color=resolved.solid;
+		document.querySelectorAll('svg[data-testid="icon-verified"]').forEach(function(svg){
+			if(svg.closest("[data-xitter-badges],[data-xitter-frame],[data-xitter-framed],.xitter-deco,[data-xitter-decor-bg]"))return;
+			if(keptCheck(svg))return;
+			svg.style.setProperty("color",color,"important");
+			svg.style.setProperty("fill",fill,"important");
+			svg.querySelectorAll("path,g").forEach(function(n){
+				var k=rgbKey(getComputedStyle(n).fill);
+				if(GOLD[k]||GREY[k])return;
+				n.style.setProperty("fill",fill,"important");
+			});
+		});
+	}
 	function varsOf(t){
 		if(!t)return null;
-		var avg=avgOf(t.bg),avgHex=hexOf(t.bg),tr=hexRgb(t.text||"#e7e9ea"),surface=hexOf(t.surface||avgHex),text=t.text,accent=t.accent;
+		var avg=avgOf(t.bg),avgHex=hexOf(t.bg),tr=hexRgb(t.text||"#e7e9ea"),surface=hexOf(t.surface||avgHex),text=t.text,accent=hexOf(t.accent),accentFill=fill(t.accent)||accent;
 		var muted=t.muted||mix(tr,hexRgb(avgHex),0.45),border=t.border||mix(tr,hexRgb(avgHex),0.82),link=t.link||accent;
 		var reply=t.reply||accent,bookmark=t.bookmark||accent,like=t.like||"#f91880",repost=t.repost||"#00ba7c";
 		return {
 			"--xt-bg":fill(t.bg),"--xt-surface":fill(t.surface),"--xt-text":text,"--xt-secondary":t.secondary||mix(tr,hexRgb(avgHex),0.28),"--xt-muted":muted,"--xt-link":link,
-			"--xt-border":border,"--xt-divider":t.divider||border,"--xt-accent":accent,"--xt-button":fill(t.button),"--xt-button-text":t.buttonText,
+			"--xt-border":border,"--xt-divider":t.divider||border,"--xt-accent":accent,"--xt-accent-fill":accentFill,"--xt-button":fill(t.button),"--xt-button-text":t.buttonText,
 			"--xt-button-hover":t.buttonHover||mix(hexRgb(hexOf(t.button)),tr,0.12),"--xt-header":t.header?fill(t.header):"rgb("+Math.round(avg[0])+" "+Math.round(avg[1])+" "+Math.round(avg[2])+" / .85)",
 			"--xt-hover":t.hover||("rgb("+tr[0]+" "+tr[1]+" "+tr[2]+" / .1)"),"--xt-input":t.inputBg||mix(hexRgb(surface),tr,0.08),"--xt-input-text":t.inputText||text,"--xt-input-border":t.inputBorder||border,
 			"--xt-menu":t.menu?fill(t.menu):fill(t.surface),"--xt-tooltip":t.tooltip||mix(hexRgb(surface),tr,0.16),"--xt-icon":t.icon||muted,"--xt-icon-active":t.iconActive||text,
@@ -767,16 +1008,19 @@ export const THEME_SCRIPT = String.raw`(function(){
 		if(fontOk(t.font.display)){addFont(t.font.display);css+='html[data-xitter-theme] [data-testid="User-Name"] span:first-of-type,html[data-xitter-theme] [data-testid="UserName"],html[data-xitter-theme] h1,html[data-xitter-theme] h2{font-family:"'+t.font.display+'",'+CHIRP+'!important}'}
 		fontSheet.textContent=css;
 	}
-	var VAR_KEYS=["--xt-bg","--xt-surface","--xt-text","--xt-secondary","--xt-muted","--xt-link","--xt-border","--xt-divider","--xt-accent","--xt-button","--xt-button-text","--xt-button-hover","--xt-header","--xt-hover","--xt-input","--xt-input-text","--xt-input-border","--xt-menu","--xt-tooltip","--xt-icon","--xt-icon-active","--xt-reply","--xt-repost","--xt-like","--xt-bookmark","--xt-views","--xt-secondary-button","--xt-secondary-button-border","--xt-secondary-button-text","--xt-badge","--xt-selection","--xt-accent-soft","--xt-reply-soft","--xt-repost-soft","--xt-like-soft","--xt-bookmark-soft"];
+	var VAR_KEYS=["--xt-bg","--xt-surface","--xt-text","--xt-secondary","--xt-muted","--xt-link","--xt-border","--xt-divider","--xt-accent","--xt-accent-fill","--xt-button","--xt-button-text","--xt-button-hover","--xt-header","--xt-hover","--xt-input","--xt-input-text","--xt-input-border","--xt-menu","--xt-tooltip","--xt-icon","--xt-icon-active","--xt-reply","--xt-repost","--xt-like","--xt-bookmark","--xt-views","--xt-secondary-button","--xt-secondary-button-border","--xt-secondary-button-text","--xt-badge","--xt-selection","--xt-accent-soft","--xt-reply-soft","--xt-repost-soft","--xt-like-soft","--xt-bookmark-soft"];
+	var ACCENT_KEYS={"--xt-accent":1,"--xt-accent-fill":1,"--xt-accent-soft":1,"--xt-accent-hover":1};
 	function apply(t){
 		theme=t;
 		var h=document.documentElement;
 		if(!t){
 			h.removeAttribute("data-xitter-theme");
-			VAR_KEYS.forEach(function(k){h.style.removeProperty(k)});
+			VAR_KEYS.forEach(function(k){if(!ACCENT_KEYS[k])h.style.removeProperty(k)});
 			if(sheet)sheet.textContent="";
 			applyFonts(null);
 			key="";
+			applyAccentVars();
+			paintAccent();
 			return;
 		}
 		h.setAttribute("data-xitter-theme",t.id||"custom");
@@ -784,7 +1028,9 @@ export const THEME_SCRIPT = String.raw`(function(){
 		for(k in v)h.style.setProperty(k,v[k]);
 		applyFonts(t);
 		key="";
+		applyAccentVars();
 		paint();
+		paintAccent();
 	}
 	function setNight(v){
 		document.cookie="night_mode="+v+"; ${NIGHT_MODE_ATTR}";
@@ -848,7 +1094,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 	function paint(){
 		if(!theme||Date.now()-at<1000)return;
 		at=Date.now();
-		var p=pal(),found={pagebg:[],surface:[],text:[],secondary:[],muted:[],border:[],accentColor:[],accentBg:[],accentSoft:[],accentOutline:[],button:[],buttonText:[],header:[],hover:[],menu:[],input:[],tooltip:[],icon:[],iconFill:[],iconActiveFill:[],repost:[],repostBg:[],like:[],likeBg:[],chirp:[]};
+		var p=pal(),found={pagebg:[],surface:[],text:[],secondary:[],muted:[],border:[],accentColor:[],accentBg:[],accentHover:[],accentSoft:[],accentOutline:[],button:[],buttonText:[],header:[],hover:[],menu:[],input:[],tooltip:[],icon:[],iconFill:[],iconActiveFill:[],repost:[],repostBg:[],like:[],likeBg:[],chirp:[]};
 		function note(kind,sel){if(!found[kind])found[kind]=[];if(found[kind].indexOf(sel)<0)found[kind].push(sel)}
 		[].forEach.call(document.styleSheets,function(ss){
 			var rules;try{rules=ss.cssRules}catch(e){return}
@@ -870,15 +1116,16 @@ export const THEME_SCRIPT = String.raw`(function(){
 				if(p.muted[c])note("muted",sel);
 				if(p.icon[c])note("icon",sel);
 				if(p.buttonText[c]&&!p.text[c])note("buttonText",sel);
-				if(c==="29, 155, 240")note("accentColor",sel);
+				if(c==="29, 155, 240"||c==="26, 140, 216")note("accentColor",sel);
 				if(bg==="29, 155, 240")note("accentBg",sel);
-				if(bg==="29, 155, 240, 0.1"||bg==="29, 155, 240, 0.12"||bg==="29, 155, 240, 0.14")note("accentSoft",sel);
+				if(bg==="26, 140, 216")note("accentHover",sel);
+				if(bg==="29, 155, 240, 0.1"||bg==="29, 155, 240, 0.12"||bg==="29, 155, 240, 0.14"||bg==="29, 155, 240, 0.2")note("accentSoft",sel);
 				if(c==="0, 186, 124"||fl==="0, 186, 124")note("repost",sel);
 				if(bg==="0, 186, 124"||bg==="0, 186, 124, 0.1"||bg==="0, 186, 124, 0.2")note("repostBg",sel);
 				if(c==="249, 24, 128"||fl==="249, 24, 128")note("like",sel);
 				if(bg==="249, 24, 128"||bg==="249, 24, 128, 0.1"||bg==="249, 24, 128, 0.2")note("likeBg",sel);
 				if(p.border[bd])note("border",sel);
-				if(fl==="29, 155, 240")note("accentColor",sel);
+				if(fl==="29, 155, 240"||fl==="26, 140, 216")note("accentColor",sel);
 				if(ol==="29, 155, 240")note("accentOutline",sel);
 				if(p.iconFill[fl])note("iconFill",sel);
 				if(p.iconActiveFill[fl])note("iconActiveFill",sel);
@@ -890,9 +1137,10 @@ export const THEME_SCRIPT = String.raw`(function(){
 			['pagebg','[style*="background-color: rgb(0, 0, 0)"]','[style*="background-color: rgb(255, 255, 255)"]'],
 			['surface','[style*="background-color: rgb(22, 24, 28)"]','[style*="background-color: rgb(32, 35, 39)"]','[style*="background-color: rgb(247, 249, 249)"]'],
 			['button','[style*="background-color: rgb(239, 243, 244)"]','[style*="background-color: rgb(15, 20, 25)"]'],
-			['accentColor','[style*="color: rgb(29, 155, 240)"]','[style*="fill: rgb(29, 155, 240)"]'],
+			['accentColor','[style*="color: rgb(29, 155, 240)"]','[style*="fill: rgb(29, 155, 240)"]','[style*="color: rgb(26, 140, 216)"]'],
 			['accentBg','[style*="background-color: rgb(29, 155, 240)"]'],
-			['accentSoft','[style*="background-color: rgba(29, 155, 240, 0.1)"]','[style*="background-color: rgba(29, 155, 240, 0.12)"]'],
+			['accentHover','[style*="background-color: rgb(26, 140, 216)"]'],
+			['accentSoft','[style*="background-color: rgba(29, 155, 240, 0.1)"]','[style*="background-color: rgba(29, 155, 240, 0.12)"]','[style*="background-color: rgba(29, 155, 240, 0.2)"]'],
 			['repost','[style*="color: rgb(0, 186, 124)"]'],
 			['repostBg','[style*="background-color: rgb(0, 186, 124)"]','[style*="background-color: rgba(0, 186, 124, 0.1)"]'],
 			['like','[style*="color: rgb(249, 24, 128)"]'],
@@ -911,7 +1159,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 				else if(kind==="surface")note(kind,sel);
 				else if(kind==="button"&&light&&sel.indexOf("15, 20, 25")>=0)note(kind,sel);
 				else if(kind==="button"&&!light&&sel.indexOf("239, 243, 244")>=0)note(kind,sel);
-				else if(kind==="accentColor"||kind==="accentBg"||kind==="accentSoft"||kind==="repost"||kind==="repostBg"||kind==="like"||kind==="likeBg")note(kind,sel);
+				else if(kind==="accentColor"||kind==="accentBg"||kind==="accentHover"||kind==="accentSoft"||kind==="repost"||kind==="repostBg"||kind==="like"||kind==="likeBg")note(kind,sel);
 			});
 		});
 		var css=[],k;
@@ -934,7 +1182,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		add("buttonText","color:var(--xt-button-text)!important",false);
 		add("accentColor","color:var(--xt-accent)!important;fill:var(--xt-accent)!important",false);
 		add("accentOutline","outline-color:var(--xt-accent)!important",false);
-		add("accentBg","background-color:var(--xt-accent)!important",false);
+		add("accentBg","background:var(--xt-accent-fill,var(--xt-accent))!important",false);
+		add("accentHover","background:var(--xt-accent-hover,var(--xt-accent))!important",false);
 		add("accentSoft","background-color:var(--xt-accent-soft)!important",false);
 		(found.accentColor||[]).forEach(function(sel){
 			scopes.forEach(function(scope){
@@ -966,6 +1215,45 @@ export const THEME_SCRIPT = String.raw`(function(){
 		if(!sheet){sheet=document.createElement("style");sheet.setAttribute("data-xitter-theme-css","");document.head.appendChild(sheet)}
 		sheet.textContent=next;
 	}
+	function wrapAccent(sel){
+		return 'html[data-xitter-accent] '+sel+':not(img):not(svg[data-testid="icon-verified"]):not(svg[aria-label="Translator account"]):not(.xitter-deco):not([data-xitter-badges]):not([data-xitter-frame]):not([data-xitter-framed]):not([data-xitter-decor-bg]):not(:is(svg[data-testid="icon-verified"] *,svg[aria-label="Translator account"] *,[data-xitter-badges] *,[data-xitter-frame],[data-xitter-framed] *,[data-xitter-decor-bg] *,.xitter-deco,[aria-label="Color options"] *))';
+	}
+	function paintAccent(){
+		applyAccentVars();
+		var css=[];
+		function add(sel,decl){css.push(wrapAccent(sel)+"{"+decl+"}")}
+		[].forEach.call(document.styleSheets,function(ss){
+			var rules;try{rules=ss.cssRules}catch(e){return}
+			[].forEach.call(rules||[],function(r){
+				if(!r.selectorText||!r.style||!/^\.[\w-]+$/.test(r.selectorText))return;
+				var c=norm(r.style.color),bg=norm(r.style.backgroundColor),fl=norm(r.style.fill),ol=norm(r.style.outlineColor),bd=norm(r.style.borderColor),sel=r.selectorText;
+				if(c==="29, 155, 240"||c==="26, 140, 216"||fl==="29, 155, 240"||fl==="26, 140, 216")add(sel,"color:var(--xt-accent)!important;fill:var(--xt-accent)!important");
+				if(bg==="29, 155, 240")add(sel,"background:var(--xt-accent-fill,var(--xt-accent))!important");
+				if(bg==="26, 140, 216")add(sel,"background:var(--xt-accent-hover,var(--xt-accent))!important");
+				if(bg==="142, 205, 248"||bg==="107, 201, 251")add(sel,"background-color:var(--xt-accent-tint)!important");
+				if(/^29, 155, 240, /.test(bg)||/^26, 140, 216, /.test(bg))add(sel,"background-color:color-mix(in srgb,var(--xt-accent) "+Math.round(Number(bg.split(", ")[3])*100)+"%,transparent)!important");
+				if(ol==="29, 155, 240"||bd==="29, 155, 240"||ol==="142, 205, 248"||bd==="142, 205, 248")add(sel,"outline-color:var(--xt-accent)!important;border-color:var(--xt-accent)!important");
+				if(/29,\s*155,\s*240|26,\s*140,\s*216|142,\s*205,\s*248/.test(r.style.backgroundImage||""))add(sel,"background-image:linear-gradient(90deg,var(--xt-accent),var(--xt-accent-tint))!important");
+			});
+		});
+		add('[style*="color: rgb(29, 155, 240)"]',"color:var(--xt-accent)!important;fill:var(--xt-accent)!important");
+		add('[style*="fill: rgb(29, 155, 240)"]',"fill:var(--xt-accent)!important");
+		add('[style*="background-color: rgb(29, 155, 240)"]',"background:var(--xt-accent-fill,var(--xt-accent))!important");
+		add('[style*="background-color: rgb(26, 140, 216)"]',"background:var(--xt-accent-hover,var(--xt-accent))!important");
+		add('[style*="background-color: rgba(29, 155, 240"]',"background-color:var(--xt-accent-soft)!important");
+		add('[style*="border-color: rgb(29, 155, 240)"]',"border-color:var(--xt-accent)!important");
+		add('[style*="border-color: rgb(26, 140, 216)"]',"border-color:var(--xt-accent-hover,var(--xt-accent))!important");
+		add('[style*="background-color: rgb(142, 205, 248)"]',"background-color:var(--xt-accent-tint)!important");
+		css.push('html[data-xitter-accent] [data-testid="tweetButton"],html[data-xitter-accent] [data-testid="tweetButtonInline"]{background:var(--xt-accent-fill,var(--xt-accent))!important;border-color:transparent!important}');
+		css.push('html[data-xitter-accent] [data-testid="tweetButton"] div,html[data-xitter-accent] [data-testid="tweetButtonInline"] div{color:var(--xt-accent-text,#fff)!important}');
+		var next=css.join("");
+		if(next!==accentKey){
+			accentKey=next;
+			if(!accentSheet){accentSheet=document.createElement("style");accentSheet.setAttribute("data-xitter-accent-css","");document.head.appendChild(accentSheet)}
+			accentSheet.textContent=next;
+		}
+		paintChecks();
+	}
 	function post(body,then){
 		fetch("/i/api/xitter/theme",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-csrf-token":csrf()},body:JSON.stringify(body)})
 			.then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d}})})
@@ -983,7 +1271,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 		var i=card.querySelector("input");if(i)i.checked=false;
 	}
 	function selectCard(card){
-		var acc=(theme&&theme.accent)||"#1d9bf0";
+		var acc=resolved.solid||"#1d9bf0";
 		card.style.borderColor=acc;
 		card.style.borderWidth="2px";
 		var d=circle(card);
@@ -992,19 +1280,148 @@ export const THEME_SCRIPT = String.raw`(function(){
 	}
 	function mark(){
 		var dim=document.querySelector("[data-xitter-dim]");
-		document.querySelectorAll("[data-xitter-native]").forEach(function(c){if(theme)unselectCard(c)});
+		document.querySelectorAll("[data-xitter-native]").forEach(function(c){
+			if(theme)unselectCard(c);
+			else{
+				var i=c.querySelector("input");
+				if(i&&i.checked)selectCard(c);
+			}
+		});
 		if(dim){
-			if(theme&&theme.id==="dim")selectCard(dim);else if(theme)unselectCard(dim);
+			if(theme&&theme.id==="dim")selectCard(dim);
+			else if(theme)unselectCard(dim);
+			else{
+				var i=dim.querySelector("input");
+				if(i&&i.checked)selectCard(dim);
+			}
 			dim.setAttribute("data-on",theme&&theme.id==="dim"?"1":"0");
 		}
 		document.querySelectorAll("[data-xitter-swatch]").forEach(function(c){
 			var on=theme&&theme.id===c.getAttribute("data-xitter-swatch");
 			c.setAttribute("data-on",on?"1":"0");
-			c.style.borderColor=on?((theme&&theme.accent)||"#1d9bf0"):"transparent";
+			c.style.borderColor=on?(resolved.solid||"#1d9bf0"):"transparent";
 		});
+	}
+	function markColors(group){
+		var a=resolveAccent(accentWire),on=a.custom?"custom":a.id;
+		group.setAttribute("data-custom",a.custom?"1":"0");
+		group.querySelectorAll("[data-xitter-color]").forEach(function(card){
+			var id=card.getAttribute("data-xitter-color");
+			var sel=id===on;
+			var radio=card.querySelector("input[type=radio]");
+			if(radio)radio.checked=!!sel;
+			card.querySelectorAll("svg").forEach(function(s){
+				if(s.querySelector("circle")&&!s.querySelector("path")){
+					if(id==="custom")s.style.display="none";
+					return;
+				}
+				if(id!=="custom")s.style.display=sel?"":"none";
+			});
+			if(id==="custom"){
+				var host=card.querySelector('[role="radio"]')||card;
+				var tick=card.querySelector("[data-xitter-tick]");
+				if(sel){
+					if(!tick){
+						tick=document.createElement("div");
+						tick.setAttribute("data-xitter-tick","");
+						tick.innerHTML=TICK;
+						tick.style.cssText="position:absolute;inset:0;display:grid;place-items:center;pointer-events:none";
+						var svg=tick.querySelector("svg");
+						if(svg)svg.style.cssText="width:25px;height:25px;fill:#fff";
+						host.style.position="relative";
+						host.appendChild(tick);
+					}
+				}else if(tick)tick.remove();
+			}
+		});
+	}
+	function openCustom(group){
+		var inp=document.getElementById("xitter-accent-pick");
+		if(!inp){
+			inp=document.createElement("input");
+			inp.type="color";inp.id="xitter-accent-pick";
+			inp.style.cssText="position:fixed;left:-99px;width:1px;height:1px;opacity:0";
+			document.body.appendChild(inp);
+			inp.addEventListener("input",function(){
+				if(!inp.value)return;
+				forcedColor="blue500";
+				accentWire=inp.value;
+				applyAccentVars();
+				paintAccent();
+				markColors(group);
+			});
+			inp.addEventListener("change",function(){
+				post({accent:inp.value},function(ok,d){
+					if(ok&&d&&d.accent!=null)accentWire=d.accent;
+					if(ok&&d&&d.theme)theme=d.theme;
+					applyAccentVars();
+					paintAccent();
+					markColors(group);
+				});
+			});
+		}
+		var a=resolveAccent(accentWire);
+		inp.value=/^#[0-9a-f]{6}$/i.test(a.solid)?a.solid:"#ff3d7f";
+		inp.click();
+	}
+	function colors(){
+		if(location.pathname.indexOf("/settings/display")!==0)return;
+		var group=document.querySelector('[role="radiogroup"][aria-label="Color options"]');
+		if(!group)return;
+		var kids=[].filter.call(group.children,function(n){return n.getAttribute("data-xitter-color")!=="custom"&&n.querySelector('[role="radio"],input[type="radio"]')});
+		kids.forEach(function(card,i){
+			var id=accentIds[i];
+			if(!id)return;
+			if(card.getAttribute("data-xitter-wired"))return;
+			card.setAttribute("data-xitter-wired","1");
+			card.setAttribute("data-xitter-color",id);
+			card.addEventListener("click",function(){
+				if(picking)return;
+				forcedColor=id;
+				accentWire=id;
+				post({accent:id},function(ok,d){
+					if(ok&&d&&d.accent!=null)accentWire=d.accent;
+					if(ok&&d&&d.theme)theme=d.theme;
+					applyAccentVars();
+					paintAccent();
+					markColors(group);
+				});
+			},true);
+		});
+		if(!group.querySelector('[data-xitter-color="custom"]')){
+			var last=kids[kids.length-1]||group.lastElementChild;
+			if(last){
+				var custom=last.cloneNode(true);
+				custom.removeAttribute("data-xitter-wired");
+				custom.setAttribute("data-xitter-color","custom");
+				var lab=custom.querySelector("input");
+				if(lab){lab.setAttribute("aria-label","Custom");lab.checked=false;lab.name="xitter-accent-custom"}
+				var vis=custom.querySelector('[role="radio"]')||custom.firstElementChild;
+				if(vis){
+					vis.style.background="conic-gradient(#ff3d7f,#ffd400,#00ba7c,#1d9bf0,#7856ff,#f91880,#ff3d7f)";
+					vis.style.borderRadius="9999px";
+					vis.style.backgroundImage="conic-gradient(#ff3d7f,#ffd400,#00ba7c,#1d9bf0,#7856ff,#f91880,#ff3d7f)";
+				}
+				var disc=custom.querySelector("svg");
+				if(disc)disc.style.display="none";
+				custom.addEventListener("click",function(e){
+					e.preventDefault();e.stopPropagation();
+					if(picking)return;
+					picking=true;
+					var blue=group.querySelector('[data-xitter-color="blue500"]');
+					try{if(blue)blue.click()}catch(err){}
+					picking=false;
+					forcedColor="blue500";
+					openCustom(group);
+				},true);
+				group.appendChild(custom);
+			}
+		}
+		markColors(group);
 	}
 	function display(){
 		if(location.pathname.indexOf("/settings/display")!==0)return;
+		colors();
 		if(document.querySelector("[data-xitter-dim]")){mark();return}
 		var group=document.querySelector('[role="radiogroup"][aria-label="Background options"]');
 		if(!group)return;
@@ -1044,7 +1461,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 				mark();
 			});
 		},true);
-		var face=CHIRP, muted="rgb(113, 118, 123)", accent=(theme&&theme.accent)||"#1d9bf0";
+		var face=CHIRP, muted="rgb(113, 118, 123)", accent=resolved.solid||"#1d9bf0";
 		var sample=defCard.querySelector("span")||defCard;
 		var fam=getComputedStyle(sample).fontFamily;
 		if(fam&&!/^\s*(serif|Times|Times New Roman)\s*$/i.test(fam))face=fam;
@@ -1097,9 +1514,12 @@ export const THEME_SCRIPT = String.raw`(function(){
 		'html[data-xitter-theme]:not([data-xitter-decor]),html[data-xitter-theme]:not([data-xitter-decor]) body{background:var(--xt-bg)!important;background-attachment:fixed!important}'+
 		'html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div,html[data-xitter-theme]:not([data-xitter-decor]) #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
 	document.head.appendChild(base);
+	seedThemeColor();
+	applyAccentVars();
 	if(theme)apply(theme);
+	else paintAccent();
 	nudge();
-	function tick(){if(theme)paint();display()}
+	function tick(){if(theme)paint();paintAccent();display()}
 	tick();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;tick()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 })();`;
@@ -1235,7 +1655,7 @@ const EDITOR_SCRIPT = String.raw`(function(){
 		prev.style.setProperty("--pv-text",b.text);
 		prev.style.setProperty("--pv-button",fill(b.button,b.btnA));
 		prev.style.setProperty("--pv-button-text",b.buttonText);
-		prev.style.setProperty("--pv-accent",b.accent);
+		prev.style.setProperty("--pv-accent",fillVal("accent",b.accent));
 		prev.style.setProperty("--pv-link",tok("link",d.link));
 		prev.style.setProperty("--pv-muted",tok("muted",d.muted));
 		prev.style.setProperty("--pv-border",tok("border",d.border));
@@ -1355,7 +1775,7 @@ const EDITOR_SCRIPT = String.raw`(function(){
 		setv("base","dark");setv("text","#f7f9f9");setv("surface","#1e2732");setv("accent","#1d9bf0");setv("buttonText","#0f1419");
 		setv("font_ui","");setv("font_display","");
 		ADV.forEach(function(n){flag(n,false);hideGrad(n)});
-		hideGrad("surface");
+		hideGrad("surface");hideGrad("accent");
 		var bg=f.querySelector('[data-stops="bg"]');
 		if(bg){bg.querySelectorAll("input[type=color]").forEach(function(i,n){if(n===0)i.value="#15202b";else i.parentElement.remove()})}
 		var btn=f.querySelector('[data-stops="button"]');
@@ -1410,7 +1830,7 @@ function fromForm(f: FormData): { clear?: true; theme?: unknown } {
 		bg: { stops: f.getAll("bg"), angle: Number(f.get("bg_angle")) },
 		surface: formFill(f, "surface"),
 		text: f.get("text"),
-		accent: f.get("accent"),
+		accent: formFill(f, "accent"),
 		button: { stops: f.getAll("button"), angle: Number(f.get("button_angle")) },
 		buttonText: f.get("buttonText"),
 	};
@@ -1426,7 +1846,13 @@ function fromForm(f: FormData): { clear?: true; theme?: unknown } {
 	return { theme };
 }
 
-async function commitLook(userId: string, current: Look | null, write: LookWrite, warnings: readonly string[] = []): Promise<{ look: Look | null; warnings: readonly string[] }> {
+async function commitLook(
+	userId: string,
+	current: Prefs,
+	write: LookWrite,
+	accent: Accent | undefined,
+	warnings: readonly string[] = [],
+): Promise<{ look: Look | null; accent: Accent; warnings: readonly string[] }> {
 	const nextWarnings = [...warnings];
 	let next = write;
 	if (write.type === "paint" && write.theme.font) {
@@ -1439,21 +1865,31 @@ async function commitLook(userId: string, current: Look | null, write: LookWrite
 			next = { type: "paint", theme };
 		}
 	}
-	const look = applyWrite(current, next);
-	await saveLook(userId, look);
-	return { look, warnings: nextWarnings };
+	const nextAccent = accent ?? current.accent;
+	const look = overlayAccent(applyWrite(current.look, next), nextAccent);
+	await saveLook(userId, look, nextAccent);
+	return { look, accent: nextAccent, warnings: nextWarnings };
 }
 
-async function saveLook(userId: string, look: Look | null): Promise<void> {
+async function saveLook(userId: string, look: Look | null, accent: Accent): Promise<void> {
 	const { sql } = await import("./db");
-	const patch = look?.kind === "native" ? { mode: look.mode } : look?.kind === "painted" ? { theme: look.theme } : {};
-	await sql`update users set preferences = (coalesce(preferences, '{}') - 'theme' - 'mode') || ${JSON.stringify(patch)}::text::jsonb where id = ${userId}::bigint`;
+	const patch =
+		look?.kind === "native"
+			? { mode: look.mode, accent: accentWire(accent) }
+			: look?.kind === "painted"
+				? { theme: look.theme, accent: accentWire(accent) }
+				: { accent: accentWire(accent) };
+	await sql`update users set preferences = (coalesce(preferences, '{}') - 'theme' - 'mode' - 'accent') || ${JSON.stringify(patch)}::text::jsonb where id = ${userId}::bigint`;
+}
+
+export async function loadPrefs(userId: string): Promise<Prefs> {
+	const { sql } = await import("./db");
+	const [row] = await sql`select preferences from users where id = ${userId}::bigint`;
+	return readPrefs(row?.preferences);
 }
 
 export async function loadLook(userId: string): Promise<Look | null> {
-	const { sql } = await import("./db");
-	const [row] = await sql`select preferences from users where id = ${userId}::bigint`;
-	return readLook(row?.preferences);
+	return (await loadPrefs(userId)).look;
 }
 
 function swatchStyle(g: Gradient) {
@@ -1503,7 +1939,7 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 		<div class="toks">
 			${fillRow("Surface", "surface", colors.surface, "#1e2732", true, false)}
 			${colorRow("Text", "text", colors.text, true, false)}
-			${colorRow("Accent / links", "accent", colors.accent, true, false)}
+			${fillRow("Accent / links", "accent", colors.accent, "#1d9bf0", true, false)}
 			${colorRow("Button text", "buttonText", colors.buttonText, true, false)}
 		</div>
 		<p class="note" data-warn="text" hidden></p>
@@ -1575,7 +2011,7 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 			<p class="h3">Badges &amp; misc</p>
 			<div class="toks">
 				${opt("Notification badge", "badge", d.badge)}
-				${opt("Selection", "selection", /^#/.test(d.selection) ? d.selection : colors.accent)}
+				${opt("Selection", "selection", /^#/.test(d.selection) ? d.selection : solidOf(colors.accent))}
 			</div>
 			<div class="warns" id="warns"></div>
 		</details>
@@ -1591,30 +2027,33 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 }
 
 export async function themeRoute(req: Request, viewer: Viewer): Promise<Response> {
-	const current = await loadLook(viewer.id);
-	const theme = current?.kind === "painted" ? current.theme : null;
+	const current = await loadPrefs(viewer.id);
+	const theme = current.look?.kind === "painted" ? current.look.theme : null;
 	if (req.method !== "POST") return themePage(req, viewer, theme);
 	const f = await req.formData().catch(() => undefined);
 	if (String(f?.get("csrf") ?? "") !== viewer.csrf) return themePage(req, viewer, theme, { error: "That form is out of date. Try again." });
 	const parsed = parseLookWrite(fromForm(f!));
 	if (!parsed.ok) return themePage(req, viewer, theme, { error: "That isn't a theme." });
-	const saved = await commitLook(viewer.id, current, parsed.write, parsed.warnings);
+	const saved = await commitLook(viewer.id, current, parsed.write, parsed.accent, parsed.warnings);
 	const headers = new Headers({ location: "/account/theme" });
 	for (const c of nightModeCookies(saved.look)) headers.append("set-cookie", c);
 	return new Response(null, { status: 303, headers });
 }
 
 export async function themeApi(req: Request, viewer: Viewer): Promise<Response> {
-	if (req.method === "GET") return Response.json(lookView(await loadLook(viewer.id)));
+	if (req.method === "GET") {
+		const prefs = await loadPrefs(viewer.id);
+		return Response.json(lookView(prefs.look, prefs.accent));
+	}
 	if (req.method !== "POST") return Response.json({ error: "use GET or POST" }, { status: 405 });
 	const body = await req.json().catch(() => null);
-	const current = await loadLook(viewer.id);
+	const current = await loadPrefs(viewer.id);
 	const parsed = parseLookWrite(body);
 	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
-	const saved = await commitLook(viewer.id, current, parsed.write, parsed.warnings);
+	const saved = await commitLook(viewer.id, current, parsed.write, parsed.accent, parsed.warnings);
 	const headers = new Headers();
 	for (const c of nightModeCookies(saved.look)) headers.append("set-cookie", c);
-	const view = lookView(saved.look);
+	const view = lookView(saved.look, saved.accent);
 	if (parsed.write.type === "paint" || saved.warnings.length) return Response.json({ ...view, warnings: saved.warnings }, { headers });
 	return Response.json(view, { headers });
 }

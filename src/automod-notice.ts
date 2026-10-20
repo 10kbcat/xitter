@@ -22,7 +22,7 @@ export const NOTICE_SCRIPT = `(function(){
 		ok.type="button";ok.textContent="Okay";
 		ok.style.cssText="height:52px;border-radius:9999px;border:0;font:inherit;font-size:17px;font-weight:700;cursor:pointer;background:"+c[1]+";color:"+c[0];
 		more.href="/account/notices";more.textContent="See everything from staff";
-		more.style.cssText="text-align:center;font-size:15px;color:rgb(29,155,240);text-decoration:none";
+		more.style.cssText="text-align:center;font-size:15px;color:var(--xt-accent,#1d9bf0);text-decoration:none";
 		ok.onclick=function(){
 			ok.disabled=true;
 			fetch("/i/api/xitter/moderation",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-csrf-token":csrf()},body:JSON.stringify({action:"read",id:m.id})})

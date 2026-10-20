@@ -145,6 +145,48 @@ try {
 	check(lightGet.mode === "light" && lightGet.theme === null, "GET mode light and theme null", lightGet);
 	const badMode = await s.post({ mode: "nope" });
 	check(badMode.status === 400, "invalid mode is 400", badMode.status);
+
+	const purple = await (await s.post({ accent: "purple500" })).json();
+	check(purple.accent === "purple500" && purple.mode === "light" && purple.theme === null, "POST named accent keeps native look", purple);
+	const purpleGet = await s.get();
+	check(purpleGet.accent === "purple500", "GET named accent", purpleGet);
+	const homeAcc = await fetch(`${origin}/home`, { headers: { cookie: s.cookie } });
+	const homeHtml = await homeAcc.text();
+	check(homeHtml.includes('"themeColor":"purple500"') || homeHtml.includes('"themeColor": "purple500"'), "shell seeds themeColor from the account accent");
+	check(homeHtml.includes('data-xitter-accent="purple500"'), "html carries the accent id");
+
+	const dimKeep = await (await s.post({ theme: { id: "dim" } })).json();
+	check(dimKeep.theme?.id === "dim" && dimKeep.accent === "purple500" && dimKeep.theme?.accent === "#7856ff", "dim overlay keeps the named accent", dimKeep);
+	const darkKeep = await (await s.post({ mode: "dark" })).json();
+	check(darkKeep.mode === "dark" && darkKeep.theme === null && darkKeep.accent === "purple500", "mode write keeps accent", darkKeep);
+
+	const customAcc = await (await s.post({ accent: "#FF3D7F" })).json();
+	check(customAcc.accent === "#ff3d7f", "POST custom hex accent", customAcc);
+	const customHome = await fetch(`${origin}/home`, { headers: { cookie: s.cookie } });
+	const customHtml = await customHome.text();
+	check(customHtml.includes('"themeColor":"blue500"') || customHtml.includes('"themeColor": "blue500"'), "custom accent still boots the client as blue500");
+	check(customHtml.includes("#ff3d7f"), "boot CSS carries the custom hex");
+
+	const grad = await (await s.post({ accent: { stops: ["#ff3d7f", "#7856ff"], angle: 90 } })).json();
+	check(grad.accent?.stops?.[0] === "#ff3d7f" && grad.accent?.angle === 90, "POST gradient accent", grad);
+	const themed = await (
+		await s.post({
+			theme: {
+				id: "custom",
+				base: "dark",
+				bg: { stops: ["#0a0a12"], angle: 180 },
+				surface: "#121018",
+				text: "#f2f0ff",
+				accent: "#8b7cff",
+				button: { stops: ["#eef0ff"], angle: 180 },
+				buttonText: "#070b1a",
+			},
+		})
+	).json();
+	check(themed.accent === "#8b7cff" && themed.theme?.accent === "#8b7cff", "theme accent and row are the same value", themed);
+
+	const badAcc = await s.post({ accent: "nope" });
+	check(badAcc.status === 400, "invalid accent is 400", badAcc.status);
 } finally {
 	await sql`update users set preferences = ${JSON.stringify(before?.preferences ?? {})}::text::jsonb where lower(screen_name) = lower(${name})`;
 }

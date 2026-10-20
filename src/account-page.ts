@@ -77,7 +77,7 @@ const fontFaces = () => {
 };
 
 const CSS = `
-:root{${vars("light")};--accent:rgb(29 155 240);--accent-hover:rgb(26 140 216);--danger:#f4212e;--success:#00ba7c;--warning:#ffd400}
+:root{${vars("light")};--accent:rgb(29 155 240);--accent-fill:var(--accent);--accent-hover:rgb(26 140 216);--danger:#f4212e;--success:#00ba7c;--warning:#ffd400}
 @media (prefers-color-scheme:dark){:root:not([data-theme]){${vars("dark")}}}
 :root[data-theme="dim"]{${vars("dim")}}
 :root[data-theme="dark"]{${vars("dark")}}
@@ -96,7 +96,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/20px var(--font, 
 .tabs a{flex:1 0 auto;display:flex;justify-content:center;padding:0 16px;color:var(--muted);font-weight:500;text-decoration:none}
 .tabs span{position:relative;display:block;padding:16px 0;white-space:nowrap}
 .tabs a[aria-current]{color:var(--text);font-weight:700}
-.tabs a[aria-current] span::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;border-radius:9999px;background:var(--accent)}
+.tabs a[aria-current] span::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;border-radius:9999px;background:var(--accent-fill,var(--accent))}
 main{flex:1;padding:16px;display:flex;flex-direction:column;gap:12px}
 h1,h2,p,pre{margin:0}
 h1{font-size:23px;line-height:28px;font-weight:800;text-wrap:balance}
@@ -117,7 +117,7 @@ form.row{display:flex}
 input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border:1px solid var(--field);border-radius:4px;background:var(--bg);color:inherit;font:inherit;font-size:16px}
 textarea{min-height:120px;resize:vertical}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-color:transparent}
-button{min-height:36px;padding:0 16px;border:1px solid transparent;border-radius:9999px;background:var(--accent);color:var(--accent-text,#fff);font:inherit;font-weight:700;cursor:pointer;white-space:nowrap;transition:scale 200ms ease-out}
+button{min-height:36px;padding:0 16px;border:1px solid transparent;border-radius:9999px;background:var(--accent-fill,var(--accent));color:var(--accent-text,#fff);font:inherit;font-weight:700;cursor:pointer;white-space:nowrap;transition:scale 200ms ease-out}
 button:active:not(:disabled){scale:.97}
 button.secondary{background:transparent;border-color:var(--outline);color:var(--text)}
 button.danger{background:var(--danger);color:#fff}
@@ -166,15 +166,16 @@ type PageOptions = {
 };
 
 export async function accountPage({ req, title, body, viewer, status = 200, back, cache = "no-store", referrer = "no-referrer", css = "", head = "" }: PageOptions): Promise<Response> {
-	const { accountVars, nightModeCookies, paletteOf, readLook } = await import("./themes");
+	const { accountVars, accentVars, nightModeCookies, paletteOf, readPrefs } = await import("./themes");
 	const name = settings().instance_name;
 	const night = parseCookies(req).night_mode;
-	let look: ReturnType<typeof readLook> = null;
+	let look: ReturnType<typeof readPrefs>["look"] = null;
 	let extra = "";
 	if (viewer) {
 		const [row] = await sql`select preferences from users where id = ${viewer.id}::bigint`;
-		look = readLook(row?.preferences);
-		if (look?.kind === "painted") extra = `:root[data-theme]{${accountVars(look.theme)}}`;
+		const prefs = readPrefs(row?.preferences);
+		look = prefs.look;
+		extra = look?.kind === "painted" ? `:root[data-theme]{${accountVars(look.theme)}}` : `:root{${accentVars(prefs.accent)}}`;
 	}
 	const theme = paletteOf(look, night);
 	const path = new URL(req.url).pathname;
