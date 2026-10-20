@@ -1,6 +1,7 @@
 // Server-side CSS: deriveTokens, account/boot/page-chrome CSS, font links, background paint.
 
 import { fontSlug } from "../fonts";
+import { STEAM_STILL_PATH, STEAM_VIDEO_PATH, steamStillPath, steamVideoPath } from "../steam-items";
 import { CHIRP, fillOfAccent, type Accent, type BgFit, type BgPosition, type BgRepeat, type BgScale, type BlurPx, type Dim, type PanelOpacity, type Theme } from "./presets";
 import { INK, WHITE, derived, fillCss, mixHex, readableOn, rgba, solidOf } from "./validate";
 
@@ -14,7 +15,12 @@ export type BackgroundPaint = {
 	readonly scale: number;
 	readonly repeat: BgRepeat;
 	readonly panel: number;
+	readonly movie: string | null;
+	readonly mp4: string | null;
+	readonly defid: number | null;
 };
+
+export type SteamMotion = { readonly defid: number; readonly movie: string | null; readonly mp4: string | null };
 
 export type ChromeSlots = {
 	root: string;
@@ -172,9 +178,16 @@ export const PREVIEW_CHROME_SLOTS: ChromeSlots = {
 	search: "#preview.live .search",
 };
 
-function cssUrl(path: string): string {
-	if (typeof path !== "string" || !/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path)) return "none";
-	return `url("${path}")`;
+export function cssUrl(path: string): string {
+	if (typeof path !== "string") return "none";
+	if (/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path) || STEAM_STILL_PATH.test(path)) return `url("${path}")`;
+	return "none";
+}
+
+export function steamMotion(paint: BackgroundPaint | undefined): SteamMotion | null {
+	if (!paint?.defid) return null;
+	if (!paint.movie && !paint.mp4) return null;
+	return { defid: paint.defid, movie: paint.movie, mp4: paint.mp4 };
 }
 
 function finiteOr(v: number | null | undefined, fallback: number): number {
@@ -263,13 +276,8 @@ export function bootCss(theme: Theme, paint?: BackgroundPaint): string {
 
 export async function resolveBackground(userId: string, theme: Theme): Promise<BackgroundPaint | undefined> {
 	const bg = theme.background;
-	if (!bg?.mediaId) return;
-	const { ownedThemePhoto, themeMediaPath, themePosterPath } = await import("../media");
-	const photo = await ownedThemePhoto(userId, bg.mediaId);
-	if (!photo) return;
-	return {
-		image: themeMediaPath(bg.mediaId, photo.ext),
-		still: photo.poster ? themePosterPath(bg.mediaId) : null,
+	if (!bg) return;
+	const knobs = {
 		fit: bg.fit,
 		position: bg.position,
 		dim: bg.dim,
@@ -277,6 +285,32 @@ export async function resolveBackground(userId: string, theme: Theme): Promise<B
 		scale: bg.scale ?? (100 as BgScale),
 		repeat: bg.repeat ?? "repeat",
 		panel: bg.panel ?? (72 as PanelOpacity),
+	};
+	if (bg.steam && !bg.mediaId) {
+		const image = steamStillPath(bg.steam);
+		if (!STEAM_STILL_PATH.test(image)) return;
+		const movie = steamVideoPath(bg.steam, "movie");
+		const mp4 = steamVideoPath(bg.steam, "mp4");
+		return {
+			image,
+			still: image,
+			...knobs,
+			movie: movie && STEAM_VIDEO_PATH.test(movie) ? movie : null,
+			mp4: mp4 && STEAM_VIDEO_PATH.test(mp4) ? mp4 : null,
+			defid: bg.steam.defid,
+		};
+	}
+	if (!bg.mediaId) return;
+	const { ownedThemePhoto, themeMediaPath, themePosterPath } = await import("../media");
+	const photo = await ownedThemePhoto(userId, bg.mediaId);
+	if (!photo) return;
+	return {
+		image: themeMediaPath(bg.mediaId, photo.ext),
+		still: photo.poster ? themePosterPath(bg.mediaId) : null,
+		...knobs,
+		movie: null,
+		mp4: null,
+		defid: null,
 	};
 }
 

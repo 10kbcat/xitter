@@ -7,8 +7,8 @@ import {
 	BACKGROUND_OMITTED,
 	THEME_FILE_MAX,
 	exportTheme,
+	finishBackground,
 	importTheme,
-	mergeSavedBackground,
 	parseLookWrite,
 	sanitiseTheme,
 } from "../src/themes/validate";
@@ -92,9 +92,10 @@ test("a colour save keeps the stored picture", () => {
 		...custom,
 		background: { fit: "cover", position: "top", dim: 10, blur: 2, mediaId: "123" },
 	})!.theme;
-	const next = mergeSavedBackground(previous, custom, "keep", false);
-	expect(next.background?.mediaId).toBe("123");
-	expect(mergeSavedBackground(previous, custom, "clear", false).background).toBeUndefined();
+	const next = finishBackground(previous, custom, "keep", { tag: "none" }, undefined);
+	expect(next.ok && next.theme.background?.mediaId).toBe("123");
+	const cleared = finishBackground(previous, custom, "clear", { tag: "none" }, undefined);
+	expect(cleared.ok && cleared.theme.background).toBeUndefined();
 });
 
 test("peel keeps a picture only on custom themes", () => {
@@ -105,11 +106,13 @@ test("peel keeps a picture only on custom themes", () => {
 	const dim = parseLookWrite({ theme: { id: "dim" } });
 	expect(dim.ok).toBe(true);
 	if (!dim.ok || dim.write.type !== "paint") return;
-	expect(mergeSavedBackground(previous, dim.write.theme, dim.write.peel, dim.write.mediaIdSent).background).toBeUndefined();
+	const dimKept = finishBackground(previous, dim.write.theme, dim.write.peel, dim.write.source, undefined);
+	expect(dimKept.ok && dimKept.theme.background).toBeUndefined();
 	const sunset = parseLookWrite({ theme: { id: "sunset" } });
 	expect(sunset.ok).toBe(true);
 	if (!sunset.ok || sunset.write.type !== "paint") return;
-	expect(mergeSavedBackground(previous, sunset.write.theme, sunset.write.peel, sunset.write.mediaIdSent).background).toBeUndefined();
+	const sunsetKept = finishBackground(previous, sunset.write.theme, sunset.write.peel, sunset.write.source, undefined);
+	expect(sunsetKept.ok && sunsetKept.theme.background).toBeUndefined();
 	const painted = parseLookWrite({
 		theme: {
 			id: "custom",
@@ -124,7 +127,8 @@ test("peel keeps a picture only on custom themes", () => {
 	});
 	expect(painted.ok).toBe(true);
 	if (!painted.ok || painted.write.type !== "paint") return;
-	expect(mergeSavedBackground(previous, painted.write.theme, painted.write.peel, painted.write.mediaIdSent).background?.mediaId).toBe("123");
+	const paintedKept = finishBackground(previous, painted.write.theme, painted.write.peel, painted.write.source, undefined);
+	expect(paintedKept.ok && paintedKept.theme.background?.mediaId).toBe("123");
 	const light = parseLookWrite({ mode: "light" });
 	const dark = parseLookWrite({ mode: "dark" });
 	expect(light.ok && light.write.type === "plain").toBe(true);
@@ -306,6 +310,9 @@ test("page chrome only emits an allowlisted media url", () => {
 		scale: 100,
 		repeat: "repeat",
 		panel: 72,
+		movie: null,
+		mp4: null,
+		defid: null,
 	});
 	const css = pageChromeCss(paint("/media/123.png"));
 	expect(css).toContain('url("/media/123.png")');
@@ -379,6 +386,9 @@ test("page chrome vars match the es5 port and frost rules compose once", () => {
 		scale: 100,
 		repeat: "repeat",
 		panel: 72,
+		movie: null,
+		mp4: null,
+		defid: null,
 		...over,
 	});
 	const fits = ["cover", "contain", "tile"] as const;

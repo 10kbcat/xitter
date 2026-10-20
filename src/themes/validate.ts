@@ -2,6 +2,7 @@
 
 import { validateFamily } from "../fonts";
 import { isId } from "../ids";
+import { readStoredSteam, steamDefId, type SteamDefId, type StoredSteam } from "../steam-items";
 import {
 	ACCENT_IDS,
 	ACCENTS,
@@ -12,6 +13,7 @@ import {
 	themeColorOf,
 	type Accent,
 	type AccentId,
+	type BackgroundKnobs,
 	type BgFit,
 	type BgPosition,
 	type BgRepeat,
@@ -25,6 +27,7 @@ import {
 	type Theme,
 	type ThemeBackground,
 	type ThemeFont,
+	type ThemeFrame,
 } from "./presets";
 
 export type Sanitised = { theme: Theme; warnings: string[] };
@@ -43,15 +46,17 @@ export type ParsedTheme =
 	| { readonly ok: true; readonly theme: Theme; readonly warnings: readonly string[] }
 	| { readonly ok: false; readonly errors: readonly ThemeError[] };
 
-export type SharedBackground = {
-	fit: BgFit;
-	position: BgPosition;
-	dim: Dim;
-	blur: BlurPx;
-	scale: BgScale;
-	repeat: BgRepeat;
-	panel: PanelOpacity;
+export type SharedBackground = BackgroundKnobs & {
+	readonly steam?: { readonly defid: number };
+	readonly mediaId?: MediaId;
 };
+
+export type BackgroundSource =
+	| { readonly tag: "none" }
+	| { readonly tag: "upload"; readonly mediaId: MediaId }
+	| { readonly tag: "steam"; readonly defid: SteamDefId };
+
+export const STEAM_MISSING = "Steam doesn't have that background.";
 export type ImportedTheme = Omit<Theme, "background"> & { background?: SharedBackground };
 export type ImportResult =
 	| { readonly ok: true; readonly theme: ImportedTheme; readonly warnings: readonly string[] }
@@ -109,6 +114,7 @@ const BACKGROUND_FIELDS = [
 	{ key: "repeat", share: true, onImport: "take" },
 	{ key: "panel", share: true, onImport: "take" },
 	{ key: "mediaId", share: false, onImport: "forbid" },
+	{ key: "steam", share: false, onImport: "take" },
 ] as const;
 
 const FONT_KEYS = ["ui", "display"] as const;
@@ -405,16 +411,14 @@ function parseRepeat(v: unknown): BgRepeat | undefined {
 	return v as BgRepeat;
 }
 
-export function sharedBackground(bg: ThemeBackground): SharedBackground {
-	return {
-		fit: bg.fit,
-		position: bg.position,
-		dim: bg.dim,
-		blur: bg.blur,
-		scale: bg.scale,
-		repeat: bg.repeat,
-		panel: bg.panel,
-	};
+export function backgroundKnobs(bg: BackgroundKnobs): BackgroundKnobs {
+	return { fit: bg.fit, position: bg.position, dim: bg.dim, blur: bg.blur, scale: bg.scale, repeat: bg.repeat, panel: bg.panel };
+}
+
+export function sharedBackground(bg: ThemeBackground | BackgroundKnobs): SharedBackground {
+	const out: SharedBackground = backgroundKnobs(bg);
+	if ("steam" in bg && bg.steam) out.steam = { defid: bg.steam.defid };
+	return out;
 }
 
 function pushError(errors: ThemeError[], path: string, message: string) {
@@ -523,8 +527,19 @@ export function copyTheme(theme: Theme): Theme {
 	return out;
 }
 
-function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
+function frameOf(theme: Theme): ThemeFrame {
+	const { background, ...rest } = theme;
+	if (!background) return rest;
+	return { ...rest, background: backgroundKnobs(background) };
+}
+
+export function parseTheme(input: unknown, mode: "read"): { ok: true; theme: Theme; warnings: readonly string[] } | { ok: false; errors: readonly ThemeError[] };
+export function parseTheme(input: unknown, mode: "save" | "import"):
+	| { ok: true; theme: ThemeFrame; source: BackgroundSource; warnings: readonly string[] }
+	| { ok: false; errors: readonly ThemeError[] };
+export function parseTheme(input: unknown, mode: ThemeMode) {
 	const errors: ThemeError[] = [];
+	let source: BackgroundSource = { tag: "none" };
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
 		return { ok: false, errors: [{ path: "", message: "theme must be an object" }] };
 	}
@@ -652,9 +667,32 @@ function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
 			if (panelN !== undefined) background.panel = asPanel(panelN);
 			else if (mode === "read") background.panel = asPanel(72);
 			else pushError(errors, "background.panel", "invalid panel");
-			if ("mediaId" in bgObj) {
+			const hasMedia = "mediaId" in bgObj;
+			const hasSteam = "steam" in bgObj;
+			let readMedia: MediaId | undefined;
+			let readSteam: StoredSteam | undefined;
+			if (mode === "read") {
+				if (hasMedia && isId(bgObj.mediaId)) readMedia = asMediaId(bgObj.mediaId);
+				if (hasSteam) readSteam = readStoredSteam(bgObj.steam);
+				if (readMedia && readSteam) {
+					readMedia = undefined;
+					readSteam = undefined;
+				}
+			} else if (hasMedia && hasSteam) {
+				pushError(errors, "background", "background has two sources");
+			} else if (hasSteam) {
+				const steam = bgObj.steam;
+				if (!steam || typeof steam !== "object" || Array.isArray(steam)) pushError(errors, "background.steam", "invalid steam background");
+				else {
+					const steamObj = steam as Record<string, unknown>;
+					ownUnknown(steamObj, ["defid"], "background.steam", mode, errors);
+					const id = steamDefId(steamObj.defid);
+					if (!id) pushError(errors, "background.steam", "invalid steam background");
+					else source = { tag: "steam", defid: id };
+				}
+			} else if (hasMedia) {
 				if (mode === "import") pushError(errors, "background.mediaId", "forbidden key");
-				else if (isId(bgObj.mediaId)) background.mediaId = asMediaId(bgObj.mediaId);
+				else if (isId(bgObj.mediaId)) source = { tag: "upload", mediaId: asMediaId(bgObj.mediaId) };
 				else if (mode === "save") pushError(errors, "background.mediaId", "invalid media id");
 			}
 			if (
@@ -666,8 +704,12 @@ function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
 				background.repeat &&
 				background.panel !== undefined &&
 				!errors.some((e) => e.path.startsWith("background"))
-			)
-				theme.background = background;
+			) {
+				const knobs = backgroundKnobs(background);
+				if (readMedia) theme.background = { ...knobs, mediaId: readMedia };
+				else if (readSteam) theme.background = { ...knobs, steam: readSteam };
+				else theme.background = knobs;
+			}
 		}
 	}
 
@@ -694,7 +736,8 @@ function parseTheme(input: unknown, mode: ThemeMode): ParsedTheme {
 	clampOpt("link", theme.link, pageBgs, "link", 4.5);
 	clampOpt("inputText", theme.inputText, [theme.inputBg ?? d.inputBg], "input text", 4.5);
 	clampOpt("secondaryButtonText", theme.secondaryButtonText, theme.secondaryButton ? stopsOf(theme.secondaryButton) : pageBgs, "secondary button text", 4.5);
-	return { ok: true, theme, warnings };
+	if (mode === "read") return { ok: true, theme, warnings };
+	return { ok: true, theme: frameOf(theme), source, warnings };
 }
 
 export function sanitiseTheme(input: unknown): Sanitised | null {
@@ -740,9 +783,13 @@ export function importTheme(text: string): ImportResult {
 	const got = parseTheme(envelope.theme, "import");
 	if (!got.ok) return { ok: false, errors: got.errors.map((e) => ({ path: e.path ? `theme.${e.path}` : "theme", message: e.message })) };
 	const warnings = [...got.warnings];
-	if (got.theme.background) warnings.push(BACKGROUND_OMITTED);
 	const theme = copyTheme(got.theme) as ImportedTheme;
-	if (theme.background) theme.background = sharedBackground(theme.background);
+	if (got.source.tag === "steam" && got.theme.background) {
+		theme.background = { ...backgroundKnobs(got.theme.background), steam: { defid: got.source.defid } };
+	} else if (got.theme.background) {
+		warnings.push(BACKGROUND_OMITTED);
+		theme.background = sharedBackground(got.theme.background);
+	}
 	return { ok: true, theme, warnings };
 }
 
@@ -780,30 +827,49 @@ export function themeFileName(theme: Theme): `${string}.xitter-theme.json` {
 	return `${id}.xitter-theme.json`;
 }
 
-export function mergeSavedBackground(previous: Theme | undefined, theme: Theme, peel: "keep" | "clear" | "frame", mediaIdSent: boolean): Theme {
-	if (PRESETS[theme.id]) {
-		if (!theme.background) return theme;
-		const next = copyTheme(theme);
-		delete next.background;
-		return next;
+export function finishBackground(
+	previous: Theme | undefined,
+	frame: ThemeFrame,
+	peel: "keep" | "clear" | "frame",
+	source: BackgroundSource,
+	resolved: StoredSteam | undefined,
+): { ok: true; theme: Theme } | { ok: false; error: typeof STEAM_MISSING } {
+	if (PRESETS[frame.id]) {
+		const theme = copyTheme(frame);
+		delete theme.background;
+		return { ok: true, theme };
 	}
 	if (peel === "keep") {
-		if (!previous?.background) return theme;
-		const next = copyTheme(theme);
-		next.background = previous.background;
-		return next;
+		const theme = copyTheme(frame);
+		if (previous?.background) theme.background = previous.background;
+		return { ok: true, theme };
 	}
 	if (peel === "clear") {
-		const next = copyTheme(theme);
-		delete next.background;
-		return next;
+		const theme = copyTheme(frame);
+		delete theme.background;
+		return { ok: true, theme };
 	}
-	if (theme.background && !mediaIdSent && previous?.background?.mediaId) {
-		const next = copyTheme(theme);
-		next.background = { ...sharedBackground(theme.background), mediaId: previous.background.mediaId };
-		return next;
+	const knobs = frame.background ? backgroundKnobs(frame.background) : undefined;
+	if (!knobs) return { ok: true, theme: copyTheme(frame) };
+	if (source.tag === "steam") {
+		if (!resolved) return { ok: false, error: STEAM_MISSING };
+		const theme = copyTheme(frame);
+		theme.background = { ...knobs, steam: resolved };
+		return { ok: true, theme };
 	}
-	return theme;
+	const theme = copyTheme(frame);
+	if (source.tag === "upload") theme.background = { ...knobs, mediaId: source.mediaId };
+	else if (previous?.background?.mediaId) theme.background = { ...knobs, mediaId: previous.background.mediaId };
+	else if (previous?.background?.steam) theme.background = { ...knobs, steam: previous.background.steam };
+	else theme.background = knobs;
+	return { ok: true, theme };
+}
+
+export function themeForClient(theme: Theme): SharedTheme {
+	const shared = exportTheme(theme).theme;
+	const mediaId = theme.background?.mediaId;
+	if (!mediaId || !shared.background) return shared;
+	return { ...shared, background: { ...shared.background, mediaId } };
 }
 
 export type Mode = "light" | "dark";
@@ -828,7 +894,7 @@ export type LookView = {
 
 export type ClientLook = {
 	readonly night: "0" | "2";
-	readonly theme: Theme | null;
+	readonly theme: SharedTheme | null;
 	readonly accent: string | Gradient;
 	readonly themeColor: AccentId;
 };
@@ -836,7 +902,7 @@ export type ClientLook = {
 export type LookWrite =
 	| { readonly type: "plain"; readonly mode: Mode }
 	| { readonly type: "clear" }
-	| { readonly type: "paint"; readonly theme: Theme; readonly peel: "keep" | "clear" | "frame"; readonly mediaIdSent: boolean }
+	| { readonly type: "paint"; readonly theme: ThemeFrame; readonly peel: "keep" | "clear" | "frame"; readonly source: BackgroundSource }
 	| { readonly type: "keep" };
 
 export type ParsedWrite =
@@ -905,8 +971,8 @@ export function parseLookWrite(body: unknown): ParsedWrite {
 		if (hasMode && mode !== got.theme.base) return { ok: false, error: "invalid mode" };
 		const fromTheme = "accent" in themeBody ? parseAccent(themeBody.accent) ?? parseAccent(got.theme.accent) : undefined;
 		const peel = !("background" in themeBody) ? "keep" : themeBody.background === null ? "clear" : "frame";
-		const mediaIdSent = peel === "frame" && !!themeBody.background && typeof themeBody.background === "object" && "mediaId" in themeBody.background;
-		return { ok: true, write: { type: "paint", theme: got.theme, peel, mediaIdSent }, warnings: got.warnings, accent: extra.accent ?? fromTheme };
+		const source = peel === "frame" ? got.source : { tag: "none" as const };
+		return { ok: true, write: { type: "paint", theme: got.theme, peel, source }, warnings: got.warnings, accent: extra.accent ?? fromTheme };
 	}
 	if (hasMode) {
 		if (!mode) return { ok: false, error: "invalid mode" };
@@ -934,7 +1000,7 @@ export function lookView(look: Look | null, accent: Accent = DEFAULT_ACCENT): Lo
 export function clientLook(look: Look | null, accent: Accent = DEFAULT_ACCENT): ClientLook {
 	return {
 		night: look ? (modeOf(look) === "light" ? "0" : "2") : "2",
-		theme: look?.kind === "painted" ? look.theme : null,
+		theme: look?.kind === "painted" ? themeForClient(look.theme) : null,
 		accent: accentWire(accent),
 		themeColor: themeColorOf(accent),
 	};

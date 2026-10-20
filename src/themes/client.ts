@@ -1,5 +1,6 @@
 // THEME_SCRIPT, the in-page boot script, and LINK_SCOPES it interpolates.
 
+import { STEAM_STILL_PATH, STEAM_VIDEO_PATH } from "../steam-items";
 import { ACCENT_IDS, ACCENTS } from "./presets";
 import { NIGHT_MODE_ATTR } from "./validate";
 
@@ -12,6 +13,8 @@ export const LINK_SCOPES = [
 
 export const THEME_SCRIPT = String.raw`(function(){
 	var X=window.__XITTER__||{};
+	var STEAM_STILL=new RegExp(${JSON.stringify(STEAM_STILL_PATH.source)});
+	var STEAM_VIDEO=new RegExp(${JSON.stringify(STEAM_VIDEO_PATH.source)});
 	var theme=X.theme||null;
 	var look=X.look||null;
 	var accents=${JSON.stringify(ACCENTS)};
@@ -216,6 +219,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 			if(sheet)sheet.textContent="";
 			applyFonts(null);
 			writeBase(false);
+			syncThemeVideo();
 			key="";
 			applyAccentVars();
 			paintAccent();
@@ -224,8 +228,8 @@ export const THEME_SCRIPT = String.raw`(function(){
 		h.setAttribute("data-xitter-theme",t.id||"custom");
 		var v=varsOf(t),k;
 		for(k in v)h.style.setProperty(k,v[k]);
-		var sameBg=t.background&&X.theme&&X.theme.background&&t.background.mediaId&&t.background.mediaId===X.theme.background.mediaId;
-		writeBase(!!sameBg);
+		writeBase(bgMatches(t));
+		syncThemeVideo();
 		applyFonts(t);
 		key="";
 		applyAccentVars();
@@ -736,12 +740,79 @@ export const THEME_SCRIPT = String.raw`(function(){
 	}
 	writeBase(!!(theme&&theme.background));
 	document.head.appendChild(base);
+	var videoCss=document.createElement("style");
+	videoCss.setAttribute("data-xitter-theme-video","");
+	videoCss.textContent='[data-xitter-theme-bg]{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}#preview [data-xitter-theme-bg]{position:absolute}[data-xitter-theme-bg] video{position:absolute;inset:0;width:100%;height:100%}';
+	document.head.appendChild(videoCss);
 	seedThemeColor();
 	applyAccentVars();
 	if(theme)apply(theme);
 	else paintAccent();
 	nudge();
-	function tick(){if(theme)paint();paintAccent();display()}
+	function sourceKey(b){
+		if(!b)return "";
+		if(b.mediaId)return "u:"+b.mediaId;
+		if(b.steam&&b.steam.defid)return "s:"+String(b.steam.defid);
+		return "";
+	}
+	function bgMatches(t){
+		var a=sourceKey(t&&t.background),b=sourceKey(X.theme&&X.theme.background);
+		return !!(a&&a===b);
+	}
+	function mountThemeVideo(host,motion,knobs){
+		if(!host)return;
+		var old=host.querySelector(":scope > [data-xitter-theme-bg]");
+		if(document.documentElement.hasAttribute("data-xitter-decor")||!motion||(!motion.movie&&!motion.mp4)||matchMedia("(prefers-reduced-motion: reduce)").matches||(knobs&&knobs.fit==="tile")){
+			if(old)old.remove();
+			return;
+		}
+		var movie=typeof motion.movie==="string"&&STEAM_VIDEO.test(motion.movie)?motion.movie:"";
+		var mp4=typeof motion.mp4==="string"&&STEAM_VIDEO.test(motion.mp4)?motion.mp4:"";
+		if(!movie&&!mp4){if(old)old.remove();return}
+		var key=movie+"|"+mp4;
+		var v=old&&old.getAttribute("data-key")===key?old.querySelector("video"):null;
+		if(!v){
+			if(old)old.remove();
+			var div=document.createElement("div");
+			div.setAttribute("data-xitter-theme-bg","");
+			div.setAttribute("data-key",key);
+			v=document.createElement("video");
+			v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");
+			var poster=typeof motion.image==="string"&&STEAM_STILL.test(motion.image)?motion.image:"";
+			if(poster)v.poster=poster;
+			if(movie){var s1=document.createElement("source");s1.src=movie;s1.type="video/webm";v.appendChild(s1)}
+			if(mp4){var s2=document.createElement("source");s2.src=mp4;s2.type="video/mp4";v.appendChild(s2)}
+			div.appendChild(v);
+			host.prepend(div);
+			old=div;
+		}
+		var fit=knobs&&knobs.fit==="contain"?"contain":"cover";
+		var pos=knobs&&(knobs.position==="top"||knobs.position==="bottom")?knobs.position:"center";
+		var scale=knobs&&typeof knobs.scale==="number"?knobs.scale:100;
+		var blur=knobs&&typeof knobs.blur==="number"?knobs.blur:0;
+		v.style.objectFit=fit;
+		v.style.objectPosition=pos;
+		v.style.width=scale===100?"100%":scale+"%";
+		v.style.height=scale===100?"100%":scale+"%";
+		v.style.filter=blur?"blur("+blur+"px)":"";
+	}
+	function syncThemeVideo(){
+		if(!document.body)return;
+		var motion=X.steamMotion;
+		var b=theme&&theme.background;
+		var same=bgMatches(theme)&&motion&&b&&b.steam&&String(motion.defid)===String(b.steam.defid);
+		if(!same){
+			var gone=document.body.querySelector(":scope > [data-xitter-theme-bg]");
+			if(gone)gone.remove();
+			return;
+		}
+		var poster="";
+		var chrome=typeof X.pageChrome==="string"?X.pageChrome:"";
+		var found=/--xt-bg-image:url\("([^"]+)"\)/.exec(chrome);
+		if(found&&STEAM_STILL.test(found[1]))poster=found[1];
+		mountThemeVideo(document.body,{defid:motion.defid,movie:motion.movie,mp4:motion.mp4,image:poster},b);
+	}
+	function tick(){if(theme)paint();paintAccent();display();syncThemeVideo()}
 	tick();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;tick()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 })();`;

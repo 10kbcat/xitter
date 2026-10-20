@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import type { Viewer } from "../auth";
 import { validateFamily } from "../fonts";
+import { STEAM_STILL_PATH, STEAM_VIDEO_PATH, shopBrowserScript } from "../steam-items";
 import { FONT_SUGGESTIONS, PRESET_NAMES, PRESETS, SWATCH_IDS, type Fill, type Gradient, type Theme } from "./presets";
 import { OPTIONAL_FILL, OPTIONAL_HEX, derived, fillCss, parseLookWrite, solidOf } from "./validate";
 import { fontLinks, pageChromeRules, PREVIEW_CHROME_SLOTS, resolveBackground } from "./css";
@@ -49,7 +50,7 @@ details.adv summary{cursor:pointer;font-weight:700}
 .fg .line{display:flex;gap:8px;align-items:center;min-width:0}
 .fg .line input{flex:1 1 auto;min-width:0;width:auto;min-height:36px;font-size:15px}
 .fg .fp{margin:0;font-size:14px;line-height:18px;color:var(--text)}
-.live{width:100%;min-width:0;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--pv-bg,#000)}
+.live{position:relative;width:100%;min-width:0;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--pv-bg,#000)}
 @media (min-width:601px){.live{position:sticky;top:61px;z-index:1}}
 .live .stage{display:grid;grid-template-columns:56px minmax(0,1fr) minmax(0,104px);color:var(--pv-text,#e7e9ea);background:transparent}
 .live .nav{padding:8px 6px;display:grid;gap:8px;align-content:start;font-size:12px;font-weight:700;background:var(--pv-header,transparent)}
@@ -108,11 +109,27 @@ ${pageChromeRules(PREVIEW_CHROME_SLOTS)}
 :root[data-theme="dark"] .warns p,:root[data-theme="dim"] .warns p{color:#e6b800}
 .savebar{display:flex;gap:8px;align-items:center;width:100%;padding:4px 0 0}
 .savebar button[type=submit]{flex:1}
+#steam-shop{width:min(720px,calc(100vw - 32px));max-height:80vh;overflow:auto;border:1px solid var(--border);border-radius:16px;background:var(--surface);color:var(--text);padding:16px}
+#steam-shop::backdrop{background:rgb(0 0 0 / .6)}
+.shop{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.shop button{display:flex;flex-direction:column;gap:6px;height:auto;padding:10px;border-radius:12px;background:var(--field);color:var(--text);font-weight:500;white-space:normal;text-align:left;font-size:13px;line-height:16px}
+@media (hover:hover){.shop button:hover:not(:disabled){background:var(--hover)}}
+.shop .bg{width:100%;aspect-ratio:320/140;object-fit:cover;border-radius:8px}
+#cats:empty,#sub:empty{display:none}
+#sub select{width:auto;max-width:100%}
+#sub button{min-width:32px;padding:0 10px}
+.games{display:flex;flex-wrap:wrap;gap:6px}
+.shop>p{grid-column:1/-1}
+[data-xitter-theme-bg]{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+#preview [data-xitter-theme-bg]{position:absolute}
+[data-xitter-theme-bg] video{position:absolute;inset:0;width:100%;height:100%}
 `;
 
 const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 	var f=document.getElementById("custom"),prev=document.getElementById("preview"),warn=document.getElementById("warns");
 	if(!f||!prev)return;
+	var STEAM_STILL=new RegExp(${JSON.stringify(STEAM_STILL_PATH.source)});
+	var STEAM_VIDEO=new RegExp(${JSON.stringify(STEAM_VIDEO_PATH.source)});
 	function val(name){return f[name]?f[name].value:""}
 	function setv(name,v){if(f[name])f[name].value=v}
 	function flagged(name){return val(name+"_set")==="1"}
@@ -320,20 +337,71 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			box.appendChild(p);
 		});
 	}
+	function mountThemeVideo(host,motion,knobs){
+		if(!host)return;
+		var old=host.querySelector(":scope > [data-xitter-theme-bg]");
+		if(document.documentElement.hasAttribute("data-xitter-decor")||!motion||(!motion.movie&&!motion.mp4)||matchMedia("(prefers-reduced-motion: reduce)").matches||(knobs&&knobs.fit==="tile")){
+			if(old)old.remove();
+			return;
+		}
+		var movie=typeof motion.movie==="string"&&STEAM_VIDEO.test(motion.movie)?motion.movie:"";
+		var mp4=typeof motion.mp4==="string"&&STEAM_VIDEO.test(motion.mp4)?motion.mp4:"";
+		if(!movie&&!mp4){if(old)old.remove();return}
+		var key=movie+"|"+mp4;
+		var v=old&&old.getAttribute("data-key")===key?old.querySelector("video"):null;
+		if(!v){
+			if(old)old.remove();
+			var div=document.createElement("div");
+			div.setAttribute("data-xitter-theme-bg","");
+			div.setAttribute("data-key",key);
+			v=document.createElement("video");
+			v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");
+			var poster=typeof motion.image==="string"&&STEAM_STILL.test(motion.image)?motion.image:"";
+			if(poster)v.poster=poster;
+			if(movie){var s1=document.createElement("source");s1.src=movie;s1.type="video/webm";v.appendChild(s1)}
+			if(mp4){var s2=document.createElement("source");s2.src=mp4;s2.type="video/mp4";v.appendChild(s2)}
+			div.appendChild(v);
+			host.prepend(div);
+		}
+		var fit=knobs&&knobs.fit==="contain"?"contain":"cover";
+		var pos=knobs&&(knobs.position==="top"||knobs.position==="bottom")?knobs.position:"center";
+		var scale=knobs&&typeof knobs.scale==="number"?knobs.scale:100;
+		var blur=knobs&&typeof knobs.blur==="number"?knobs.blur:0;
+		v.style.objectFit=fit;
+		v.style.objectPosition=pos;
+		v.style.width=scale===100?"100%":scale+"%";
+		v.style.height=scale===100?"100%":scale+"%";
+		v.style.filter=blur?"blur("+blur+"px)":"";
+	}
+	function showMotionHint(){
+		var note=document.getElementById("bg-motion");
+		if(!note)return;
+		var movie=prev.getAttribute("data-movie")||prev.getAttribute("data-mp4");
+		var tile=(val("bg_fit")||"cover")==="tile";
+		note.hidden=!(movie&&(tile||matchMedia("(prefers-reduced-motion: reduce)").matches));
+	}
+	function previewKnobs(){
+		return {fit:val("bg_fit")||"cover",position:val("bg_position")||"center",scale:Number(val("bg_scale")||100),blur:Number(val("bg_blur")||0)};
+	}
 	function showBg(){
 		var space=document.getElementById("bg-space");
 		if(space)space.hidden=(val("bg_fit")||"cover")!=="tile";
 		var path=prev.getAttribute("data-bg")||"";
-		if(!/^\/media\/\d{1,19}\.(png|gif|webp|jpg)$/.test(path)){
+		var media=/^\/media\/\d{1,19}\.(png|gif|webp|jpg)$/.test(path);
+		if(!media&&!STEAM_STILL.test(path)){
 			prev.removeAttribute("data-bg");
+			prev.removeAttribute("data-movie");
+			prev.removeAttribute("data-mp4");
 			prev.style.setProperty("--xt-bg-image","none");
 			prev.style.setProperty("--xt-bg-still","none");
+			mountThemeVideo(prev,{movie:"",mp4:""},previewKnobs());
+			showMotionHint();
 			return;
 		}
 		var gif=/^\/media\/(\d+)\.gif$/i.exec(path);
 		var vars=pageChromeVars({
 			image:path,
-			still:gif?"/media/poster/"+gif[1]+".jpg":null,
+			still:gif?"/media/poster/"+gif[1]+".jpg":path,
 			fit:val("bg_fit")||"cover",
 			position:val("bg_position")||"center",
 			dim:Number(val("bg_dim")||0),
@@ -343,6 +411,8 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			panel:Number(val("bg_panel")||72)
 		});
 		for(var k in vars)if(Object.prototype.hasOwnProperty.call(vars,k))prev.style.setProperty(k,vars[k]);
+		mountThemeVideo(prev,{movie:prev.getAttribute("data-movie")||"",mp4:prev.getAttribute("data-mp4")||"",image:path},previewKnobs());
+		showMotionHint();
 	}
 	function setStops(name, list){
 		var row=f.querySelector('[data-stops="'+name+'"]');
@@ -356,7 +426,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			row.appendChild(inp);
 		});
 	}
-	function applyImported(theme){
+	function applyImported(theme, preview){
 		if(!theme||typeof theme!=="object")return;
 		if(theme.base==="light"||theme.base==="dark"){
 			var radio=f.querySelector('input[name="base"][value="'+theme.base+'"]');
@@ -406,6 +476,18 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			setv("bg_scale",theme.background.scale!=null?String(theme.background.scale):"100");
 			setv("bg_repeat",theme.background.repeat||"repeat");
 			setv("bg_panel",theme.background.panel!=null?String(theme.background.panel):"72");
+			var steam=theme.background.steam;
+			var defid=steam?String(steam.defid||""):"";
+			if(/^\d{1,12}$/.test(defid)&&defid!=="0"){
+				setv("background_media","");
+				setv("background_steam",defid);
+				var image=preview&&typeof preview.image==="string"?preview.image:"";
+				var movie=preview&&typeof preview.movie==="string"?preview.movie:"";
+				var mp4=preview&&typeof preview.mp4==="string"?preview.mp4:"";
+				if(STEAM_STILL.test(image))prev.setAttribute("data-bg",image);else prev.removeAttribute("data-bg");
+				if(STEAM_VIDEO.test(movie))prev.setAttribute("data-movie",movie);else prev.removeAttribute("data-movie");
+				if(STEAM_VIDEO.test(mp4))prev.setAttribute("data-mp4",mp4);else prev.removeAttribute("data-mp4");
+			}
 		}
 		draw();
 	}
@@ -420,7 +502,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			if(!data||data.ok===false){showErrors(data&&data.errors);showWarnings([]);return}
 			showErrors([]);
 			showWarnings(data.warnings);
-			applyImported(data.theme);
+			applyImported(data.theme, data.preview);
 		}).catch(function(){showErrors([{path:"",message:"import failed"}])});
 		file.value="";
 	});
@@ -444,6 +526,9 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			setv("background_on","1");
 			setv("background_clear","");
 			setv("background_media",done.media_id_string);
+			setv("background_steam","");
+			prev.removeAttribute("data-movie");
+			prev.removeAttribute("data-mp4");
 			if(typeof done.theme_path==="string"){prev.setAttribute("data-bg",done.theme_path);showBg()}
 		}).catch(function(err){if(note)note.textContent=err&&err.message?err.message:"upload failed"});
 		bgFile.value="";
@@ -453,8 +538,32 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 		setv("background_clear","1");
 		setv("background_on","");
 		setv("background_media","");
+		setv("background_steam","");
 		prev.removeAttribute("data-bg");
+		prev.removeAttribute("data-movie");
+		prev.removeAttribute("data-mp4");
 		showBg();
+	});
+	var bgSteam=document.getElementById("bg-steam");
+	var steamShop=document.getElementById("steam-shop");
+	if(bgSteam&&steamShop)bgSteam.addEventListener("click",function(){steamShop.showModal()});
+	var shop=document.getElementById("shop");
+	if(shop)shop.addEventListener("xitter-shop-pick",function(e){
+		var d=e.detail||{};
+		var defid=String(d.defid||"");
+		if(!/^\d{1,12}$/.test(defid)||defid==="0")return;
+		var appid=String(d.appid||"");
+		function built(file){return /^\d{1,10}$/.test(appid)&&file?"/public/steam/"+appid+"/"+file:""}
+		var image=built(d.image),movie=built(d.movie),mp4=built(d.mp4);
+		setv("background_on","1");
+		setv("background_clear","");
+		setv("background_steam",defid);
+		setv("background_media","");
+		if(STEAM_STILL.test(image))prev.setAttribute("data-bg",image);else prev.removeAttribute("data-bg");
+		if(STEAM_VIDEO.test(movie))prev.setAttribute("data-movie",movie);else prev.removeAttribute("data-movie");
+		if(STEAM_VIDEO.test(mp4))prev.setAttribute("data-mp4",mp4);else prev.removeAttribute("data-mp4");
+		showBg();
+		if(steamShop&&steamShop.close)steamShop.close();
 	});
 	["bg_fit","bg_position","bg_dim","bg_blur","bg_scale","bg_repeat","bg_panel"].forEach(function(name){
 		var el=f[name];
@@ -540,7 +649,12 @@ function fromForm(f: FormData): { clear?: true; theme?: unknown } {
 			panel: Number(f.get("bg_panel") ?? 72),
 		};
 		const mediaId = String(f.get("background_media") ?? "");
-		if (mediaId) background.mediaId = mediaId;
+		const steamId = String(f.get("background_steam") ?? "");
+		if (mediaId && steamId) {
+			background.mediaId = mediaId;
+			background.steam = { defid: steamId };
+		} else if (steamId) background.steam = { defid: steamId };
+		else if (mediaId) background.mediaId = mediaId;
 		theme.background = background;
 	}
 	return { theme };
@@ -564,8 +678,11 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 		colorRow(label, name, hex(typeof colors[name] === "string" ? (colors[name] as string) : fallback), set(name));
 	const fonts = FONT_SUGGESTIONS.map((n) => `<option value="${esc(n)}">`).join("");
 	const bg = current?.background;
-	const ownedBg = bg?.mediaId ? await resolveBackground(viewer.id, current!) : undefined;
-	const bgPath = ownedBg && /^\/media\/\d{1,19}\.(?:png|gif|webp|jpg)$/.test(ownedBg.image) ? ownedBg.image : "";
+	const ownedBg = current ? await resolveBackground(viewer.id, current) : undefined;
+	const bgPath = ownedBg && (/^\/media\/\d{1,19}\.(?:png|gif|webp|jpg)$/.test(ownedBg.image) || STEAM_STILL_PATH.test(ownedBg.image)) ? ownedBg.image : "";
+	const moviePath = ownedBg?.movie && STEAM_VIDEO_PATH.test(ownedBg.movie) ? ownedBg.movie : "";
+	const mp4Path = ownedBg?.mp4 && STEAM_VIDEO_PATH.test(ownedBg.mp4) ? ownedBg.mp4 : "";
+	const steamDef = bg && "steam" in bg && bg.steam ? String(bg.steam.defid) : "";
 	const body = `<h1>Theme</h1>
 	<p class="dim">X dropped Dim; this puts it back, and lets you pick a look of your own. Dark themes sit on Lights out, light ones on Default. A typeface rides with a theme — Default / Lights out is X's own and has no custom font. Organisation profile decor keeps its own colours on the profile column.</p>
 	${notices.error ? `<p class="error">${esc(notices.error)}</p>` : ""}
@@ -587,7 +704,7 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 			<label class="choice"><input type="radio" name="base" value="dark"${colors.base !== "light" ? " checked" : ""}>Dark</label>
 			<label class="choice"><input type="radio" name="base" value="light"${colors.base === "light" ? " checked" : ""}>Light</label>
 		</div>
-		<div class="live" id="preview"${bgPath ? ` data-bg="${esc(bgPath)}"` : ""}>
+		<div class="live" id="preview"${bgPath ? ` data-bg="${esc(bgPath)}"` : ""}${moviePath ? ` data-movie="${esc(moviePath)}"` : ""}${mp4Path ? ` data-mp4="${esc(mp4Path)}"` : ""}>
 			<div class="stage">
 				<div class="nav"><span class="on">Home</span><span>Notifications</span><span>Search</span><span>Profile</span></div>
 				<div class="feed">
@@ -680,10 +797,11 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 		</details>
 		<div class="bgopt">
 			<p class="h3">Background image</p>
-			<p class="dim">The picture is not in an exported file. Upload it here, then save.</p>
+			<p class="dim">An upload stays on this account and is left out of the theme file. A Steam background is stored in the file as its item id.</p>
 			<input type="hidden" name="background_on" value="${bg ? "1" : ""}">
 			<input type="hidden" name="background_clear" value="">
-			<input type="hidden" name="background_media" value="${esc(bg?.mediaId ?? "")}">
+			<input type="hidden" name="background_media" value="${esc(bg && "mediaId" in bg ? bg.mediaId ?? "" : "")}">
+			<input type="hidden" name="background_steam" value="${esc(steamDef)}">
 			<div class="line">
 				<label>Fit<select name="bg_fit"><option value="cover"${!bg || bg.fit === "cover" ? " selected" : ""}>Cover</option><option value="contain"${bg?.fit === "contain" ? " selected" : ""}>Contain</option><option value="tile"${bg?.fit === "tile" ? " selected" : ""}>Tile</option></select></label>
 				<label>Position<select name="bg_position"><option value="center"${!bg || bg.position === "center" ? " selected" : ""}>Center</option><option value="top"${bg?.position === "top" ? " selected" : ""}>Top</option><option value="bottom"${bg?.position === "bottom" ? " selected" : ""}>Bottom</option></select></label>
@@ -695,9 +813,11 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 			<label class="ang">Panel opacity<input type="range" name="bg_panel" min="20" max="90" value="${bg?.panel ?? 72}"><span class="deg" data-num="bg_panel">${bg?.panel ?? 72}</span></label>
 			<div class="line">
 				<label class="secondary file">Upload image<input type="file" id="bg-file" accept="image/png,image/gif,image/webp,image/jpeg"></label>
+				<button type="button" class="secondary" id="bg-steam">Steam background</button>
 				<button type="button" class="secondary" id="bg-clear">Remove image</button>
 			</div>
 			<p class="dim" id="bg-note"></p>
+			<p class="dim" id="bg-motion" hidden>Animated Steam backgrounds play as video. Tile mode and reduced motion use the still frame.</p>
 		</div>
 		<div class="savebar">
 			<button type="submit">Save theme</button>
@@ -706,6 +826,14 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 		</div>`,
 		'id="custom" class="editor"',
 	)}
+	<dialog id="steam-shop">
+		<form class="row" id="search" method="dialog"><input name="q" placeholder="Or search by game, like Portal 2" autocomplete="off"><button type="submit" class="small">Search</button></form>
+		<div class="row" id="cats"></div>
+		<div class="row" id="sub"></div>
+		<div id="shop" class="shop" data-pick="theme" data-kind="background" data-lock="1"></div>
+		<button type="button" id="more" hidden>Load more</button>
+	</dialog>
+	<script>${shopBrowserScript()}</script>
 	<script>${EDITOR_SCRIPT}</script>`;
 	const head = fontLinks(current);
 	return accountPage({ req, viewer, title: "Theme", status: notices.error ? 400 : 200, body, css: PAGE_CSS, head });
@@ -720,6 +848,7 @@ export async function themeRoute(req: Request, viewer: Viewer): Promise<Response
 	const parsed = parseLookWrite(fromForm(f!));
 	if (!parsed.ok) return themePage(req, viewer, theme, { error: "That isn't a theme." });
 	const saved = await commitLook(viewer.id, current, parsed.write, parsed.accent, parsed.warnings);
+	if (!saved.ok) return themePage(req, viewer, theme, { error: saved.error });
 	const headers = new Headers({ location: "/account/theme" });
 	for (const c of nightModeCookies(saved.look)) headers.append("set-cookie", c);
 	return new Response(null, { status: 303, headers });

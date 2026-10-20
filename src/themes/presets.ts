@@ -1,5 +1,7 @@
 // Preset palettes, named accents, CHIRP, and the Theme type they instantiate.
 
+import type { StoredSteam } from "../steam-items";
+
 export type Gradient = { stops: string[]; angle: number };
 export type Fill = string | Gradient;
 export type ThemeFont = { ui?: string; display?: string };
@@ -18,7 +20,7 @@ export type BgFit = "cover" | "contain" | "tile";
 export type BgPosition = "center" | "top" | "bottom";
 export type BgRepeat = "repeat" | "space" | "round";
 
-export type ThemeBackground = {
+export type BackgroundKnobs = {
 	fit: BgFit;
 	position: BgPosition;
 	dim: Dim;
@@ -26,8 +28,14 @@ export type ThemeBackground = {
 	scale: BgScale;
 	repeat: BgRepeat;
 	panel: PanelOpacity;
-	mediaId?: MediaId;
 };
+
+export type ThemeBackground =
+	| (BackgroundKnobs & { readonly mediaId?: undefined; readonly steam?: undefined })
+	| (BackgroundKnobs & { readonly mediaId: MediaId; readonly steam?: undefined })
+	| (BackgroundKnobs & { readonly mediaId?: undefined; readonly steam: StoredSteam });
+
+export type ThemeFrame = Omit<Theme, "background"> & { background?: BackgroundKnobs };
 
 export type Theme = {
 	id: string;

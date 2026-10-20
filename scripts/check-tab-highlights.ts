@@ -28,7 +28,9 @@ const looks = [
 	// are live while the floating-layer checks run.
 	...(process.env.BG_MEDIA_ID
 		? [{ name: "custom-image", body: { theme: { ...NAVY.theme, background: { mediaId: process.env.BG_MEDIA_ID, fit: "tile", position: "center", dim: 20, blur: 0, scale: 25, repeat: "repeat", panel: 80 } } } }]
-		: []),
+		: process.env.BG_STEAM_DEFID
+			? [{ name: "custom-image", body: { theme: { ...NAVY.theme, background: { steam: { defid: Number(process.env.BG_STEAM_DEFID) }, fit: "tile", position: "center", dim: 20, blur: 0, scale: 25, repeat: "repeat", panel: 80 } } } }]
+			: []),
 ];
 
 const paths = [

@@ -75,6 +75,22 @@ try {
 	const page = await fetch(`${origin}/account/theme`, { headers: { cookie } });
 	const html = await page.text();
 	check(html.includes("Export theme") && html.includes("Import theme") && html.includes("theme-file"), "editor has share controls");
+
+	if (process.env.STEAM_THEME_LIVE) {
+		const steamFile = fileOf({
+			...theme,
+			background: { fit: "cover", position: "center", dim: 0, blur: 0, scale: 100, repeat: "repeat", panel: 72, steam: { defid: 190993 } },
+		});
+		const steamRes = await fetch(`${origin}/i/api/xitter/theme/import`, {
+			method: "POST",
+			headers: { ...headers, "content-type": "text/plain" },
+			body: steamFile,
+		});
+		const steamImport = (await steamRes.json()) as { ok?: boolean; theme?: { background?: { steam?: { defid?: number } } } };
+		const themeJson = JSON.stringify(steamImport.theme ?? {});
+		check(steamRes.status === 200 && steamImport.ok === true && steamImport.theme?.background?.steam?.defid === 190993, "live import steam defid 190993", steamImport);
+		check(!themeJson.includes('"image"') && !themeJson.includes('"appid"') && !themeJson.includes('"movie"'), "live steam import keeps only the defid");
+	}
 } finally {
 	await sql`update users set preferences = ${JSON.stringify(before?.preferences ?? {})}::text::jsonb where lower(screen_name) = lower(${name})`;
 }

@@ -3,7 +3,7 @@ function finiteOr(v, fallback) {
 }
 
 function cssUrl(path) {
-	if (typeof path !== "string" || !/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$/.test(path)) return "none";
+	if (typeof path !== "string" || !/^\/media\/(?:poster\/)?\d{1,19}\.(?:png|gif|webp|jpg)$|^\/public\/steam\/\d{1,10}\/[0-9a-f]{40}\.(png|jpg|gif)$/.test(path)) return "none";
 	return 'url("' + path + '")';
 }
 
