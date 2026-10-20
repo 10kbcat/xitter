@@ -1455,6 +1455,10 @@ create table if not exists archive_imports (
 	error text,
 	updated_at timestamptz not null default now()
 );
+-- posts the instance's rules left out, and when a paused import (the post
+-- rate limit) carries on
+alter table archive_imports add column if not exists refused int not null default 0;
+alter table archive_imports add column if not exists waiting_until timestamptz;
 
 -- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
 alter table users add column if not exists decor jsonb;

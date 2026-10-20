@@ -2,7 +2,10 @@
 // the central directory first, then each entry's bytes when asked for. Stored
 // and deflated entries, and zip64 for archives past 4 GB (X archives get big).
 
-import { inflateRawSync } from "node:zlib";
+import { createReadStream, createWriteStream, rmSync } from "node:fs";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createInflateRaw, inflateRawSync } from "node:zlib";
 
 export type ZipEntry = { name: string; method: number; size: number; compressed: number; offset: number; encrypted: boolean };
 
@@ -82,24 +85,52 @@ export class Zip {
 		return new Zip(path, entries);
 	}
 
-	// the entry's contents; refuses anything larger than `max` bytes
-	async read(entry: ZipEntry, max: number): Promise<Buffer> {
+	// where the entry's bytes start, after checking it can be read at all and is
+	// no larger than `max` bytes either way: a stored entry's size is only what it
+	// says, its packed length is what gets read
+	private async start(entry: ZipEntry, max: number): Promise<number> {
 		if (entry.encrypted) throw new ZipError(`${entry.name} is encrypted.`);
-		if (entry.size > max) throw new ZipError(`${entry.name} is too large.`);
-		const file = Bun.file(this.path);
-		const header = Buffer.from(await file.slice(entry.offset, entry.offset + 30).arrayBuffer());
+		if (entry.size > max || entry.compressed > max) throw new ZipError(`${entry.name} is too large.`);
+		if (entry.method !== 0 && entry.method !== 8) throw new ZipError(`${entry.name} uses a compression this server can't read.`);
+		const header = Buffer.from(await Bun.file(this.path).slice(entry.offset, entry.offset + 30).arrayBuffer());
 		if (header.length < 30 || u32(header, 0) !== 0x04034b50) throw new ZipError("The zip file is damaged.");
-		const start = entry.offset + 30 + u16(header, 26) + u16(header, 28);
-		const raw = Buffer.from(await file.slice(start, start + entry.compressed).arrayBuffer());
+		return entry.offset + 30 + u16(header, 26) + u16(header, 28);
+	}
+
+	// the entry's contents in memory; for small ones (the JSON, photos)
+	async read(entry: ZipEntry, max: number): Promise<Buffer> {
+		const start = await this.start(entry, max);
+		const raw = Buffer.from(await Bun.file(this.path).slice(start, start + entry.compressed).arrayBuffer());
 		if (entry.method === 0) return raw;
-		if (entry.method === 8) {
-			try {
-				return inflateRawSync(raw, { maxOutputLength: Math.max(max, 1) });
-			} catch {
-				// damaged, or unpacks to more than its size says (a zip bomb)
-				throw new ZipError(`${entry.name} couldn't be unpacked.`);
-			}
+		try {
+			return inflateRawSync(raw, { maxOutputLength: Math.max(max, 1) });
+		} catch {
+			// damaged, or unpacks to more than its size says (a zip bomb)
+			throw new ZipError(`${entry.name} couldn't be unpacked.`);
 		}
-		throw new ZipError(`${entry.name} uses a compression this server can't read.`);
+	}
+
+	// the entry's contents written to `dest` as they're read, never all in
+	// memory (videos); the bytes written
+	async extract(entry: ZipEntry, max: number, dest: string): Promise<number> {
+		const start = await this.start(entry, max);
+		let written = 0;
+		const cap = new Transform({
+			transform(chunk: Buffer, _, done) {
+				written += chunk.length;
+				done(written > max ? new ZipError(`${entry.name} is too large.`) : null, chunk);
+			},
+		});
+		const from = createReadStream(this.path, { start, end: start + Math.max(entry.compressed, 1) - 1 });
+		try {
+			if (entry.compressed === 0) await Bun.write(dest, "");
+			else if (entry.method === 0) await pipeline(from, cap, createWriteStream(dest));
+			else await pipeline(from, createInflateRaw(), cap, createWriteStream(dest));
+		} catch (e) {
+			from.destroy();
+			rmSync(dest, { force: true });
+			throw e instanceof ZipError ? e : new ZipError(`${entry.name} couldn't be unpacked.`);
+		}
+		return written;
 	}
 }

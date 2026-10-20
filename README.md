@@ -66,11 +66,15 @@ copy during setup, and it stays on that machine.
 - Branded hashtags (X's branded likes and hashmoji, Admin > Branded
   hashtags): for a set time, liking a post with the hashtag plays a custom
   Lottie animation, and the hashtag shows an emoji (optionally with hashfetti)
-- Import from X (Settings > Your account > Import from X): upload the archive
-  x.com makes (up to `ARCHIVE_MAX_MB`, default 4096) and its posts, threads,
-  photos, videos and profile come over with their original dates and X ids.
-  Retweets and likes stay behind, mentions stay as text, and imported posts
-  aren't sent to other instances
+- Import from X (off by default; Admin > Settings, feature switches, then
+  Settings > Your account > Import from X): upload the archive x.com makes
+  (up to `ARCHIVE_MAX_MB`, default 1024) and its posts, threads, photos,
+  videos and profile come over with their original dates and X ids. Imported
+  posts pass the same length limit, automod and blocked phrases as new ones
+  (those that don't are left out and counted) and count toward the post rate
+  limit, so the import waits on it. Retweets and likes stay behind, mentions
+  stay as text, imported posts aren't sent to other instances, and an upload
+  that isn't imported within a day is deleted
 - Polls with a photo on each choice
 - Previews when a public post or profile is shared in other apps (Discord,
   Slack, iMessage…): OpenGraph and Twitter card tags and oEmbed, for active,
@@ -223,7 +227,8 @@ cache and autovacuum settings; adjust them for the host's memory and workload.
 | `SMTP_URL` | unset | Own mail server for sign-up codes, password resets and notifications: `smtp://user:pass@host:587` (STARTTLS) or `smtps://user:pass@host:465`; percent-encode `@` in the user; the host must be the name on the server's certificate |
 | `RESEND_API_KEY` | unset | Resend key, used when `SMTP_URL` isn't set or refused a mail; without either nothing is sent |
 | `MAIL_FROM` | `Xitter <noreply@xit.chococat.lol>` | Sender of that mail (its domain must be the mail server's, or verified in Resend) |
-| `ARCHIVE_DIR`, `ARCHIVE_MAX_MB` | `data/imports`, `4096` | Where uploaded X archives wait while they import, and the largest accepted |
+| `ARCHIVE_DIR`, `ARCHIVE_MAX_MB` | `data/imports`, `1024` | Where uploaded X archives wait while they import, and the largest accepted |
+| `ARCHIVE_MAX_JSON_MB` | `64` | Largest JSON file in an archive (`tweets.js` and its parts) an import reads; it's parsed in memory |
 | `KLIPY_API_KEY` | unset | GIF search through [Klipy](https://klipy.com) (see `src/gifs.ts`); without it or `TENOR_API_KEY` the GIF button is hidden |
 | `TENOR_API_KEY` | unset | GIF search through Tenor's v2 API instead, used when `KLIPY_API_KEY` isn't set |
 

@@ -94,7 +94,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	if (u?.notices) links.push({ href: "/account/notices", text: "Staff notices", description: `Messages, warnings and strikes from the ${s.instance_name} team, and your appeals.`, icon: SHIELD, where: "both" });
 	if (FEDERATION_ON) links.push({ href: "/account/instances", text: "Other instances", description: "Hide accounts and organisations from other instances.", icon: GLOBE, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/passkeys", text: "Passkeys", description: "Sign in with your fingerprint, face or screen lock instead of a password.", icon: KEY, viewBox: "0 -960 960 960", where: "settings" });
-	links.push({ href: "/account/import", text: "Import from X", description: "Bring your posts, photos and videos over from your X archive.", icon: UPLOAD, viewBox: "0 -960 960 960", where: "settings" });
+	if (feature("archive_import")) links.push({ href: "/account/import", text: "Import from X", description: "Bring your posts, photos and videos over from your X archive.", icon: UPLOAD, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD, where: "settings" });
 	return links;
