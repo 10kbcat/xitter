@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"sequence": 8,
+	"sequence": 9,
 	"instances": [
 		{
 			"id": "larp.jye.fyi",
@@ -42,6 +42,13 @@
 			"name": "Xit",
 			"source_url": null,
 			"public_key": "C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w",
+			"state": "active"
+		},
+		{
+			"id": "xitt.flex.pm",
+			"name": "Xittor",
+			"source_url": "https://github.com/Xittered/xitter",
+			"public_key": "954Dw1wqqWqe4XIXEaMx9wmUUBRiChbbl_vPzahgxfY",
 			"state": "active"
 		},
 		{

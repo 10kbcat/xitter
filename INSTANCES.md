@@ -1,6 +1,6 @@
 # Instances
 
-Generated from [instances.json](instances.json), sequence 8. Edit that file, then run
+Generated from [instances.json](instances.json), sequence 9. Edit that file, then run
 `bun scripts/check-instances.ts --write-md` to update this one.
 
 | Instance | Name | State | Key | Source |
@@ -11,6 +11,7 @@ Generated from [instances.json](instances.json), sequence 8. Edit that file, the
 | [x.glitchprod.xyz](https://x.glitchprod.xyz) | Digital Circus | federating | `L2-aSa8he-ufDfTVKQdosl2vW0JyWZMiGae3qhTt1a8` | [code](https://github.com/MDCYT/xitter) |
 | [x.transfur.org](https://x.transfur.org) | Xitter | federating | `swH4RzAMdz0qh_yPtNxYG4yJnWAPTgvXyeGjZ8rVGdI` | [code](https://github.com/Xittered/xitter) |
 | [xit.chococat.lol](https://xit.chococat.lol) | Xit | federating | `C_9Cz5GkJjtSvWngLyVhfSTscLdcYo6Omx_EpSzQU5w` |  |
+| [xitt.flex.pm](https://xitt.flex.pm) | Xittor | federating | `954Dw1wqqWqe4XIXEaMx9wmUUBRiChbbl_vPzahgxfY` | [code](https://github.com/Xittered/xitter) |
 | [xitter.opuadm.com](https://xitter.opuadm.com) | Xitter | federating | `FDWBt_uXkSyKKyM2J_9bYLfryG5N0bHFseMprag-Qv8` | [code](https://github.com/Xittered/xitter) |
 | [xt.iambrdn.com](https://xt.iambrdn.com) | xt.brdn | federating | `eiI4EMp0bupFbJ7EKy5A_MIo_yvhRMbljYSnzozwXIY` | [code](https://github.com/braidenhxyz/xitter-compose) |
 
