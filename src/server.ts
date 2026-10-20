@@ -345,6 +345,8 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/i/flow/add_email") return Response.redirect("/account/email", 302);
 	// and X's automated-account flow (automation.ts)
 	if (p === "/i/flow/enable_automated_account") return Response.redirect("/account/automation", 302);
+	// and X's passkey settings and flows: ours is a page (passkeys.ts)
+	if (/^\/(settings|i\/flow)\/.*passkey/i.test(p)) return Response.redirect("/account/passkeys", 302);
 	// the built-in "All" list (lists.ts)
 	if (p === "/all") return Response.redirect("/i/lists/1", 302);
 	if (p === "/login" || p === "/signup" || p.startsWith("/i/flow/")) {
