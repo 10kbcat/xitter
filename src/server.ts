@@ -53,7 +53,7 @@ import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 import { noteAppealsRoute } from "./note-appeals";
 import { decorCatalog, decorFor, decorRoute, decorShop, steamFile } from "./decor";
-import { sanitiseTheme, themeApi, themeRoute } from "./themes";
+import { nightModeCookies, readLook, themeApi, themeRoute } from "./themes";
 import { serveFont } from "./fonts";
 
 const MIME: Record<string, string> = {
@@ -436,16 +436,18 @@ async function route(req: Request): Promise<Response | undefined> {
 	const [communityRows, flagRows, links] = viewer
 		? await Promise.all([
 			sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`,
-			sql`select education_flags, preferences->'theme' as theme from users where id = ${viewer.id}::bigint`,
+			sql`select education_flags, preferences from users where id = ${viewer.id}::bigint`,
 			menuLinks(viewer.id),
 		])
 		: [[], [], []];
-	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links, sanitiseTheme(flagRows[0]?.theme)?.theme ?? null);
-	if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
+	const look = readLook(flagRows[0]?.preferences);
+	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links, look);
 	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
 	// a guest token left from the signed-out page makes the signed-in client act
 	// as a guest (no csrf header, every write refused)
 	if (viewer && /(?:^|;\s*)gt=/.test(req.headers.get("cookie") ?? "")) headers.append("set-cookie", "gt=; Path=/; Max-Age=0");
+	for (const c of nightModeCookies(look)) headers.append("set-cookie", c);
+	if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500, headers });
 	return new Response(page, { headers });
 }
 

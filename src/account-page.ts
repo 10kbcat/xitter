@@ -8,7 +8,6 @@ import { menuLinks } from "./tidy";
 export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 type Theme = "light" | "dim" | "dark";
-const THEMES: Record<string, Theme> = { "0": "light", "1": "dim", "2": "dark" };
 
 const TOKENS: Record<Theme, Record<string, string>> = {
 	light: {
@@ -167,18 +166,17 @@ type PageOptions = {
 };
 
 export async function accountPage({ req, title, body, viewer, status = 200, back, cache = "no-store", referrer = "no-referrer", css = "", head = "" }: PageOptions): Promise<Response> {
+	const { accountVars, nightModeCookies, paletteOf, readLook } = await import("./themes");
 	const name = settings().instance_name;
-	let theme = THEMES[parseCookies(req).night_mode ?? ""];
+	const night = parseCookies(req).night_mode;
+	let look: ReturnType<typeof readLook> = null;
 	let extra = "";
 	if (viewer) {
-		const { sanitiseTheme, accountVars } = await import("./themes");
-		const [row] = await sql`select preferences->'theme' as theme from users where id = ${viewer.id}::bigint`;
-		const got = sanitiseTheme(row?.theme);
-		if (got) {
-			theme = got.theme.id === "dim" ? "dim" : got.theme.base === "light" ? "light" : "dark";
-			extra = `:root[data-theme]{${accountVars(got.theme)}}`;
-		}
+		const [row] = await sql`select preferences from users where id = ${viewer.id}::bigint`;
+		look = readLook(row?.preferences);
+		if (look?.kind === "painted") extra = `:root[data-theme]{${accountVars(look.theme)}}`;
 	}
+	const theme = paletteOf(look, night);
 	const path = new URL(req.url).pathname;
 	const links = viewer ? await menuLinks(viewer.id) : [];
 	const tabs = links.length
@@ -211,7 +209,8 @@ ${body}
 </html>`;
 	// never inside another site's frame: these pages hold one-click actions
 	// (authorizing an app, removing 2FA) a hidden frame could be clicked into
-	const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" };
-	if (referrer) headers["referrer-policy"] = referrer;
+	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" });
+	if (referrer) headers.set("referrer-policy", referrer);
+	if (viewer) for (const c of nightModeCookies(look)) headers.append("set-cookie", c);
 	return new Response(html, { status, headers });
 }

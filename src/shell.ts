@@ -12,7 +12,7 @@ import { ERROR_SCRIPT } from "./errors";
 import { BADGES_SCRIPT } from "./badges";
 import { DECOR_SCRIPT } from "./decor";
 import { DECORATIONS_SCRIPT } from "./decorations";
-import { THEME_SCRIPT, bootCss, fontLinks, swatches, type Theme } from "./themes";
+import { THEME_SCRIPT, bootCss, clientLook, fontLinks, swatches, type Look } from "./themes";
 import { NOTICE_SCRIPT } from "./automod-notice";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
 import { PUBLIC_ORIGIN } from "./config";
@@ -259,7 +259,8 @@ let runtimePatched: { sha: string; text: string } | undefined;
 // With no user the client boots signed out, for the sign-in dialog.
 // `multi`: other accounts are signed in too (auth_multi), so the account menu
 // asks for them.
-export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = [], theme: Theme | null = null): string | undefined {
+export function shell(user: User | null, multi = false, inCommunity = false, educationFlags: Record<string, number> = {}, links: MenuLink[] = [], look: Look | null = null): string | undefined {
+	const theme = look?.kind === "painted" ? look.theme : null;
 	const loaded = loadBuild();
 	if (!loaded) return undefined;
 	const { build, runtime } = loaded;
@@ -283,7 +284,7 @@ ${FLAG_PICKER_CSS}
 ${STICKER_PICKER_CSS}${theme ? bootCss(theme) : ""}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links), theme, themePresets: swatches() })};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links), theme, look: look ? clientLook(look) : null, themePresets: swatches() })};
 ${user ? ERROR_SCRIPT : ""}
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}

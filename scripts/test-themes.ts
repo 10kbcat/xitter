@@ -3,13 +3,22 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	LINK_SCOPES,
+	NIGHT_MODE_ATTR,
 	PRESETS,
 	SWATCH_IDS,
+	THEME_SCRIPT,
+	applyWrite,
 	contrast,
 	derived,
 	deriveTokens,
 	mixHex,
+	modeOf,
+	nightModeCookies,
+	paletteOf,
 	parseHex,
+	parseLookWrite,
+	readLook,
 	sanitiseTheme,
 } from "../src/themes";
 import {
@@ -416,4 +425,75 @@ function existsWoff(slug: string) {
 
 afterAll(() => {
 	rmSync(dir, { recursive: true, force: true });
+});
+
+test("a theme-only row is painted and its mode is the theme base", () => {
+	const look = readLook({ theme: { id: "dim" } });
+	expect(look?.kind).toBe("painted");
+	if (look?.kind !== "painted") return;
+	expect(look.theme).toEqual(PRESETS.dim);
+	expect(modeOf(look)).toBe("dark");
+	expect("mode" in look).toBe(false);
+});
+
+test("a mode row is native and a sibling mode does not override a theme", () => {
+	expect(readLook({ mode: "light" })).toEqual({ kind: "native", mode: "light" });
+	const glued = readLook({ theme: { id: "dim" }, mode: "light" });
+	expect(glued?.kind).toBe("painted");
+	expect(modeOf(glued!)).toBe("dark");
+});
+
+test("clear keeps the painted mode and leaves an absent look absent", () => {
+	const painted = readLook({ theme: { id: "dim" } });
+	const write = parseLookWrite({ clear: true });
+	expect(write.ok).toBe(true);
+	if (!write.ok) return;
+	expect(applyWrite(painted, write.write)).toEqual({ kind: "native", mode: "dark" });
+	expect(applyWrite(null, write.write)).toBeNull();
+	expect(applyWrite({ kind: "native", mode: "light" }, write.write)).toEqual({ kind: "native", mode: "light" });
+});
+
+test("invalid mode is refused and mode with a null theme is native", () => {
+	const bad = parseLookWrite({ mode: "dim" });
+	expect(bad.ok).toBe(false);
+	if (!bad.ok) expect(bad.error).toBe("invalid mode");
+	expect(parseLookWrite({ mode: "light", clear: true }).ok).toBe(false);
+	expect(parseLookWrite({ mode: "light", theme: { id: "dim" } }).ok).toBe(false);
+	const native = parseLookWrite({ mode: "light", theme: null });
+	expect(native.ok).toBe(true);
+	if (!native.ok) return;
+	expect(applyWrite(null, native.write)).toEqual({ kind: "native", mode: "light" });
+	const plain = parseLookWrite({ mode: "dark" });
+	expect(plain.ok).toBe(true);
+	if (plain.ok) expect(applyWrite({ kind: "painted", theme: PRESETS.dim! }, plain.write)).toEqual({ kind: "native", mode: "dark" });
+});
+
+test("night_mode cookies are 0 or 2 with the shared attributes and no HttpOnly", () => {
+	const light = nightModeCookies(readLook({ mode: "light" }));
+	const dim = nightModeCookies(readLook({ theme: { id: "dim" } }));
+	expect(light).toEqual([`night_mode=0; ${NIGHT_MODE_ATTR}`]);
+	expect(dim).toEqual([`night_mode=2; ${NIGHT_MODE_ATTR}`]);
+	expect(light[0]).toBe("night_mode=0; Path=/; Max-Age=31536000; SameSite=Lax");
+	expect(dim[0]).toBe("night_mode=2; Path=/; Max-Age=31536000; SameSite=Lax");
+	expect(light[0]?.includes("HttpOnly")).toBe(false);
+	expect(dim[0]?.includes("HttpOnly")).toBe(false);
+	expect(nightModeCookies(null)).toEqual([]);
+	expect(paletteOf(null, "1")).toBe("dark");
+	expect(paletteOf(readLook({ theme: { id: "dim" } }))).toBe("dim");
+});
+
+test("display posts a mode and link scopes repaint accent text with the link colour", () => {
+	expect(THEME_SCRIPT).toContain('post({mode:mode}');
+	expect(THEME_SCRIPT).toContain('onMode("light")');
+	expect(THEME_SCRIPT).toContain('onMode("dark")');
+	expect(THEME_SCRIPT).not.toContain("post({clear:true}");
+	expect(THEME_SCRIPT).toContain('post({theme:{id:"dim"}}');
+	expect(THEME_SCRIPT).not.toContain("getComputedStyle(document.body)");
+	expect(THEME_SCRIPT).toContain('sessionStorage.getItem("xitter-theme-nudge")');
+	expect(THEME_SCRIPT).toContain(JSON.stringify(LINK_SCOPES));
+	expect(THEME_SCRIPT).toContain('wrap(scope+" "+sel)+"{color:var(--xt-link)!important}"');
+	expect(THEME_SCRIPT).toContain('wrap(scope+sel)+"{color:var(--xt-link)!important}"');
+	expect(THEME_SCRIPT).toContain('svg[data-testid="icon-verified"]');
+	expect(THEME_SCRIPT).toContain("data-xitter-decor");
+	expect(THEME_SCRIPT).toContain(NIGHT_MODE_ATTR);
 });

@@ -31,9 +31,9 @@ try {
 	check(none.theme === null, "GET theme is none", none);
 
 	const dim = await (await s.post({ theme: { id: "dim" } })).json();
-	check(dim.theme?.id === "dim" && dim.theme?.bg?.stops?.[0] === "#15202b", "POST dim stores dim", dim);
+	check(dim.theme?.id === "dim" && dim.theme?.bg?.stops?.[0] === "#15202b" && dim.mode === "dark", "POST dim stores dim and mode dark", dim);
 	const got = await s.get();
-	check(got.theme?.id === "dim" && got.theme?.text === "#f7f9f9", "GET returns dim", got);
+	check(got.theme?.id === "dim" && got.theme?.text === "#f7f9f9" && got.mode === "dark", "GET returns dim and mode", got);
 
 	const custom = await (
 		await s.post({
@@ -65,6 +65,14 @@ try {
 	await s.post({ theme: { id: "dim" } });
 	const home = await fetch(`${origin}/home`, { headers: { cookie: s.cookie } });
 	const html = await home.text();
+	const homeNight = home.headers.getSetCookie().find((c) => c.startsWith("night_mode="));
+	check(homeNight === "night_mode=2; Path=/; Max-Age=31536000; SameSite=Lax", "home sets night_mode from the saved look", homeNight);
+	const wrong = await fetch(`${origin}/home`, { headers: { cookie: `${s.cookie}; night_mode=0` } });
+	const forced = wrong.headers.getSetCookie().find((c) => c.startsWith("night_mode="));
+	check(forced === "night_mode=2; Path=/; Max-Age=31536000; SameSite=Lax", "home overrides a wrong night_mode cookie", forced);
+	const login = await fetch(`${origin}/login`, { method: "POST", body: new URLSearchParams({ username: name, password }), redirect: "manual" });
+	const loginNight = login.headers.getSetCookie().find((c) => c.startsWith("night_mode="));
+	check(loginNight === "night_mode=2; Path=/; Max-Age=31536000; SameSite=Lax", "login sets night_mode from the saved look", loginNight);
 	if (home.ok) check(html.includes("__XITTER__") && html.includes('"id":"dim"'), "shell HTML carries the theme JSON");
 	else check(/no pinned client/.test(html), "home without a pinned client is the known empty-build page", home.status);
 
@@ -128,8 +136,15 @@ try {
 	check(missing.status === 404, "unknown font is 404", missing.status);
 
 	const cleared = await (await s.post({ clear: true })).json();
-	check(cleared.theme === null, "POST clear removes it", cleared);
-	check((await s.get()).theme === null, "GET returns none after clear");
+	check(cleared.theme === null && cleared.mode === "dark", "POST clear drops the theme and keeps dark", cleared);
+	const afterClear = await s.get();
+	check(afterClear.theme === null && afterClear.mode === "dark", "GET keeps dark mode after clear", afterClear);
+	const light = await (await s.post({ mode: "light" })).json();
+	check(light.mode === "light" && light.theme === null, "POST mode light", light);
+	const lightGet = await s.get();
+	check(lightGet.mode === "light" && lightGet.theme === null, "GET mode light and theme null", lightGet);
+	const badMode = await s.post({ mode: "nope" });
+	check(badMode.status === 400, "invalid mode is 400", badMode.status);
 } finally {
 	await sql`update users set preferences = ${JSON.stringify(before?.preferences ?? {})}::text::jsonb where lower(screen_name) = lower(${name})`;
 }

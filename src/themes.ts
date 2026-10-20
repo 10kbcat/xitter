@@ -1,5 +1,4 @@
-// Dim (X dropped it) and custom themes. Stored in users.preferences.theme;
-// Default / Lights out deletes the key. Pure helpers live at the top so unit
+// Dim (X dropped it) and custom themes. Pure helpers live at the top so unit
 // tests can import them without touching db.ts.
 
 import type { Viewer } from "./auth";
@@ -589,9 +588,121 @@ export function swatches(): { id: string; name: string; bg: Gradient; base: "dar
 	});
 }
 
+export type Mode = "light" | "dark";
+
+export type NativeLook = {
+	readonly kind: "native";
+	readonly mode: Mode;
+};
+
+export type PaintedLook = {
+	readonly kind: "painted";
+	readonly theme: Theme;
+};
+
+export type Look = NativeLook | PaintedLook;
+
+export type LookView = {
+	readonly mode: Mode | null;
+	readonly theme: Theme | null;
+};
+
+export type ClientLook = {
+	readonly night: "0" | "2";
+	readonly theme: Theme | null;
+};
+
+export type LookWrite =
+	| { readonly type: "plain"; readonly mode: Mode }
+	| { readonly type: "clear" }
+	| { readonly type: "paint"; readonly theme: Theme };
+
+export type ParsedWrite =
+	| { readonly ok: true; readonly write: LookWrite; readonly warnings: readonly string[] }
+	| { readonly ok: false; readonly error: string };
+
+export type AccountPalette = "light" | "dim" | "dark";
+
+export const NIGHT_MODE_ATTR = "Path=/; Max-Age=31536000; SameSite=Lax";
+
+export const LINK_SCOPES = [
+	'[data-testid="tweetText"]',
+	'[data-testid="UserMention"]',
+	'a[href*="/hashtag/"]',
+	'[data-testid^="card.layout"]',
+] as const;
+
+export function modeOf(look: Look): Mode {
+	return look.kind === "native" ? look.mode : look.theme.base;
+}
+
+export function readLook(preferences: unknown): Look | null {
+	if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return null;
+	const row = preferences as Record<string, unknown>;
+	const theme = sanitiseTheme(row.theme)?.theme;
+	if (theme) return { kind: "painted", theme };
+	if (row.mode === "light" || row.mode === "dark") return { kind: "native", mode: row.mode };
+	return null;
+}
+
+export function parseLookWrite(body: unknown): ParsedWrite {
+	if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "that isn't a theme" };
+	const o = body as Record<string, unknown>;
+	const mode = o.mode === "light" || o.mode === "dark" ? o.mode : undefined;
+	const hasMode = "mode" in o;
+	if (o.clear === true) {
+		if (hasMode) return { ok: false, error: "invalid mode" };
+		return { ok: true, write: { type: "clear" }, warnings: [] };
+	}
+	if (o.theme && typeof o.theme === "object" && !Array.isArray(o.theme)) {
+		const got = sanitiseTheme(o.theme);
+		if (!got) return { ok: false, error: "that isn't a theme" };
+		if (hasMode && mode !== got.theme.base) return { ok: false, error: "invalid mode" };
+		return { ok: true, write: { type: "paint", theme: got.theme }, warnings: got.warnings };
+	}
+	if (hasMode) {
+		if (!mode) return { ok: false, error: "invalid mode" };
+		if ("theme" in o && o.theme !== null) return { ok: false, error: "that isn't a theme" };
+		return { ok: true, write: { type: "plain", mode }, warnings: [] };
+	}
+	if (o.theme === null) return { ok: true, write: { type: "clear" }, warnings: [] };
+	return { ok: false, error: "that isn't a theme" };
+}
+
+export function applyWrite(current: Look | null, write: LookWrite): Look | null {
+	if (write.type === "plain") return { kind: "native", mode: write.mode };
+	if (write.type === "paint") return { kind: "painted", theme: write.theme };
+	if (!current || current.kind === "native") return current;
+	return { kind: "native", mode: current.theme.base };
+}
+
+export function lookView(look: Look | null): LookView {
+	if (!look) return { mode: null, theme: null };
+	return { mode: modeOf(look), theme: look.kind === "painted" ? look.theme : null };
+}
+
+export function nightModeCookies(look: Look | null): readonly string[] {
+	if (!look) return [];
+	return [`night_mode=${modeOf(look) === "light" ? "0" : "2"}; ${NIGHT_MODE_ATTR}`];
+}
+
+export function clientLook(look: Look): ClientLook {
+	return { night: modeOf(look) === "light" ? "0" : "2", theme: look.kind === "painted" ? look.theme : null };
+}
+
+export function paletteOf(look: Look | null, nightCookie?: string): AccountPalette | undefined {
+	if (look?.kind === "painted" && look.theme.id === "dim") return "dim";
+	if (look) return modeOf(look);
+	if (nightCookie === "0") return "light";
+	if (nightCookie === "1" || nightCookie === "2") return "dark";
+	return undefined;
+}
+
 export const THEME_SCRIPT = String.raw`(function(){
 	var X=window.__XITTER__||{};
 	var theme=X.theme||null;
+	var look=X.look||null;
+	var scopes=${JSON.stringify(LINK_SCOPES)};
 	var presets=X.themePresets||[];
 	var sheet,fontSheet,at=0,timer,key="";
 	var CHIRP='TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
@@ -676,18 +787,15 @@ export const THEME_SCRIPT = String.raw`(function(){
 		paint();
 	}
 	function setNight(v){
-		document.cookie="night_mode="+v+"; Path=/; Max-Age=31536000; SameSite=Lax";
+		document.cookie="night_mode="+v+"; ${NIGHT_MODE_ATTR}";
 	}
 	function nudge(){
-		if(!theme)return;
-		var want=theme.base==="light"?"rgb(255, 255, 255)":"rgb(0, 0, 0)";
-		var got=getComputedStyle(document.body).backgroundColor;
-		var cookie=theme.base==="light"?"0":"2";
-		setNight(cookie);
-		if(got!==want){
-			try{if(sessionStorage.getItem("xitter-theme-nudge"))return;sessionStorage.setItem("xitter-theme-nudge","1")}catch(e){return}
-			location.reload();
-		}else{try{sessionStorage.removeItem("xitter-theme-nudge")}catch(e){}}
+		if(!look)return;
+		var digit=String(look.night);
+		if((document.cookie.match(/(?:^|;\s*)night_mode=(\d)/)||[])[1]===digit)return;
+		setNight(digit);
+		try{if(sessionStorage.getItem("xitter-theme-nudge"))return;sessionStorage.setItem("xitter-theme-nudge","1")}catch(e){return}
+		location.reload();
 	}
 	function norm(s){
 		var m=/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)$/.exec(s||"");
@@ -828,6 +936,12 @@ export const THEME_SCRIPT = String.raw`(function(){
 		add("accentOutline","outline-color:var(--xt-accent)!important",false);
 		add("accentBg","background-color:var(--xt-accent)!important",false);
 		add("accentSoft","background-color:var(--xt-accent-soft)!important",false);
+		(found.accentColor||[]).forEach(function(sel){
+			scopes.forEach(function(scope){
+				css.push(wrap(scope+" "+sel)+"{color:var(--xt-link)!important}");
+				css.push(wrap(scope+sel)+"{color:var(--xt-link)!important}");
+			});
+		});
 		add("repost","color:var(--xt-repost)!important;fill:var(--xt-repost)!important",false);
 		add("repostBg","background-color:var(--xt-repost-soft)!important",false);
 		add("like","color:var(--xt-like)!important;fill:var(--xt-like)!important",false);
@@ -843,7 +957,6 @@ export const THEME_SCRIPT = String.raw`(function(){
 		css.push('html[data-xitter-theme] [data-testid="app-text-transition-container"]{color:var(--xt-views)!important}');
 		css.push('html[data-xitter-theme] a[href="/notifications"] div[dir],html[data-xitter-theme] [data-testid="AppTabBar_Notifications_Link"] div[style*="background"]{background-color:var(--xt-badge)!important}');
 		css.push('html[data-xitter-theme] [data-testid="placementTracking"] button,html[data-xitter-theme] a[data-testid="editProfileButton"]{background:var(--xt-secondary-button)!important;border-color:var(--xt-secondary-button-border)!important;color:var(--xt-secondary-button-text)!important}');
-		css.push('html[data-xitter-theme] a,html[data-xitter-theme] [data-testid="UserMention"]{color:var(--xt-link)}');
 		if(theme.font&&fontOk(theme.font.ui)){
 			(found.chirp||[]).forEach(function(sel){css.push('html[data-xitter-theme] '+sel+'{font-family:"'+theme.font.ui+'",'+CHIRP+'!important}')});
 		}
@@ -913,12 +1026,14 @@ export const THEME_SCRIPT = String.raw`(function(){
 		if(inp){inp.removeAttribute("name");inp.setAttribute("aria-label","Dim");inp.checked=false}
 		unselectCard(dim);
 		group.insertBefore(dim,lightsCard);
-		function onNative(){
-			if(picking)return;
-			post({clear:true},function(){apply(null);mark()});
+		function onMode(mode){
+			return function(){
+				if(picking)return;
+				post({mode:mode},function(){apply(null);mark()});
+			};
 		}
-		defCard.addEventListener("click",onNative,true);
-		lightsCard.addEventListener("click",onNative,true);
+		defCard.addEventListener("click",onMode("light"),true);
+		lightsCard.addEventListener("click",onMode("dark"),true);
 		dim.addEventListener("click",function(e){
 			e.preventDefault();e.stopPropagation();
 			picking=true;
@@ -1311,34 +1426,34 @@ function fromForm(f: FormData): { clear?: true; theme?: unknown } {
 	return { theme };
 }
 
-async function saveTheme(userId: string, theme: Theme | null) {
-	const { sql } = await import("./db");
-	if (!theme) await sql`update users set preferences = preferences - 'theme' where id = ${userId}::bigint`;
-	else
-		await sql`update users set preferences = jsonb_set(coalesce(preferences, '{}'), '{theme}', ${JSON.stringify(theme)}::text::jsonb) where id = ${userId}::bigint`;
-}
-
-async function loadTheme(userId: string): Promise<Theme | null> {
-	const { sql } = await import("./db");
-	const [row] = await sql`select preferences->'theme' as theme from users where id = ${userId}::bigint`;
-	return sanitiseTheme(row?.theme)?.theme ?? null;
-}
-
-async function persistTheme(userId: string, got: Sanitised): Promise<Sanitised> {
-	const warnings = [...got.warnings];
-	let theme = got.theme;
-	if (theme.font) {
-		const prep = await prepareFonts(theme.font);
-		warnings.push(...prep.warnings);
-		if (prep.font.ui || prep.font.display) theme = { ...theme, font: prep.font };
+async function commitLook(userId: string, current: Look | null, write: LookWrite, warnings: readonly string[] = []): Promise<{ look: Look | null; warnings: readonly string[] }> {
+	const nextWarnings = [...warnings];
+	let next = write;
+	if (write.type === "paint" && write.theme.font) {
+		const prep = await prepareFonts(write.theme.font);
+		nextWarnings.push(...prep.warnings);
+		if (prep.font.ui || prep.font.display) next = { type: "paint", theme: { ...write.theme, font: prep.font } };
 		else {
-			const next = { ...theme };
-			delete next.font;
-			theme = next;
+			const theme = { ...write.theme };
+			delete theme.font;
+			next = { type: "paint", theme };
 		}
 	}
-	await saveTheme(userId, theme);
-	return { theme, warnings };
+	const look = applyWrite(current, next);
+	await saveLook(userId, look);
+	return { look, warnings: nextWarnings };
+}
+
+async function saveLook(userId: string, look: Look | null): Promise<void> {
+	const { sql } = await import("./db");
+	const patch = look?.kind === "native" ? { mode: look.mode } : look?.kind === "painted" ? { theme: look.theme } : {};
+	await sql`update users set preferences = (coalesce(preferences, '{}') - 'theme' - 'mode') || ${JSON.stringify(patch)}::text::jsonb where id = ${userId}::bigint`;
+}
+
+export async function loadLook(userId: string): Promise<Look | null> {
+	const { sql } = await import("./db");
+	const [row] = await sql`select preferences from users where id = ${userId}::bigint`;
+	return readLook(row?.preferences);
 }
 
 function swatchStyle(g: Gradient) {
@@ -1476,36 +1591,31 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 }
 
 export async function themeRoute(req: Request, viewer: Viewer): Promise<Response> {
-	const current = await loadTheme(viewer.id);
-	if (req.method !== "POST") return themePage(req, viewer, current);
+	const current = await loadLook(viewer.id);
+	const theme = current?.kind === "painted" ? current.theme : null;
+	if (req.method !== "POST") return themePage(req, viewer, theme);
 	const f = await req.formData().catch(() => undefined);
-	if (String(f?.get("csrf") ?? "") !== viewer.csrf) return themePage(req, viewer, current, { error: "That form is out of date. Try again." });
-	const body = fromForm(f!);
-	if (body.clear) {
-		await saveTheme(viewer.id, null);
-		return new Response(null, { status: 303, headers: { location: "/account/theme" } });
-	}
-	const got = sanitiseTheme(body.theme);
-	if (!got) return themePage(req, viewer, current, { error: "That isn't a theme." });
-	await persistTheme(viewer.id, got);
-	return new Response(null, { status: 303, headers: { location: "/account/theme" } });
+	if (String(f?.get("csrf") ?? "") !== viewer.csrf) return themePage(req, viewer, theme, { error: "That form is out of date. Try again." });
+	const parsed = parseLookWrite(fromForm(f!));
+	if (!parsed.ok) return themePage(req, viewer, theme, { error: "That isn't a theme." });
+	const saved = await commitLook(viewer.id, current, parsed.write, parsed.warnings);
+	const headers = new Headers({ location: "/account/theme" });
+	for (const c of nightModeCookies(saved.look)) headers.append("set-cookie", c);
+	return new Response(null, { status: 303, headers });
 }
 
 export async function themeApi(req: Request, viewer: Viewer): Promise<Response> {
-	if (req.method === "GET") {
-		const theme = await loadTheme(viewer.id);
-		return Response.json({ theme });
-	}
+	if (req.method === "GET") return Response.json(lookView(await loadLook(viewer.id)));
 	if (req.method !== "POST") return Response.json({ error: "use GET or POST" }, { status: 405 });
 	const body = await req.json().catch(() => null);
-	if (!body || typeof body !== "object") return Response.json({ error: "that isn't a theme" }, { status: 400 });
-	if ((body as any).clear === true || (body as any).theme === null) {
-		await saveTheme(viewer.id, null);
-		return Response.json({ theme: null });
-	}
-	const got = sanitiseTheme((body as any).theme);
-	if (!got) return Response.json({ error: "that isn't a theme" }, { status: 400 });
-	const saved = await persistTheme(viewer.id, got);
-	return Response.json({ theme: saved.theme, warnings: saved.warnings });
+	const current = await loadLook(viewer.id);
+	const parsed = parseLookWrite(body);
+	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+	const saved = await commitLook(viewer.id, current, parsed.write, parsed.warnings);
+	const headers = new Headers();
+	for (const c of nightModeCookies(saved.look)) headers.append("set-cookie", c);
+	const view = lookView(saved.look);
+	if (parsed.write.type === "paint" || saved.warnings.length) return Response.json({ ...view, warnings: saved.warnings }, { headers });
+	return Response.json(view, { headers });
 }
 

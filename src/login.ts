@@ -3,6 +3,7 @@
 
 import { recordSignIn } from "./login-history";
 import { login, sessionCookies } from "./auth";
+import { loadLook, nightModeCookies } from "./themes";
 import { hit, used } from "./ratelimit";
 import { settings } from "./settings";
 
@@ -49,9 +50,10 @@ ${body}
 export const html = (body: string, status = 200) =>
 	new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
-function signedIn(session: { token: string; csrf: string; userId: string }): Response {
+async function signedIn(session: { token: string; csrf: string; userId: string }): Promise<Response> {
 	const headers = new Headers({ location: "/home" });
 	for (const c of sessionCookies(session)) headers.append("set-cookie", c);
+	for (const c of nightModeCookies(await loadLook(session.userId))) headers.append("set-cookie", c);
 	return new Response(null, { status: 303, headers });
 }
 
