@@ -8,7 +8,7 @@
 //
 // The sign-in dialog (PASSKEY_SCRIPT) offers saved passkeys in the username
 // field's autofill, as its autocomplete="username webauthn" asks, and adds a
-// button under the field.
+// button above the field.
 import { signInCookies } from "./accounts";
 import { accountPage, esc } from "./account-page";
 import { startSession, type Viewer } from "./auth";
@@ -147,7 +147,9 @@ const CLIENT = `(function(){
 })();`;
 
 // On the signed-out page: the dialog's username field (autocomplete "username
-// webauthn") gets saved passkeys in its autofill, and a button below it.
+// webauthn") gets saved passkeys in its autofill, and above it a button in the
+// style of X's "Continue with Google", then X's "or" line.
+const KEY_ICON = "M12.65 10A6 6 0 0 0 7 6a6 6 0 1 0 5.65 8H17v4h4v-4h2v-4H12.65zM7 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4z";
 export const PASSKEY_SCRIPT = `${CLIENT}
 (function(){
 	if(!window.xitterPasskey)return;
@@ -158,12 +160,23 @@ export const PASSKEY_SCRIPT = `${CLIENT}
 		var label=field.closest("label");
 		var block=label&&label.parentElement;
 		if(!block||block.parentElement.querySelector("[data-xitter-passkey]"))return;
+		var light=getComputedStyle(document.body).backgroundColor==="rgb(255, 255, 255)";
+		var box=document.createElement("div");
+		box.setAttribute("data-xitter-passkey","");
+		box.style.cssText="display:flex;flex-direction:column;width:100%;margin:0 0 4px";
 		var b=document.createElement("button");
-		b.type="button";b.textContent="Sign in with a passkey";b.setAttribute("data-xitter-passkey","");
-		var dark=getComputedStyle(document.body).backgroundColor!=="rgb(255, 255, 255)";
-		b.style.cssText="display:block;width:100%;min-height:40px;margin:12px 0 0;padding:0 16px;border-radius:9999px;background:transparent;font:inherit;font-weight:700;font-size:15px;cursor:pointer;border:1px solid "+(dark?"rgb(83, 100, 113)":"rgb(207, 217, 222)")+";color:"+(dark?"rgb(239, 243, 244)":"rgb(15, 20, 25)");
+		b.type="button";
+		b.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px;margin-right:8px;fill:currentColor;flex:none"><path d="${KEY_ICON}"/></svg><span>Sign in with a passkey</span>';
+		b.style.cssText="display:flex;align-items:center;justify-content:center;width:100%;min-height:40px;padding:0 16px;border-radius:9999px;border:1px solid rgb(207, 217, 222);background:#fff;color:rgb(15, 20, 25);font:inherit;font-size:15px;font-weight:700;line-height:20px;cursor:pointer;transition:background-color .2s";
+		b.addEventListener("mouseenter",function(){b.style.backgroundColor="rgb(230, 230, 230)"});
+		b.addEventListener("mouseleave",function(){b.style.backgroundColor="#fff"});
 		b.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();xitterPasskey.signIn()});
-		block.parentElement.insertBefore(b,block.nextSibling);
+		var line=light?"rgb(207, 217, 222)":"rgb(47, 51, 54)";
+		var or=document.createElement("div");
+		or.style.cssText="display:flex;align-items:center;gap:8px;margin:12px 0 8px;color:"+(light?"rgb(15, 20, 25)":"rgb(231, 233, 234)")+";font-size:15px;line-height:20px";
+		or.innerHTML='<div style="flex:1;height:1px;background:'+line+'"></div><span>or</span><div style="flex:1;height:1px;background:'+line+'"></div>';
+		box.appendChild(b);box.appendChild(or);
+		block.parentElement.insertBefore(box,block);
 	}
 	new MutationObserver(look).observe(document.documentElement,{childList:true,subtree:true});
 	look();
