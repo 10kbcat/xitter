@@ -53,6 +53,8 @@ import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 import { noteAppealsRoute } from "./note-appeals";
 import { decorCatalog, decorFor, decorRoute, decorShop, steamFile } from "./decor";
+import { sanitiseTheme, themeApi, themeRoute } from "./themes";
+import { serveFont } from "./fonts";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -70,7 +72,7 @@ const MIME: Record<string, string> = {
 // dev mode it calls the bare paths.
 // The client also calls outside services on its own (grok.com checkout, ads
 // measurement). Requests from the page may only reach this instance.
-const PAGE_CSP = "connect-src 'self' blob: data:";
+const PAGE_CSP = "connect-src 'self' blob: data:; font-src 'self'";
 
 // the instance's own files (logo, icons), open to everyone since the sign-in page uses them
 const PUBLIC_DIR = process.env.PUBLIC_DIR ?? "public";
@@ -209,6 +211,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/decor") return decorFor(url);
 	if (path === "/xitter/decor/shop") return decorShop(url);
 	if (path === "/xitter/decor/catalog") return decorCatalog();
+	if (path === "/xitter/theme") return themeApi(req, viewer);
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
@@ -284,6 +287,8 @@ async function route(req: Request): Promise<Response | undefined> {
 	const p = url.pathname;
 	if (p === "/federation/superadmin/accept") return acceptTicket(req, requestIp(req) ?? "unknown");
 	if (p.startsWith("/i/xitter/decoration/")) return (await decorationFile(url)) ?? new Response("not found", { status: 404 });
+	if (p.startsWith("/i/xitter/fonts/")) return serveFont(url, url.searchParams.has("family") && !!(await getViewer(req)));
+	if (p.startsWith("/i/xitter/")) return new Response("not found", { status: 404 });
 	if (req.method !== "GET" && req.method !== "HEAD" && req.headers.has("cookie")) {
 		const site = req.headers.get("sec-fetch-site");
 		const origin = req.headers.get("origin");
@@ -391,6 +396,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/decoration" && viewer) return decorationRoute(req, viewer);
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p === "/account/decor" && viewer) return decorRoute(req, viewer);
+	if (p === "/account/theme" && viewer) return themeRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
 	if (p.startsWith("/embed/")) return embedImage(p);
@@ -430,11 +436,11 @@ async function route(req: Request): Promise<Response | undefined> {
 	const [communityRows, flagRows, links] = viewer
 		? await Promise.all([
 			sql`select 1 from community_members where user_id = ${viewer.id}::bigint limit 1`,
-			sql`select education_flags from users where id = ${viewer.id}::bigint`,
+			sql`select education_flags, preferences->'theme' as theme from users where id = ${viewer.id}::bigint`,
 			menuLinks(viewer.id),
 		])
 		: [[], [], []];
-	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links);
+	const page = shell(viewer ?? null, !!parseCookies(req).auth_multi, communityRows.length > 0, flagRows[0]?.education_flags ?? {}, links, sanitiseTheme(flagRows[0]?.theme)?.theme ?? null);
 	if (!page) return new Response("no pinned client build: run scripts/fetch-client.ts --token or --har", { status: 500 });
 	const headers = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": PAGE_CSP });
 	// a guest token left from the signed-out page makes the signed-in client act

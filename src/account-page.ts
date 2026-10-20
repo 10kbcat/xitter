@@ -1,6 +1,7 @@
 import { parseCookies, type Viewer } from "./auth";
 import { loadBuild } from "./build";
 import { readCached } from "./client-cache";
+import { sql } from "./db";
 import { settings } from "./settings";
 import { menuLinks } from "./tidy";
 
@@ -83,7 +84,7 @@ const CSS = `
 :root[data-theme="dark"]{${vars("dark")}}
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/20px ${FONT};overflow-wrap:break-word}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/20px var(--font, ${FONT});overflow-wrap:break-word}
 .col{width:min(600px,100%);min-height:100vh;margin:0 auto;border-inline:1px solid var(--border);display:flex;flex-direction:column}
 .bar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:20px;min-height:53px;padding:0 16px;background:var(--bar);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .back{display:grid;place-items:center;width:36px;height:36px;margin-left:-8px;border-radius:50%;color:var(--text);flex:none}
@@ -117,7 +118,7 @@ form.row{display:flex}
 input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border:1px solid var(--field);border-radius:4px;background:var(--bg);color:inherit;font:inherit;font-size:16px}
 textarea{min-height:120px;resize:vertical}
 input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-color:transparent}
-button{min-height:36px;padding:0 16px;border:1px solid transparent;border-radius:9999px;background:var(--accent);color:#fff;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap;transition:scale 200ms ease-out}
+button{min-height:36px;padding:0 16px;border:1px solid transparent;border-radius:9999px;background:var(--accent);color:var(--accent-text,#fff);font:inherit;font-weight:700;cursor:pointer;white-space:nowrap;transition:scale 200ms ease-out}
 button:active:not(:disabled){scale:.97}
 button.secondary{background:transparent;border-color:var(--outline);color:var(--text)}
 button.danger{background:var(--danger);color:#fff}
@@ -162,11 +163,22 @@ type PageOptions = {
 	cache?: string;
 	referrer?: string | null;
 	css?: string;
+	head?: string;
 };
 
-export async function accountPage({ req, title, body, viewer, status = 200, back, cache = "no-store", referrer = "no-referrer", css = "" }: PageOptions): Promise<Response> {
+export async function accountPage({ req, title, body, viewer, status = 200, back, cache = "no-store", referrer = "no-referrer", css = "", head = "" }: PageOptions): Promise<Response> {
 	const name = settings().instance_name;
-	const theme = THEMES[parseCookies(req).night_mode ?? ""];
+	let theme = THEMES[parseCookies(req).night_mode ?? ""];
+	let extra = "";
+	if (viewer) {
+		const { sanitiseTheme, accountVars } = await import("./themes");
+		const [row] = await sql`select preferences->'theme' as theme from users where id = ${viewer.id}::bigint`;
+		const got = sanitiseTheme(row?.theme);
+		if (got) {
+			theme = got.theme.id === "dim" ? "dim" : got.theme.base === "light" ? "light" : "dark";
+			extra = `:root[data-theme]{${accountVars(got.theme)}}`;
+		}
+	}
 	const path = new URL(req.url).pathname;
 	const links = viewer ? await menuLinks(viewer.id) : [];
 	const tabs = links.length
@@ -183,7 +195,8 @@ export async function accountPage({ req, title, body, viewer, status = 200, back
 <meta name="color-scheme" content="${theme ? TOKENS[theme].scheme : "light dark"}">
 <title>${esc(title)} · ${esc(name)}</title>
 <link rel="icon" type="image/png" href="/public/favicon.png">
-<style>${fontFaces()}${CSS}${css}</style>
+${head}
+<style>${fontFaces()}${CSS}${extra}${css}</style>
 </head>
 <body>
 <div class="col">
