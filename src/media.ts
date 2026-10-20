@@ -1,3 +1,4 @@
+import { conversationVideoMap } from "./conversation-cards";
 // Uploads: the client's chunked upload (INIT, APPEND, FINALIZE, STATUS),
 // storage on disk, serving, and the media objects attached to posts.
 // Images are stored as uploaded (a GIF may be cropped first); GIFs are served
@@ -402,7 +403,16 @@ async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefi
 // client asks for sizes through the query string or a path suffix, and gets the
 // original either way. Byte ranges are answered so the video player can seek.
 export async function serveMedia(req: Request, pathname: string, viewer: Viewer): Promise<Response> {
+	let body: Blob | undefined | false | null, served: Served | undefined, cache: string | undefined, headers: Record<string, string>, size: number, range: RegExpExecArray | null;
 	const poster = /^\/media\/poster\/(\d{1,19})\.jpg$/.exec(pathname);
+	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
+	const cardVideo = /^\/media\/card-video\/(\d{1,19})\.xml$/.exec(pathname);
+	if (cardVideo && isId(cardVideo[1])) {
+		const served = await servedOf(cardVideo[1]);
+		const cache = served && await cacheFor(viewer, served);
+		if (!served || served.mime !== "video/mp4" || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
+		return new Response(conversationVideoMap(served.id, mediaUrl(served.id, served.mime), served.owner), { headers: { "content-type": "application/xml", "cache-control": cache, "x-content-type-options": "nosniff" } });
+	}
 	if (poster && isId(poster[1])) {
 		const body = await remoteMediaFile(poster[1], true);
 		const served = body && (await servedOf(poster[1]));
@@ -410,15 +420,14 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 		if (!body || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
 		return new Response(body, { headers: { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff" } });
 	}
-	const m = /^\/media\/(?:banner\/)?(\d{1,19})(?:\.[a-z0-9]+)?(?:\/[\w-]+)?$/.exec(pathname);
-	const body = m && isId(m[1]) && (await remoteMediaFile(m[1]));
+	body = m && isId(m[1]) && (await remoteMediaFile(m[1]));
 	if (!m || !body) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
-	const served = await servedOf(m[1]);
-	const cache = served && (await cacheFor(viewer, served));
+	served = await servedOf(m[1]);
+	cache = served && (await cacheFor(viewer, served));
 	if (!served || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
-	const headers: Record<string, string> = { "content-type": served.mime, "cache-control": cache, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
-	const size = body.size;
-	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+	headers = { "content-type": served.mime, "cache-control": cache, "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
+	size = body.size;
+	range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
 	if (range && (range[1] || range[2])) {
 		// "bytes=-N" means the last N bytes
 		const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));

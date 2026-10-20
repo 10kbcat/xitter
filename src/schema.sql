@@ -1443,3 +1443,9 @@ delete from blocks bl using users b, users t where b.id = bl.blocker_id and t.id
 
 -- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
 alter table users add column if not exists decor jsonb;
+
+alter table posts add column if not exists conversation_card jsonb;
+
+alter table posts add column if not exists conversation_card_post_id bigint references posts (id) on delete set null;
+
+update posts set conversation_card = (conversation_card #>> '{}')::jsonb where jsonb_typeof(conversation_card) = 'string';

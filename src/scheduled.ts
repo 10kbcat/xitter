@@ -33,6 +33,7 @@ function cleanPart(value: unknown): Vars {
 		media_ids: ids(r.media_ids).slice(0, 4),
 		exclude_reply_user_ids: ids(r.exclude_reply_user_ids).slice(0, 50),
 	};
+	if (r.xitter_conversation_card !== undefined) throw new PostError("Conversation cards must be published now. Remove the card to save a draft or schedule this post.", 214);
 	if (Array.isArray(r.media_ids) && (r.media_ids.length > 4 || r.media_ids.some((id: unknown) => !isId(id))))
 		throw new PostError("A post can have up to four valid attachments.", 186);
 	if (isId(r.in_reply_to_status_id)) out.in_reply_to_status_id = r.in_reply_to_status_id;
