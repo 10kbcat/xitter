@@ -6,7 +6,7 @@ export type ConversationCard = {
 	choices: { hashtag: string; text: string }[];
 };
 
-export function conversationCard(raw: unknown, forbidden: (text: string) => boolean = () => false): ConversationCard {
+export function conversationCard(raw: unknown, forbidden: (text: string) => boolean = () => false, draft = false): ConversationCard {
 	let data: Record<string, unknown>, title: string, thanks: string, thanksUrl: string, thanksDisplayUrl: string, url: URL, choices: ConversationCard["choices"], seen: Set<string>;
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid conversation card.");
 	data = raw as Record<string, unknown>;
@@ -31,9 +31,10 @@ export function conversationCard(raw: unknown, forbidden: (text: string) => bool
 		if (hashtag && !hashtag.startsWith("#")) hashtag = `#${hashtag}`;
 		hashtag = cardText(hashtag, 20, forbidden);
 		text = cardText(choice.text, 256, forbidden);
-		if (!/^#[\p{L}\p{N}_]+$/u.test(hashtag) || !/[\p{L}_]/u.test(hashtag)) throw new Error("Use a hashtag starting with # and containing letters, numbers or underscores.");
+		if (draft && hashtag === "#") hashtag = "";
+		if (!(draft && !hashtag) && (!/^#[\p{L}\p{N}_]+$/u.test(hashtag) || !/[\p{L}_]/u.test(hashtag))) throw new Error("Use a hashtag starting with # and containing letters, numbers or underscores.");
 		key = hashtag.toLocaleLowerCase();
-		if (seen.has(key)) throw new Error("Each hashtag must be different.");
+		if (hashtag && seen.has(key)) throw new Error("Each hashtag must be different.");
 		seen.add(key);
 		return { hashtag, text };
 	});

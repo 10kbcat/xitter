@@ -62,7 +62,7 @@ export const CONVERSATION_CARD_CSS = `
 `;
 
 export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
-	var editors=new Map(),submission=null,preparedState=null,timer,bootstrapCsrf=window.__XITTER__&&window.__XITTER__.csrf,cookieAtBoot=cookieCsrf(),fetchOriginal=window.fetch,xhrOpen=XMLHttpRequest.prototype.open,xhrSend=XMLHttpRequest.prototype.send,xhrHeader=XMLHttpRequest.prototype.setRequestHeader;
+	var editors=new Map(),submission=null,preparedState=null,pendingRestore=null,timer,bootstrapCsrf=window.__XITTER__&&window.__XITTER__.csrf,cookieAtBoot=cookieCsrf(),fetchOriginal=window.fetch,xhrOpen=XMLHttpRequest.prototype.open,xhrSend=XMLHttpRequest.prototype.send,xhrHeader=XMLHttpRequest.prototype.setRequestHeader;
 	function rootOf(toolbar){
 		var root=toolbar.parentElement;
 		while(root&&!root.querySelector('[contenteditable="true"][data-testid^="tweetTextarea_"]'))root=root.parentElement;
@@ -101,7 +101,7 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 		caption.textContent=label;wrap.appendChild(caption);input.value=value;input.maxLength=max;wrap.appendChild(input);parent.appendChild(wrap);
 		return input;
 	}
-	function edit(toolbar){
+	function edit(toolbar,saved){
 		var panel=document.createElement("section"),state={panel:panel,choices:[],toolbar:toolbar},header,remove,fields,title,thanks,rows,add,preview,previewButtons,footer,note,mediaBox,chooseMedia,previewCard,mediaActions,thanksUrl,thanksDisplayUrl,linkFields,tabs,cardTab,thanksTab,thanksPreview,thanksText,thanksLink;
 		panel.className="xitter-conversation";panel.setAttribute("aria-label","Conversation card settings");
 		header=document.createElement("div");header.className="xc-header";
@@ -173,9 +173,15 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 		}
 		footer=document.createElement("div");footer.className="xc-footer";
 		add=button("Add hashtag",choice);add.className="xc-text-button";footer.appendChild(add);
-		note=document.createElement("p");note.className="xc-note";note.textContent="Publish immediately. Cards can’t be saved as drafts or scheduled.";footer.appendChild(note);panel.appendChild(footer);
+		note=document.createElement("p");note.className="xc-note";note.textContent="Save as a draft or choose a posting time using the composer controls.";footer.appendChild(note);panel.appendChild(footer);
 		title.oninput=update;thanks.oninput=update;thanksUrl.oninput=update;thanksDisplayUrl.oninput=update;state.title=title;state.thanks=thanks;state.thanksUrl=thanksUrl;state.thanksDisplayUrl=thanksDisplayUrl;state.editor=rootOf(toolbar).querySelector('[contenteditable="true"]');
-		theme(panel);editors.set(toolbar,state);mount(state);toolbar.querySelector("[data-xitter-conversation]").setAttribute("aria-expanded","true");choice();syncMedia(state);
+		theme(panel);editors.set(toolbar,state);mount(state);toolbar.querySelector("[data-xitter-conversation]").setAttribute("aria-expanded","true");choice();
+		if(saved){
+			title.value=saved.title||"";thanks.value=saved.thanks||"";thanksUrl.value=saved.thanksUrl||"";thanksDisplayUrl.value=saved.thanksDisplayUrl||"";
+			while(state.choices.length<saved.choices.length)choice();
+			saved.choices.forEach(function(item,index){state.choices[index].hashtag.value=(item.hashtag||"").replace(/^#+/,"");state.choices[index].text.value=item.text||""});update();
+		}
+		syncMedia(state);
 	}
 	function releaseMedia(state){
 		if(state.attachment)state.attachment.classList.remove("xitter-card-attachment");
@@ -204,6 +210,51 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 		result.choices=state.choices.map(function(c){return {hashtag:hashtag(c.hashtag.value),text:c.text.value.trim()}});
 		return result;
 	}
+	function composerToolbars(){
+		var dialogs=document.querySelectorAll('[role="dialog"]'),index,toolbars;
+		for(index=dialogs.length-1;index>=0;index--){toolbars=dialogs[index].querySelectorAll('[data-testid="toolBar"]');if(toolbars.length)return Array.from(toolbars)}
+		if(/^\/compose\/(?:post|tweet)(?:\/|$)/.test(location.pathname||""))return [];
+		return Array.from(document.querySelectorAll('[data-testid="toolBar"]'));
+	}
+	function captureSubview(target){
+		var part,parts,selected=target.closest('[data-testid="scheduleOption"],[data-testid="scheduledTweetIndicator"],[aria-label="Edit media"],[data-testid="altTextWrapper"],.xc-media-actions button:first-child');
+		if(!selected)return;
+		parts=composerToolbars().map(function(toolbar){
+			var root=rootOf(toolbar),editor=root&&root.querySelector('[contenteditable="true"][data-testid^="tweetTextarea_"]'),state=editors.get(toolbar),part={status:editor?String(editor.innerText||editor.textContent||""):""};
+			if(state)part.xitter_conversation_card=settings(state);
+			return part;
+		});
+		if(!parts.some(function(part){return !!part.xitter_conversation_card}))return;
+		part=parts[0];part.thread_tweets=parts.slice(1);
+		pendingRestore={request:part,applied:new Set(),origin:location.pathname,waitForReturn:true,departed:false};
+	}
+	document.addEventListener("pointerdown",function(event){captureSubview(event.target)},true);
+	document.addEventListener("click",function(event){captureSubview(event.target)},true);
+	function restoreSaved(){
+		var toolbars,parts,remaining=false;
+		if(!pendingRestore)return;
+		if(pendingRestore.waitForReturn&&!pendingRestore.departed){
+			if(location.pathname===pendingRestore.origin)return;
+			pendingRestore.departed=true;
+		}
+		if(!/\/compose\/(?:post|tweet)$/.test(location.pathname||"")&&location.pathname!==pendingRestore.origin)return;
+		toolbars=composerToolbars();parts=[pendingRestore.request].concat(pendingRestore.request.thread_tweets||[]);
+		parts.forEach(function(part,index){
+			var toolbar=toolbars[index],root=toolbar&&rootOf(toolbar),editor=root&&root.querySelector('[contenteditable="true"][data-testid^="tweetTextarea_"]'),state=toolbar&&editors.get(toolbar);
+			if(editor&&pendingRestore.applied.has(editor))return;
+			if(!editor||String(editor.innerText||editor.textContent||"").trim()!==String(part.status||"").trim()){remaining=true;return}
+			if(state){releaseMedia(state);state.panel.remove();editors.delete(toolbar);toolbar.querySelector('[data-xitter-conversation]').setAttribute('aria-expanded','false')}
+			if(part.xitter_conversation_card)edit(toolbar,part.xitter_conversation_card);
+			pendingRestore.applied.add(editor);
+		});
+		if(!remaining)pendingRestore=null;
+	}
+	document.addEventListener("xitter:restore-conversation-cards",function(event){
+		if(!event.detail||typeof event.detail!=="object")return;
+		pendingRestore={request:event.detail,applied:new Set()};soon();
+	});
+	window.__XITTER_CONVERSATION_DRAFT_LABEL__=function(card){return card.title||(card.choices||[]).map(function(choice){return choice.hashtag}).filter(Boolean).join(" ")||"Conversation card"};
+	window.__XITTER_CONVERSATION_HAS_DRAFT__=function(){return composerToolbars().some(function(toolbar){return editors.has(toolbar)})};
 	function submitting(target){
 		var ancestor=target,toolbar,state;
 		draw();
@@ -216,21 +267,25 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 	document.addEventListener("click",function(e){if(e.target.closest('[data-testid="tweetButton"],[data-testid="tweetButtonInline"]'))submitting(e.target)},true);
 	document.addEventListener("keydown",function(e){if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)&&e.target.closest('[contenteditable="true"]'))submitting(e.target)},true);
 	function prepare(url,body){
-		var data,vars,matches=[],entry,encoded;
+		var data,vars,matches=[],entry,encoded,unsentParts,toolbars;
 		preparedState=null;
 		if(!/\/graphql\//.test(url)||typeof body!=="string")return body;
 		try{data=JSON.parse(body)}catch(e){return body}
 		encoded=typeof data.variables==="string";
 		try{vars=encoded?JSON.parse(data.variables):data.variables}catch(e){return body}
 		if(!vars)return body;
+		draw();
+		if(/(?:Create|Edit|Update)(?:Scheduled|Draft)/.test(url)&&vars.post_tweet_request){
+			unsentParts=[vars.post_tweet_request].concat(vars.post_tweet_request.thread_tweets||[]);toolbars=composerToolbars();
+			unsentParts.forEach(function(part,index){
+				var toolbar=toolbars[index],state=toolbar&&editors.get(toolbar),root=toolbar&&rootOf(toolbar),editor=root&&root.querySelector('[contenteditable="true"][data-testid^="tweetTextarea_"]');
+				if(state&&editor&&String(editor.innerText||editor.textContent||"").trim()===String(part.status||"").trim()){part.xitter_conversation_card=settings(state);if(!preparedState)preparedState=state}
+			});
+		}
 		editors.forEach(function(state,toolbar){
 			var root,editor;
 			if(!toolbar.isConnected){editors.delete(toolbar);return}
 			root=rootOf(toolbar);editor=root&&root.querySelector('[contenteditable="true"][data-testid^="tweetTextarea_"]');
-			if(/(?:Create|Edit|Update)(?:Scheduled|Draft)/.test(url)){
-				if(vars.post_tweet_request&&editor&&String(editor.innerText||editor.textContent||"").trim()===String(vars.post_tweet_request.status||"").trim())vars.post_tweet_request.xitter_conversation_card=settings(state);
-				return;
-			}
 			if(editor&&String(editor.innerText||editor.textContent||"").trim()===String(vars.tweet_text||"").trim())matches.push(state);
 		});
 		if(/\/CreateTweet(?:\?|$)/.test(url)&&submission){
@@ -278,7 +333,7 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 			}
 			token=csrf();if(token)headers.set("x-csrf-token",token);
 		}
-		state=localApi(url)&&/\/CreateTweet(?:\?|$)/.test(url)?preparedState:null;
+		state=localApi(url)&&/(?:CreateTweet|(?:Create|Edit|Update)(?:Scheduled|Draft)Tweet)(?:\?|$)/.test(url)?preparedState:null;
 		response=await fetchOriginal.call(this,input,options);
 		if(localApi(url)&&/\/graphql\//.test(url))response.clone().json().then(function(data){received(data,state)},function(){});
 		return response;
@@ -322,6 +377,8 @@ export const CONVERSATION_CARD_SCRIPT = String.raw`(function(){
 			},true);
 			slot.parentElement.insertBefore(copy,slot);
 		});
+		restoreSaved();
+		editors.forEach(function(state,toolbar){if(!toolbar.isConnected&&!state.editor.isConnected){releaseMedia(state);editors.delete(toolbar)}});
 	}
 	function soon(){if(!timer)timer=setTimeout(function(){timer=null;draw()},100)}
 	new MutationObserver(soon).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["src","poster"]});

@@ -13,7 +13,8 @@ import { gifHandlers } from "./gifs";
 import { listHandlers } from "./lists";
 import { placeById } from "./places";
 import { conversationCard } from "./conversation-cards";
-import { forbiddenText } from "./names";
+import { checkConversationCard } from "./conversation-card-moderation";
+import { FEDERATION_ON } from "./federation";
 import { PollError, attachPoll } from "./polls";
 import { scheduledHandlers } from "./scheduled";
 import { noteHandlers } from "./notes";
@@ -318,8 +319,7 @@ const bookmarks: Handler = async (viewer, vars) => {
 };
 
 const createTweet: Handler = async (viewer, vars) => {
-	let conversation: ReturnType<typeof conversationCard> | undefined, creative: any, sharedConversation: Awaited<ReturnType<typeof getPost>>, sharedId: string | undefined, id: string, post: Awaited<ReturnType<typeof getPost>>;
-	const text = typeof vars.tweet_text === "string" ? vars.tweet_text.trim() : "";
+	let conversation: ReturnType<typeof conversationCard> | undefined, creative: any, sharedConversation: Awaited<ReturnType<typeof getPost>>, sharedId: string | undefined, id: string, post: Awaited<ReturnType<typeof getPost>>, text: string;
 	const mediaIds: string[] = (Array.isArray(vars.media?.media_entities) ? vars.media.media_entities : [])
 		.map((m: any) => String(m?.media_id ?? ""))
 		.filter(isId);
@@ -328,9 +328,9 @@ const createTweet: Handler = async (viewer, vars) => {
 	const quoteId = typeof vars.attachment_url === "string" ? /\/status(?:es)?\/(\d{1,19})/.exec(vars.attachment_url)?.[1] : undefined;
 	const annotated = (Array.isArray(vars.semantic_annotation_ids) ? vars.semantic_annotation_ids : []).find((x: any) => String(x?.domain_id) === "31")?.entity_id;
 	const communityId = [vars.community_id, annotated].find(isId);
+	text = typeof vars.tweet_text === "string" ? vars.tweet_text.trim() : "";
 	if (vars.xitter_conversation_card !== undefined) {
-		try { conversation = conversationCard(vars.xitter_conversation_card, forbiddenText); }
-		catch (e) { throw new PostError(e instanceof Error ? e.message : "Invalid conversation card.", 214); }
+		conversation = await checkConversationCard(viewer.id, vars.xitter_conversation_card);
 		if (vars.card_uri || vars.attachment_url || vars.edit_options) throw new PostError("Conversation cards cannot be combined with polls, quotes or edits.", 214);
 	}
 	if (typeof vars.card_uri === "string" && vars.card_uri) {
@@ -343,6 +343,7 @@ const createTweet: Handler = async (viewer, vars) => {
 			if (mediaIds.length || vars.attachment_url || previous) throw new PostError("Conversation cards cannot be combined with media, quotes or edits.", 214);
 		} else sharedConversation = undefined;
 	}
+	if (!text && sharedConversation?.conversationCard && FEDERATION_ON) text = [sharedConversation.conversationCard.title, ...sharedConversation.conversationCard.choices.map((choice) => choice.hashtag)].filter(Boolean).join(" ");
 	if (!text && !mediaIds.length && !sharedConversation) throw new PostError("Your post is empty.", 170);
 	if (conversation) {
 		if (mediaIds.length !== 1) throw new PostError("A conversation card needs exactly one image or video.", 214);

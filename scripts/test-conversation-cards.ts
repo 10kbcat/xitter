@@ -7,8 +7,9 @@ import { CONVERSATION_CARD_SCRIPT, CONVERSATION_CARD_CSS } from "../src/conversa
 const card = () => ({ title: "Pick a side", thanks: "Thanks for joining!", choices: [{ hashtag: "#TeamCats", text: "I'm on team cats!" }] });
 
 function harness(options: { csrf?: string; cookie?: string } = {}) {
-	const { document } = parseHTML('<html><body><div id="composer"><div contenteditable="true" data-testid="tweetTextarea_0">Join us</div><div data-testid="toolBar"><button type="button" data-testid="tweetButtonInline">Post</button><div data-testid="ScrollSnap-List"><div class="native-slot"><button type="button" class="native-emoji" aria-label="Add emoji" aria-haspopup="menu"><svg class="native-icon" viewBox="0 0 24 24"><path d="M0 0" /></svg></button></div></div></div></div><article data-testid="tweet"><a href="/alice/status/123"><time>1m</time></a><div role="group"><button data-testid="like">Like</button></div></article></body></html>');
+	const { document } = parseHTML('<html><body><div id="composer" role="dialog"><div contenteditable="true" data-testid="tweetTextarea_0">Join us</div><div data-testid="toolBar"><button type="button" data-testid="tweetButtonInline">Post</button><div data-testid="ScrollSnap-List"><div class="native-slot"><button type="button" class="native-emoji" aria-label="Add emoji" aria-haspopup="menu"><svg class="native-icon" viewBox="0 0 24 24"><path d="M0 0" /></svg></button></div></div></div></div><article data-testid="tweet"><a href="/alice/status/123"><time>1m</time></a><div role="group"><button data-testid="like">Like</button></div></article></body></html>');
 	const requests: any[] = [], timers: (() => void)[] = [];
+	const location = { origin: "https://local.test", pathname: "/compose/post" };
 	const state = { response: {} as any, background: "rgb(255, 255, 255)", foreground: "rgb(15, 20, 25)", accent: "rgb(29, 155, 240)" };
 	const window = { __XITTER__: options.csrf ? { csrf: options.csrf } : {}, fetch: async (input: any, init: any) => {
 		const headers = new Headers(init?.headers ?? input.headers);
@@ -28,9 +29,9 @@ function harness(options: { csrf?: string; cookie?: string } = {}) {
 		this.listeners.load?.();
 	};
 	document.cookie = options.cookie ?? "ct0=current-session-csrf";
-	run(window, document, XHR, observer, (fn: () => void) => { timers.push(fn); return 1; }, Request, { origin: "https://local.test" }, (node: any) => ({ backgroundColor: state.background, color: node.getAttribute?.("aria-label") === "Add emoji" || node.closest?.('[aria-label="Add emoji"]') ? state.accent : state.foreground }));
+	run(window, document, XHR, observer, (fn: () => void) => { timers.push(fn); return 1; }, Request, location, (node: any) => ({ backgroundColor: state.background, color: node.getAttribute?.("aria-label") === "Add emoji" || node.closest?.('[aria-label="Add emoji"]') ? state.accent : state.foreground }));
 	flush();
-	return { document, requests, window, XHR, state, flush };
+	return { document, requests, window, XHR, state, flush, location };
 }
 
 function configure(h: ReturnType<typeof harness>) {
@@ -107,7 +108,7 @@ test("video cards expose the native poster, stream map and dimensions", () => {
 	expect(conversationVideoMap("1", "https://local.test/1.mp4")).toContain("http://twitter.com/schema/videoVMapV2.xsd");
 });
 
-test("successful publication removes settings, while scheduling carries a marker for explicit rejection", async () => {
+test("scheduling preserves card settings and successful publication removes the editor", async () => {
 	const h = harness();
 	configure(h);
 	await h.window.fetch("/i/api/graphql/id/CreateScheduledTweet", { body: JSON.stringify({ variables: { post_tweet_request: { status: "Join us" } } }) });
@@ -644,4 +645,69 @@ test("saving an unrelated draft does not pick up another composer's conversation
 	expect(JSON.parse(h.requests[0].body).variables.post_tweet_request.xitter_conversation_card).toBeUndefined();
 	await h.window.fetch("/graphql/id/CreateDraftTweet", { method: "POST", body: JSON.stringify({ variables: { post_tweet_request: { status: "Join us" } } }) });
 	expect(JSON.parse(h.requests[1].body).variables.post_tweet_request.xitter_conversation_card).toEqual(card());
+});
+
+test("drafts retain incomplete hashtags without allowing them to publish", () => {
+	const draft = conversationCard({ title: "Work in progress", choices: [{ hashtag: "#", text: "" }] }, () => false, true);
+	expect(draft.choices[0].hashtag).toBe("");
+	expect(() => conversationCard(draft)).toThrow(/Use a hashtag/);
+});
+
+test("opening a native draft restores all conversation-card fields and can publish them again", async () => {
+	const h = harness();
+	const saved = { ...card(), thanksUrl: "https://example.com/thanks", thanksDisplayUrl: "example.com", choices: [...card().choices, { hashtag: "#TeamDogs", text: "Go dogs" }] };
+	const event = new h.document.defaultView.CustomEvent("xitter:restore-conversation-cards", { detail: { status: "Join us", xitter_conversation_card: saved } });
+	h.document.dispatchEvent(event);h.flush();
+	expect(h.document.querySelectorAll(".xc-choice")).toHaveLength(2);
+	expect((h.document.querySelector(".xc-fields input") as any).value).toBe(saved.title);
+	expect((h.document.querySelector(".xc-link-fields input") as any).value).toBe(saved.thanksUrl);
+	expect((h.document.querySelectorAll(".xc-choice textarea")[1] as any).value).toBe("Go dogs");
+	expect(h.window.__XITTER_CONVERSATION_HAS_DRAFT__()).toBe(true);
+	await h.window.fetch("/graphql/id/CreateTweet", { method: "POST", body: JSON.stringify({ variables: { tweet_text: "Join us" } }) });
+	expect(JSON.parse(h.requests[0].body).variables.xitter_conversation_card).toEqual(saved);
+});
+
+test("restoring a plain draft clears previous card settings from its reused composer", async () => {
+	const h = harness();
+	const event = new h.document.defaultView.CustomEvent("xitter:restore-conversation-cards", { detail: { status: "Join us" } });
+	configure(h);
+	h.document.dispatchEvent(event);h.flush();
+	expect(h.document.querySelector(".xitter-conversation")).toBeNull();
+	expect(h.window.__XITTER_CONVERSATION_HAS_DRAFT__()).toBe(false);
+	await h.window.fetch("/graphql/id/CreateTweet", { method: "POST", body: JSON.stringify({ variables: { tweet_text: "Join us" } }) });
+	expect(JSON.parse(h.requests[0].body).variables.xitter_conversation_card).toBeUndefined();
+});
+
+test("a text-free draft waits for its modal composer instead of restoring into the home composer", async () => {
+	const h = harness();
+	const root = h.document.querySelector("#composer")!;
+	const editor = h.document.querySelector('[contenteditable="true"]')!;
+	const event = new h.document.defaultView.CustomEvent("xitter:restore-conversation-cards", { detail: { status: "", xitter_conversation_card: card() } });
+	root.removeAttribute("role");editor.textContent = "";
+	h.document.dispatchEvent(event);h.flush();
+	expect(h.document.querySelector(".xitter-conversation")).toBeNull();
+	root.setAttribute("role", "dialog");
+	await h.window.fetch("/graphql/id/HomeTimeline", {});await Bun.sleep(5);h.flush();
+	expect((h.document.querySelector(".xc-fields input") as any).value).toBe("Pick a side");
+});
+
+test("calendar navigation retains card settings when the native composer is remounted", async () => {
+	const h = harness();
+	const schedule = h.document.createElement("button");
+	let replacement: any;
+	configure(h);
+	schedule.setAttribute("data-testid", "scheduleOption");
+	h.document.querySelector('[data-testid="toolBar"]')!.appendChild(schedule);
+	schedule.click();
+	h.location.pathname = "/compose/post/schedule";
+	replacement = h.document.querySelector("#composer")!.cloneNode(true) as any;
+	replacement.querySelector(".xitter-conversation").remove();
+	replacement.querySelector('[data-xitter-conversation]').parentElement.remove();
+	h.document.querySelector("#composer")!.remove();
+	await h.window.fetch("/graphql/id/HomeTimeline", {});await Bun.sleep(5);h.flush();
+	h.document.body.appendChild(replacement);h.location.pathname = "/compose/post";
+	await h.window.fetch("/graphql/id/HomeTimeline", {});await Bun.sleep(5);h.flush();
+	expect((h.document.querySelector(".xc-fields input") as any).value).toBe("Pick a side");
+	await h.window.fetch("/graphql/id/CreateScheduledTweet", { body: JSON.stringify({ variables: { post_tweet_request: { status: "Join us" } } }) });
+	expect(JSON.parse(h.requests.at(-1).body).variables.post_tweet_request.xitter_conversation_card).toEqual(card());
 });

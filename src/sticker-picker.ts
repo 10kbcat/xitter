@@ -6,12 +6,7 @@
 // Material Symbols "sticker", in its own 960 unit box
 const ICON = "M460-360q69 0 120-45t60-113l-320 90q26 32 62 50t78 18ZM294-510l106-30q4-28-14-49t-46-21q-25 0-42.5 17.5T280-550q0 11 4 21t10 19Zm240-70 106-30q5-28-13.5-49T580-680q-25 0-42.5 17.5T520-620q0 11 4 21t10 19Zm106 460H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v440L640-120Zm-40-80v-80q0-33 23.5-56.5T680-360h80v-400H200v560h400Zm0 0Zm-400 0v-560 560Z";
 
-export const STICKER_PICKER_CSS = `
-@media(hover:hover){[data-xitter-sticker]:not(:disabled):not([aria-disabled="true"]):hover{background-color:color-mix(in srgb,currentColor 10%,transparent)!important}}
-[data-xitter-sticker]:focus-visible{background-color:color-mix(in srgb,currentColor 10%,transparent)!important;outline:2px solid currentColor;outline-offset:-2px}
-[data-xitter-sticker]:not(:disabled):not([aria-disabled="true"]):active{background-color:color-mix(in srgb,currentColor 20%,transparent)!important}
-@media(prefers-reduced-motion:reduce){[data-xitter-sticker]{transition:none!important}}
-#xitter-stickers{position:fixed;z-index:10000;width:340px;max-width:calc(100vw - 16px);max-height:min(420px,calc(100vh - 16px));display:flex;flex-direction:column;border-radius:16px;overflow:hidden;font-family:TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-shadow:rgba(101,119,134,.2) 0 0 15px,rgba(101,119,134,.15) 0 0 3px 1px}
+export const STICKER_PICKER_CSS = `#xitter-stickers{position:fixed;z-index:10000;width:340px;max-width:calc(100vw - 16px);max-height:min(420px,calc(100vh - 16px));display:flex;flex-direction:column;border-radius:16px;overflow:hidden;font-family:TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-shadow:rgba(101,119,134,.2) 0 0 15px,rgba(101,119,134,.15) 0 0 3px 1px}
 #xitter-stickers .xs-tabs{display:flex;gap:4px;overflow-x:auto;padding:8px;border-bottom:1px solid rgba(128,128,128,.25)}
 #xitter-stickers .xs-tab{flex:none;padding:6px 12px;border:0;border-radius:999px;background:none;color:inherit;font:inherit;font-size:14px;font-weight:700;cursor:pointer;opacity:.6}
 #xitter-stickers .xs-tab.xs-on{opacity:1;background:var(--xt-accent-soft,rgba(29,155,240,.15));color:var(--xt-accent,#1d9bf0)}
