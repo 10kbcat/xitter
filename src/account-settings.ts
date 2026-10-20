@@ -1,7 +1,7 @@
 // Settings > Your account: password, deactivation. Username and language go
 // through account/settings.json (rest.ts) and use the helpers here.
 import { hateInName } from "./hate";
-import { handleHeld } from "./held";
+import { forgetHeld, handleHeld } from "./held";
 import { automodStrike, shutOut } from "./moderation";
 import { blockedNameIn, suspendForName } from "./names";
 import { isReserved, usernameProblem } from "./invites";
@@ -54,6 +54,7 @@ export async function changeUsername(viewer: Viewer, wanted: string): Promise<st
 	}
 	await sql`insert into username_changes (user_id, old_name, new_name) values (${viewer.id}::bigint, ${viewer.screen_name}, ${wanted})`;
 	await sql`update users set screen_name = ${wanted} where id = ${viewer.id}::bigint`;
+	forgetHeld();
 	return undefined;
 }
 
@@ -79,7 +80,7 @@ export async function accountSettingsRoute(method: string, path: string, viewer:
 		const [account] = await sql`select password_hash from users where id = ${viewer.id}::bigint`;
 		if (!account || !f.current_password || !(await Bun.password.verify(f.current_password, account.password_hash).catch(() => false)))
 			return error(231, "Your current password is incorrect.", 403);
-		const next = f.new_password ?? "";
+		const next = f.new_password ?? f.password ?? "";
 		if (next.length < 8) return error(214, "Your password needs to be at least 8 characters.");
 		if (next.length > 256) return error(214, "Passwords are at most 256 characters.");
 		if (next !== (f.password_confirmation ?? next)) return error(214, "The two passwords don't match.");
@@ -96,6 +97,9 @@ export async function accountSettingsRoute(method: string, path: string, viewer:
 			await tx`delete from sessions where user_id = ${viewer.id}::bigint and token <> ${viewer.token}`;
 			await tx`delete from api_tokens where user_id = ${viewer.id}::bigint`;
 			await tx`delete from login_challenges where user_id = ${viewer.id}::bigint`;
+			// a passkey someone else added mustn't outlast the new password
+			await tx`delete from passkeys where user_id = ${viewer.id}::bigint`;
+			await tx`delete from passkey_challenges where user_id = ${viewer.id}::bigint`;
 			await tx`update email_confirmations set used = true where user_id = ${viewer.id}::bigint and not used`;
 			return true;
 		});

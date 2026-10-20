@@ -1,16 +1,17 @@
 // Builds the objects the client expects. Field sets follow the captured
 // responses; fields for features we do not have are constants.
 
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { bioEntities, urlEntities as linkEntities } from "./links";
+import { conversationCardEntity, type ConversationCard } from "./conversation-cards";
 import type { User } from "./auth";
 import { CLIENT_DIR } from "./client-cache";
 import { PUBLIC_ORIGIN } from "./config";
 import type { ArticleEntity } from "./articles";
 import { FLAGS, flagList } from "./flags";
 import { homeOf, mentionsIn } from "./mentions";
-import { type MediaRow, absolute, mediaEntity } from "./media";
+import { type MediaRow, absolute, mediaEntity, mediaUrl, posterUrl } from "./media";
 import { placeById } from "./places";
 import { shownSource } from "./platforms";
 import { settings } from "./settings";
@@ -120,7 +121,7 @@ export function badgeList(u: User): Badge[] {
 // X's one label slot: "Automated by @owner" for a bot, a profile label, else
 // the first badge. The client puts a parody, commentary or fan label there
 // before anything we send. When a label has it, every badge goes through the
-// page script (badges.ts).
+// page script (badges.ts). A bot's other labels go the same way (hiddenLabels).
 const hasParodyLabel = (u: User) => !!u.parody_label && u.parody_label !== "None";
 export const labelTakesSlot = (u: User) => !!u.automated_by || hasParodyLabel(u) || !!u.label;
 
@@ -142,7 +143,44 @@ function parodyMask(): string {
 	return mask;
 }
 
+// the same mask for a bot's extra label (badges.ts), which always wants one:
+// a fresh instance hasn't downloaded the svg yet, but the pinned main bundle
+// names it, and the server fetches it on first use. "" isn't kept, so a client
+// fetched later is found
+let bundleMask: string | undefined;
+function parodyMaskIcon(): string {
+	if (parodyMask()) return parodyMask();
+	if (bundleMask !== undefined) return bundleMask;
+	try {
+		const build = JSON.parse(readFileSync(join(CLIENT_DIR, "build.json"), "utf8"));
+		const main = (build.scripts as string[] | undefined)?.find((p) => /(?:^|\/)main\.\w+\.js$/.test(p));
+		if (!main) return "";
+		const found = readFileSync(join(CLIENT_DIR, "abs", main.replace(/^\//, "")), "utf8").match(/parody-mask\.\w+\.svg/);
+		bundleMask = found ? `${PUBLIC_ORIGIN}/abs/responsive-web/client-web/${found[0]}` : "";
+		return bundleMask;
+	} catch {
+		return "";
+	}
+}
+
 const PCF_TEXT: Record<string, string> = { Parody: "Parody account", Commentary: "Commentary account", Fan: "Fan account" };
+const parodyText = (u: User) => PCF_TEXT[u.parody_label!] ?? `${u.parody_label} account`;
+
+// labels the client's one slot hides when "Automated by @owner" takes it;
+// badges.ts draws each as its own badge on that row
+export function hiddenLabels(u: User): { text: string; url?: string; icon?: string }[] {
+	if (!u.automated_by) return [];
+	const out: { text: string; url?: string; icon?: string }[] = [];
+	if (hasParodyLabel(u)) {
+		const icon = parodyMaskIcon();
+		out.push({ text: parodyText(u), url: `${PUBLIC_ORIGIN}/rules`, ...(icon ? { icon } : {}) });
+	}
+	if (u.label) {
+		const icon = u.label.badge_id ? `${PUBLIC_ORIGIN}/public/badge-${u.label.badge_id}.png` : parodyMaskIcon();
+		out.push({ text: u.label.text, ...(u.label.url ? { url: u.label.url } : {}), ...(icon ? { icon } : {}) });
+	}
+	return out;
+}
 
 // a staff-made label, in the shape the client gives its parody label
 function profileLabel(l: NonNullable<User["label"]>) {
@@ -172,7 +210,7 @@ function badgeLabel(u: User) {
 	if (u.automated_by) return automatedLabel(u.automated_by);
 	// the profile reads parody_commentary_fan_label, but search results, lists
 	// and other user cells only ask for this slot: the label goes in both
-	if (hasParodyLabel(u)) return profileLabel({ text: PCF_TEXT[u.parody_label!] ?? `${u.parody_label} account`, badge_id: null, url: `${PUBLIC_ORIGIN}/rules` });
+	if (hasParodyLabel(u)) return profileLabel({ text: parodyText(u), badge_id: null, url: `${PUBLIC_ORIGIN}/rules` });
 	if (u.label) return profileLabel(u.label);
 	const [first] = badgeList(u);
 	if (!first) return {};
@@ -203,8 +241,8 @@ export function userResult(u: User) {
 		location: { location: u.location },
 		media_permissions: { can_media_tag: true },
 		notifications_settings: { notifications_enabled: !!u.stats?.notifying },
-		// "None": the label travels in affiliates_highlighted_label (badgeLabel),
-		// which user cells in search and lists show and this field's label isn't
+		// "None": the slot is affiliates_highlighted_label (badgeLabel); extras a
+		// bot hid go through badges.ts. this field's label isn't shown
 		parody_commentary_fan_label: "None",
 		pinned_items: u.pinned_post_id ? { tweet_ids_str: [u.pinned_post_id] } : {},
 		possibly_sensitive: false,
@@ -287,8 +325,8 @@ export function legacyUser(u: User) {
 		muting: u.stats?.muting ?? false,
 		has_graduated_access: true,
 		created_at: u.created_at.toISOString(),
-		// "None": the label travels in affiliates_highlighted_label (badgeLabel),
-		// which user cells in search and lists show and this field's label isn't
+		// "None": the slot is affiliates_highlighted_label (badgeLabel); extras a
+		// bot hid go through badges.ts. this field's label isn't shown
 		parody_commentary_fan_label: "None",
 		can_dm: false,
 	};
@@ -338,6 +376,9 @@ export type PostRow = {
 	staleEditOf?: string;
 	// the poll card this post carries, as pollCard builds it
 	poll?: Record<string, unknown>;
+	conversationCard?: ConversationCard | null;
+	conversationCardPostId?: string | null;
+	conversationCreative?: MediaRow;
 	linkCard?: Record<string, unknown>;
 	// the community this post belongs to, as communityObjects builds it
 	community?: Record<string, unknown>;
@@ -456,7 +497,9 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 	const mentions = allMentions.filter((m: any) => m.indices[1] <= textLength);
 	const tags = allTags.filter((t: any) => t.indices[1] <= textLength);
 	const urls = linkEntities(shown, textLength, p.localLinks);
-	const media = (p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
+	const creative = p.conversationCreative ?? p.media?.[0];
+	const conversation = p.conversationCard && creative ? conversationCardEntity(p.conversationCard, p.conversationCardPostId ?? p.id, { kind: creative.kind, url: mediaUrl(creative.id, creative.mime), width: creative.width, height: creative.height, poster: posterUrl(creative.id), stream: `${PUBLIC_ORIGIN}/media/card-video/${creative.id}.xml`, duration: creative.duration_ms }) : undefined;
+	const media = (conversation ? [] : p.media ?? []).map((m, i) => mediaEntity(m, p.id, p.author.screen_name, i, textLength));
 	const quoteLink = p.quoted && permalink(p.quoted);
 	return {
 		...(withTypename ? { __typename: "Tweet" } : {}),
@@ -470,7 +513,8 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 		...(p.quoted ? { quoted_status_result: { result: tweetResult(p.quoted) } } : {}),
 		...(p.article ? { article: { article_results: { result: p.article } } } : {}),
 		...(p.community ? { community_results: { result: p.community } } : {}),
-		...(p.poll ? { card: p.poll } : p.linkCard ? { card: p.linkCard } : {}),
+		...(p.conversationCard ? { xitter_conversation_card: p.conversationCard } : {}),
+		...(conversation ? { card: conversation } : p.poll ? { card: p.poll } : p.linkCard ? { card: p.linkCard } : {}),
 		...(long ? { note_tweet: { is_expandable: true, note_tweet_results: { result: {
 			id: globalId("NoteTweet", p.id),
 			text: p.text,

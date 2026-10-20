@@ -86,6 +86,26 @@ create table if not exists login_challenges (
 	attempts int not null default 0,
 	created_at timestamptz not null default now()
 );
+-- passkeys (passkeys.ts): id is the credential id, public_key its SPKI, both base64url
+create table if not exists passkeys (
+	id text primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	public_key text not null,
+	alg int not null,
+	sign_count bigint not null default 0,
+	name text not null,
+	transports text[] not null default '{}',
+	backed_up boolean not null default false,
+	created_at timestamptz not null default now(),
+	last_used_at timestamptz
+);
+create index if not exists passkeys_user on passkeys (user_id);
+-- one per sign-in or set-up, used once; user_id only when adding a passkey
+create table if not exists passkey_challenges (
+	challenge text primary key,
+	user_id bigint references users (id) on delete cascade,
+	created_at timestamptz not null default now()
+);
 -- who has been shown a post (other than its author), once each
 create table if not exists post_views (
 	post_id bigint not null references posts (id) on delete cascade,
@@ -1084,8 +1104,8 @@ create table if not exists retired_identities (
 
 -- Profile labels staff make in the admin panel, worn where X shows "Parody
 -- account": the text, a custom badge as its icon (the parody mask without
--- one) and an optional link. An account wears one label at most, and none
--- with a parody, commentary or fan label.
+-- one) and an optional link. Staff and parody/commentary/fan labels don't
+-- share an account; an automated account can wear either (hiddenLabels).
 create table if not exists account_labels (
 	id bigint primary key,
 	text text not null check (char_length(text) between 1 and 40),
@@ -1421,5 +1441,31 @@ drop trigger if exists users_admins_unblocked on users;
 create trigger users_admins_unblocked after update of role on users for each row execute function admins_unblocked();
 delete from blocks bl using users b, users t where b.id = bl.blocker_id and t.id = bl.blocked_id and b.instance is null and t.role = 'admin' and t.instance is null;
 
+-- Imports of X archives (archive-import.ts): one per account, the latest. The
+-- zip waits in ARCHIVE_DIR while it uploads and imports, and goes when done.
+create table if not exists archive_imports (
+	user_id bigint primary key references users (id) on delete cascade,
+	state text not null check (state in ('uploading', 'queued', 'running', 'done', 'failed')),
+	size bigint not null default 0,
+	options jsonb not null default '{}',
+	total int not null default 0,
+	posts int not null default 0,
+	media int not null default 0,
+	skipped int not null default 0,
+	error text,
+	updated_at timestamptz not null default now()
+);
+-- posts the instance's rules left out, and when a paused import (the post
+-- rate limit) carries on
+alter table archive_imports add column if not exists refused int not null default 0;
+alter table archive_imports add column if not exists waiting_until timestamptz;
+-- 'pending': waiting for staff to approve it (Admin > Settings, Import from X)
+alter table archive_imports drop constraint if exists archive_imports_state_check;
+alter table archive_imports add constraint archive_imports_state_check check (state in ('uploading', 'pending', 'queued', 'running', 'done', 'failed'));
+
 -- profile decor for gold-check accounts, from the Steam Points Shop (decor.ts)
 alter table users add column if not exists decor jsonb;
+
+alter table posts add column if not exists conversation_card jsonb;
+
+alter table posts add column if not exists conversation_card_post_id bigint references posts (id) on delete set null;
