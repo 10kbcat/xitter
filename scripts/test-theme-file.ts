@@ -138,6 +138,45 @@ test("painted wrap skips Color options the same way accent wrap does", () => {
 	expect(THEME_SCRIPT).toContain('lightsCard.querySelector("input")');
 });
 
+test("paint does not force badge fill onto notification labels", () => {
+	const paint = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function paint()"), THEME_SCRIPT.indexOf("function wrapAccent"));
+	const extras = [...paint.matchAll(/css\.push\('((?:\\'|[^'])*)'\)/g)].map((m) => m[1].replace(/\\'/g, "'"));
+	const badge = extras.filter((rule) => /--xt-badge/.test(rule));
+	expect(badge.length).toBe(1);
+	expect(badge[0]).toContain('[data-testid="AppTabBar_Notifications_Link"] div[style*="background"]');
+	expect(badge[0]).not.toContain("div[dir]");
+	for (const rule of extras) {
+		const brace = rule.indexOf("{");
+		if (brace < 0) continue;
+		const sel = rule.slice(0, brace);
+		const decl = rule.slice(brace);
+		if (!/background(?:-color)?\s*:/.test(decl)) continue;
+		expect(sel.includes("div[dir]") && !/style\*=["']background/.test(sel)).toBe(false);
+	}
+});
+
+test("paint leaves action icons grey at rest and only recolours hover", () => {
+	const paint = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function paint()"), THEME_SCRIPT.indexOf("function wrapAccent"));
+	expect(paint).not.toContain('[data-testid="reply"],html[data-xitter-theme] [data-testid="reply"] svg{color:var(--xt-reply)');
+	expect(paint).not.toContain('[data-testid="retweet"],html[data-xitter-theme] [data-testid="retweet"] svg{color:var(--xt-repost)');
+	expect(paint).not.toContain('[data-testid="like"],html[data-xitter-theme] [data-testid="like"] svg{color:var(--xt-like)');
+	expect(paint).not.toContain('[data-testid="bookmark"],html[data-xitter-theme] [data-testid="bookmark"] svg');
+	expect(paint).toContain('[data-testid="reply"]:hover,html[data-xitter-theme] [data-testid="reply"]:hover svg{color:var(--xt-reply)');
+	expect(paint).toContain('[data-testid="retweet"]:hover,html[data-xitter-theme] [data-testid="retweet"]:hover svg{color:var(--xt-repost)');
+	expect(paint).toContain('[data-testid="like"]:hover,html[data-xitter-theme] [data-testid="like"]:hover svg{color:var(--xt-like)');
+	expect(paint).toContain('[data-testid="bookmark"]:hover,html[data-xitter-theme] [data-testid="bookmark"]:hover svg');
+	expect(paint).toContain('[aria-label="Share post"]:hover svg');
+	expect(paint).not.toContain('[aria-label="Share post"] svg{color:var(--xt-bookmark)');
+});
+
+test("paint keeps page-bg overlays on the menu surface", () => {
+	const paint = THEME_SCRIPT.slice(THEME_SCRIPT.indexOf("function paint()"), THEME_SCRIPT.indexOf("function wrapAccent"));
+	expect(paint).toContain('add("pagebg","background-color:transparent!important",true)');
+	expect(paint).toContain('wrap(":is("+found.pagebg.join(",")+"):is("+posSels.join(",")+")")');
+	expect(paint).toContain("{background:var(--xt-menu)!important}");
+	expect(paint).toContain('r.style.position==="fixed"||r.style.position==="absolute"');
+});
+
 const attacks = [
 	"#fff;}body{display:none",
 	"red",

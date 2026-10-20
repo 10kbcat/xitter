@@ -294,7 +294,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 	function paint(){
 		if(!theme||Date.now()-at<1000)return;
 		at=Date.now();
-		var p=pal(),found={pagebg:[],surface:[],text:[],secondary:[],muted:[],border:[],accentColor:[],accentBg:[],accentHover:[],accentSoft:[],accentOutline:[],button:[],buttonText:[],header:[],hover:[],menu:[],input:[],tooltip:[],icon:[],iconFill:[],iconActiveFill:[],repost:[],repostBg:[],like:[],likeBg:[],chirp:[]};
+		var p=pal(),found={pagebg:[],surface:[],text:[],secondary:[],muted:[],border:[],accentColor:[],accentBg:[],accentHover:[],accentSoft:[],accentOutline:[],button:[],buttonText:[],header:[],hover:[],menu:[],input:[],tooltip:[],icon:[],iconFill:[],iconActiveFill:[],repost:[],repostBg:[],like:[],likeBg:[],chirp:[]},posSels=[];
 		function note(kind,sel){if(!found[kind])found[kind]=[];if(found[kind].indexOf(sel)<0)found[kind].push(sel)}
 		[].forEach.call(document.styleSheets,function(ss){
 			var rules;try{rules=ss.cssRules}catch(e){return}
@@ -302,6 +302,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 				if(!r.selectorText||!r.style||!/^\.[\w-]+$/.test(r.selectorText))return;
 				var c=norm(r.style.color),bg=norm(r.style.backgroundColor),bd=norm(r.style.borderColor),fl=norm(r.style.fill),ol=norm(r.style.outlineColor),sel=r.selectorText;
 				var ff=r.style.fontFamily||"";
+				if(r.style.position==="fixed"||r.style.position==="absolute"){if(posSels.indexOf(sel)<0)posSels.push(sel)}
 				if(ff.indexOf("TwitterChirp")>=0)note("chirp",sel);
 				if(p.bg[bg])note("pagebg",sel);
 				if(p.surface[bg])note("surface",sel);
@@ -365,6 +366,11 @@ export const THEME_SCRIPT = String.raw`(function(){
 		var css=[],k;
 		function add(kind,decl,pageBg){(found[kind]||[]).forEach(function(sel){css.push(wrap(sel,pageBg)+"{"+decl+"}")})}
 		add("pagebg","background-color:transparent!important",true);
+		if((found.pagebg||[]).length&&posSels.length){
+			css.push(wrap(":is("+found.pagebg.join(",")+"):is("+posSels.join(",")+")") + "{background:var(--xt-menu)!important}");
+			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: fixed\"]") + "{background:var(--xt-menu)!important}");
+			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: absolute\"]") + "{background:var(--xt-menu)!important}");
+		}
 		add("surface","background:var(--xt-surface)!important",false);
 		add("menu","background:var(--xt-menu)!important",false);
 		add("header","background-color:var(--xt-header)!important",false);
@@ -395,16 +401,16 @@ export const THEME_SCRIPT = String.raw`(function(){
 		add("repostBg","background-color:var(--xt-repost-soft)!important",false);
 		add("like","color:var(--xt-like)!important;fill:var(--xt-like)!important",false);
 		add("likeBg","background-color:var(--xt-like-soft)!important",false);
-		css.push('html[data-xitter-theme] [data-testid="reply"],html[data-xitter-theme] [data-testid="reply"] svg{color:var(--xt-reply)!important;fill:var(--xt-reply)!important}');
+		css.push('html[data-xitter-theme] [data-testid="reply"]:hover,html[data-xitter-theme] [data-testid="reply"]:hover svg{color:var(--xt-reply)!important;fill:var(--xt-reply)!important}');
 		css.push('html[data-xitter-theme] [data-testid="reply"]:hover [style*="background-color: rgba(29, 155, 240"]{background-color:var(--xt-reply-soft)!important}');
-		css.push('html[data-xitter-theme] [data-testid="retweet"],html[data-xitter-theme] [data-testid="retweet"] svg{color:var(--xt-repost)!important;fill:var(--xt-repost)!important}');
-		css.push('html[data-xitter-theme] [data-testid="like"],html[data-xitter-theme] [data-testid="like"] svg{color:var(--xt-like)!important;fill:var(--xt-like)!important}');
-		css.push('html[data-xitter-theme] [data-testid="bookmark"],html[data-xitter-theme] [data-testid="bookmark"] svg,html[data-xitter-theme] [aria-label="Share post"] svg{color:var(--xt-bookmark)!important;fill:var(--xt-bookmark)!important}');
+		css.push('html[data-xitter-theme] [data-testid="retweet"]:hover,html[data-xitter-theme] [data-testid="retweet"]:hover svg{color:var(--xt-repost)!important;fill:var(--xt-repost)!important}');
+		css.push('html[data-xitter-theme] [data-testid="like"]:hover,html[data-xitter-theme] [data-testid="like"]:hover svg{color:var(--xt-like)!important;fill:var(--xt-like)!important}');
+		css.push('html[data-xitter-theme] [data-testid="bookmark"]:hover,html[data-xitter-theme] [data-testid="bookmark"]:hover svg,html[data-xitter-theme] [aria-label="Share post"]:hover svg{color:var(--xt-bookmark)!important;fill:var(--xt-bookmark)!important}');
 		css.push('html[data-xitter-theme] [data-testid="bookmark"]:hover [style*="background-color: rgba(29, 155, 240"],html[data-xitter-theme] [aria-label="Share post"]:hover [style*="background-color: rgba(29, 155, 240"]{background-color:var(--xt-bookmark-soft)!important}');
 		css.push('html[data-xitter-theme] [data-testid="retweet"]:hover [style*="background-color: rgba(0, 186, 124"]{background-color:var(--xt-repost-soft)!important}');
 		css.push('html[data-xitter-theme] [data-testid="like"]:hover [style*="background-color: rgba(249, 24, 128"]{background-color:var(--xt-like-soft)!important}');
 		css.push('html[data-xitter-theme] [data-testid="app-text-transition-container"]{color:var(--xt-views)!important}');
-		css.push('html[data-xitter-theme] a[href="/notifications"] div[dir],html[data-xitter-theme] [data-testid="AppTabBar_Notifications_Link"] div[style*="background"]{background-color:var(--xt-badge)!important}');
+		css.push('html[data-xitter-theme] [data-testid="AppTabBar_Notifications_Link"] div[style*="background"]{background-color:var(--xt-badge)!important}');
 		css.push('html[data-xitter-theme] [data-testid="placementTracking"] button,html[data-xitter-theme] a[data-testid="editProfileButton"]{background:var(--xt-secondary-button)!important;border-color:var(--xt-secondary-button-border)!important;color:var(--xt-secondary-button-text)!important}');
 		if(theme.font&&fontOk(theme.font.ui)){
 			(found.chirp||[]).forEach(function(sel){css.push('html[data-xitter-theme] '+sel+'{font-family:"'+theme.font.ui+'",'+CHIRP+'!important}')});
