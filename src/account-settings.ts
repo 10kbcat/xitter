@@ -79,7 +79,7 @@ export async function accountSettingsRoute(method: string, path: string, viewer:
 		const [account] = await sql`select password_hash from users where id = ${viewer.id}::bigint`;
 		if (!account || !f.current_password || !(await Bun.password.verify(f.current_password, account.password_hash).catch(() => false)))
 			return error(231, "Your current password is incorrect.", 403);
-		const next = f.new_password ?? "";
+		const next = f.new_password ?? f.password ?? "";
 		if (next.length < 8) return error(214, "Your password needs to be at least 8 characters.");
 		if (next.length > 256) return error(214, "Passwords are at most 256 characters.");
 		if (next !== (f.password_confirmation ?? next)) return error(214, "The two passwords don't match.");
