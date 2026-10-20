@@ -288,6 +288,14 @@ async function route(req: Request): Promise<Response | undefined> {
 	const url = new URL(req.url);
 	const p = url.pathname;
 	if (p === "/federation/superadmin/accept") return acceptTicket(req, requestIp(req) ?? "unknown");
+	// /i/xitter/* holds Xitter's own static files, served before sign-in and
+	// rate limits: avatar decoration images and the locally cached Google Fonts.
+	// Everything else under this prefix 404s on purpose. Without that line an
+	// unknown or missing file here (a font that failed to download, a stale
+	// decoration link) would fall through to the client shell and come back as
+	// a 200 HTML page, which the browser then tries to use as a font or image.
+	// A new route under /i/xitter/ must go ABOVE the catch-all, or it is never
+	// reached. JSON endpoints belong under /i/api/xitter/ instead (serveApi).
 	if (p.startsWith("/i/xitter/decoration/")) return (await decorationFile(url)) ?? new Response("not found", { status: 404 });
 	if (p.startsWith("/i/xitter/fonts/")) return serveFont(url, url.searchParams.has("family") && !!(await getViewer(req)));
 	if (p.startsWith("/i/xitter/")) return new Response("not found", { status: 404 });
