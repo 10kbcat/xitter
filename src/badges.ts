@@ -2,29 +2,33 @@
 // (affiliates_highlighted_label); model.ts puts the first of an account's
 // badges in it, and this page script adds the others right after it, wherever
 // the client shows that badge: posts, profiles, account lists, hover cards.
+// A bot's extra labels (hiddenLabels in model.ts) sit on the same "Automated
+// by" row as their own icon+text badges, after the client's robot line.
 
 import { sql } from "./db";
 import { ID_RE, INSTANCE_ID, baseUrl, listedInstance } from "./federation";
 import { STAFF_HANDLE } from "./invites";
-import { badgeList, labelTakesSlot } from "./model";
+import { badgeList, hiddenLabels, labelTakesSlot } from "./model";
 import { toUser, userCols } from "./users";
 
-// GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold }, ... },
-// only accounts that wear more than one badge, or a gold translator globe
-// (X's yellow "moderator" globe, recoloured for translator moderators)
+// GET /i/api/xitter/badges?names=a,b: { a: { badges: [{ url, description }], gold, labels: [{ text, url?, icon? }] }, ... },
+// only accounts that wear more than one badge, a gold translator globe
+// (X's yellow "moderator" globe, recoloured for translator moderators),
+// or a label the client's one slot hid
 export async function extraBadges(viewerId: string, url: URL): Promise<Response> {
 	const names = [...new Set((url.searchParams.get("names") ?? "").split(",").map((n) => n.trim().toLowerCase()).filter((n) => {
 		const at = n.indexOf("@");
 		return at < 0 ? STAFF_HANDLE.test(n) : STAFF_HANDLE.test(n.slice(0, at)) && /^[a-z0-9.-]{1,253}(?::\d{1,5})?$/.test(n.slice(at + 1));
 	}))].slice(0, 50);
-	const out: Record<string, { badges: { url: string; description: string }[]; gold: boolean }> = {};
+	const out: Record<string, { badges: { url: string; description: string }[]; gold: boolean; labels: { text: string; url?: string; icon?: string }[] }> = {};
 	if (names.length) {
 		const rows = await sql`select ${userCols(viewerId)} from users u where lower(u.screen_name) = any(${sql.array(names, "TEXT")})`;
 		for (const r of rows) {
 			const u = toUser(r);
 			const badges = badgeList(u).slice(labelTakesSlot(u) ? 0 : 1).map(({ url, description }) => ({ url, description }));
 			const gold = u.translator === "moderator";
-			if (badges.length || gold) out[u.screen_name.toLowerCase()] = { badges, gold };
+			const labels = hiddenLabels(u);
+			if (badges.length || gold || labels.length) out[u.screen_name.toLowerCase()] = { badges, gold, labels };
 		}
 	}
 	return Response.json(out, { headers: { "cache-control": "private, max-age=60" } });
@@ -94,6 +98,86 @@ export const BADGES_SCRIPT = String.raw`(function(){
 			if(next!==v)t.nodeValue=next;
 		}
 		if(full.length)box.title=full.join(", ");
+	}
+	// a bot's extra labels, as badges on the same "Automated by @owner" row
+	function around(box){
+		return box.closest('article[data-testid="tweet"],[data-testid="UserCell"],[data-testid="HoverCard"]');
+	}
+	function findLine(root){
+		if(!root)return;
+		var nodes=root.querySelectorAll('div[dir="ltr"]');
+		for(var i=0;i<nodes.length;i++){
+			var el=nodes[i];
+			if((el.textContent||"").indexOf("Automated by @")!==0)continue;
+			var nest=el.closest('article[data-testid="tweet"]');
+			if(nest&&nest!==root&&root.contains(nest))continue;
+			return el;
+		}
+	}
+	function profileLine(box){
+		var col=box.closest('[data-testid="primaryColumn"]');
+		var un=col&&col.querySelector('[data-testid="UserName"]');
+		if(!un||(box!==un&&!un.contains(box)&&!box.contains(un)&&!box.querySelector('[data-testid="UserName"]')))return;
+		var n=un.parentElement;
+		while(n&&n!==col&&n.parentElement&&n.parentElement!==col&&!n.parentElement.querySelector('article[data-testid="tweet"]'))n=n.parentElement;
+		var line=n&&!n.querySelector('article[data-testid="tweet"]')?findLine(n):null;
+		if(line)return line;
+		for(var s=un.nextElementSibling;s;s=s.nextElementSibling){
+			if(s.querySelector&&s.querySelector('article[data-testid="tweet"]'))break;
+			line=findLine(s);
+			if(line)return line;
+		}
+	}
+	function shrink(el){
+		el.style.minWidth="0";
+		el.style.overflow="hidden";
+		el.style.textOverflow="ellipsis";
+		el.style.whiteSpace="nowrap";
+	}
+	function drawLabels(box,labels){
+		var line=findLine(around(box))||profileLine(box);
+		if(!line)return;
+		var row=line.parentElement;
+		if(!row||row.querySelector("[data-xitter-labels]"))return;
+		row.style.flexWrap="nowrap";
+		shrink(line);
+		var robot=row.querySelector("svg");
+		var iconWrap=robot&&robot.parentElement;
+		if(iconWrap)iconWrap.style.flexShrink="0";
+		var size=robot&&getComputedStyle(robot);
+		var h=size&&size.height||"1.25em",w=size&&size.width||"1.25em";
+		labels.forEach(function(l){
+			var wrap=document.createElement("div");
+			wrap.setAttribute("data-xitter-labels","");
+			wrap.style.cssText="display:flex;align-items:center;min-width:0;margin-left:12px";
+			if(l.icon){
+				var iw=document.createElement("div");
+				if(iconWrap)iw.className=iconWrap.className;
+				iw.style.flexShrink="0";
+				var img=document.createElement("img");
+				img.src=l.icon;img.alt="";img.draggable=false;
+				img.style.cssText="height:"+h+";width:"+w+";object-fit:contain";
+				iw.appendChild(img);
+				wrap.appendChild(iw);
+			}
+			var text=document.createElement("div");
+			text.dir="ltr";
+			text.className=line.className;
+			if(line.style.color)text.style.color=line.style.color;
+			shrink(text);
+			text.textContent=l.text;
+			if(l.url){
+				var a=document.createElement("a");
+				a.href=l.url;a.target="_blank";a.rel="noopener noreferrer";
+				// the row sits inside a post: open the link, not the post
+				a.addEventListener("click",function(e){e.stopPropagation()});
+				a.style.cssText="display:flex;color:inherit;text-decoration:none;min-width:0;overflow:hidden";
+				a.appendChild(text);
+				wrap.appendChild(a);
+			}else wrap.appendChild(text);
+			row.appendChild(wrap);
+		});
+		row.title=[line.textContent||""].concat(labels.map(function(l){return l.text})).join(" · ");
 	}
 	function own(el,box){return el&&el.closest(SEL)===box}
 	function followish(el,box){
@@ -195,6 +279,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 		var k=known[name];
 		// the translator globe X draws (its label is the client's "Translator account")
 		if(k.gold)box.querySelectorAll('svg[aria-label="Translator account"]').forEach(function(g){g.style.setProperty("color","#d4a72c","important")});
+		if(k.labels&&k.labels.length)drawLabels(box,k.labels);
 		if(!k.badges.length)return;
 		// this name's rows, not those of a name inside it (a hover card's)
 		var mine=[].filter.call(box.querySelectorAll("[data-xitter-badges]"),function(r){return r.closest(SEL)===box});
@@ -296,7 +381,7 @@ export const BADGES_SCRIPT = String.raw`(function(){
 	document.addEventListener("keydown",function(e){if(e.key==="Escape")closeCard()});
 	addEventListener("scroll",closeCard,true);
 	var style=document.createElement("style");
-	style.textContent='img[src*="/public/globe.svg?from="]{cursor:pointer}';
+	style.textContent='img[src*="/public/globe.svg?from="]{cursor:pointer}[data-xitter-labels] a{color:inherit;text-decoration:none}[data-xitter-labels] a:hover{text-decoration:underline}';
 	document.head.appendChild(style);
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;scan()},120)}).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
 })();`;
