@@ -12,7 +12,7 @@
 // The first screen is the signed-in client's own sign-in dialog.
 
 import { signInCookies } from "./accounts";
-import { loadLook, nightModeCookies } from "./themes";
+import { loadLook, nightModeCookies } from "./themes/api";
 import { login, startSession } from "./auth";
 import { answerChallenge, startChallenge } from "./two-factor";
 import { sql } from "./db";

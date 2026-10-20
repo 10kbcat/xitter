@@ -1,17 +1,15 @@
 import { expect, test } from "bun:test";
+import { bootCss, pageChromeCss, type BackgroundPaint } from "../src/themes/css";
+import { type Theme } from "../src/themes/presets";
 import {
 	BACKGROUND_OMITTED,
 	THEME_FILE_MAX,
-	bootCss,
 	exportTheme,
 	importTheme,
 	mergeSavedBackground,
-	pageChromeCss,
 	parseLookWrite,
 	sanitiseTheme,
-	type BackgroundPaint,
-	type Theme,
-} from "../src/themes";
+} from "../src/themes/validate";
 import { acceptThemePhoto } from "../src/media";
 import { familyFromSlug, fontSlug, validateFamily } from "../src/fonts";
 

@@ -2,22 +2,17 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { nightModeCookies } from "../src/themes/api";
+import { THEME_SCRIPT, LINK_SCOPES } from "../src/themes/client";
+import { deriveTokens } from "../src/themes/css";
+import { ACCENTS, DEFAULT_ACCENT, PRESETS, SWATCH_IDS, accentWire, themeColorOf } from "../src/themes/presets";
 import {
-	ACCENTS,
-	DEFAULT_ACCENT,
-	LINK_SCOPES,
 	NIGHT_MODE_ATTR,
-	PRESETS,
-	SWATCH_IDS,
-	THEME_SCRIPT,
-	accentWire,
 	applyWrite,
 	contrast,
 	derived,
-	deriveTokens,
 	mixHex,
 	modeOf,
-	nightModeCookies,
 	paletteOf,
 	parseAccent,
 	parseHex,
@@ -25,8 +20,7 @@ import {
 	readLook,
 	readPrefs,
 	sanitiseTheme,
-	themeColorOf,
-} from "../src/themes";
+} from "../src/themes/validate";
 import {
 	ensureFont,
 	fontCss,

@@ -53,7 +53,10 @@ import { emailRoute } from "./email-address";
 import { embedImage, linkPreview, oembed } from "./embeds";
 import { noteAppealsRoute } from "./note-appeals";
 import { decorCatalog, decorFor, decorRoute, decorShop, steamFile } from "./decor";
-import { nightModeCookies, readPrefs, resolveBackground, themeApi, themeExport, themeImport, themeRoute } from "./themes";
+import { nightModeCookies, themeApi, themeExport, themeImport } from "./themes/api";
+import { resolveBackground } from "./themes/css";
+import { themeRoute } from "./themes/page";
+import { readPrefs } from "./themes/validate";
 import { serveFont } from "./fonts";
 
 const MIME: Record<string, string> = {

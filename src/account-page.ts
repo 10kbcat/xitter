@@ -166,7 +166,9 @@ type PageOptions = {
 };
 
 export async function accountPage({ req, title, body, viewer, status = 200, back, cache = "no-store", referrer = "no-referrer", css = "", head = "" }: PageOptions): Promise<Response> {
-	const { accountVars, accentVars, nightModeCookies, paletteOf, readPrefs } = await import("./themes");
+	const { accountVars, accentVars } = await import("./themes/css");
+	const { nightModeCookies } = await import("./themes/api");
+	const { paletteOf, readPrefs } = await import("./themes/validate");
 	const name = settings().instance_name;
 	const night = parseCookies(req).night_mode;
 	let look: ReturnType<typeof readPrefs>["look"] = null;

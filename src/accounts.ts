@@ -12,7 +12,7 @@
 
 import { recordSignIn } from "./login-history";
 import { SECURE, type Viewer, clearedCookies, logout, parseCookies, sessionCookies } from "./auth";
-import { loadLook, nightModeCookies } from "./themes";
+import { loadLook, nightModeCookies } from "./themes/api";
 import { sql } from "./db";
 import { avatarUrl } from "./model";
 import { settings } from "./settings";

@@ -3,7 +3,7 @@
 
 import { recordSignIn } from "./login-history";
 import { login, sessionCookies } from "./auth";
-import { loadLook, nightModeCookies } from "./themes";
+import { loadLook, nightModeCookies } from "./themes/api";
 import { hit, used } from "./ratelimit";
 import { settings } from "./settings";
 
