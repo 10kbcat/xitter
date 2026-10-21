@@ -89,6 +89,9 @@ copy during setup, and it stays on that machine.
   week old can import, and staff approve each import first (Admin > Settings,
   Import from X)
 - Polls with a photo on each choice
+- YouTube links (videos, Shorts, live, youtu.be, with `t=` start times) become
+  player cards: the thumbnail comes through `EMBED_PROXY`, and pressing play
+  loads the video in place from youtube-nocookie.com
 - Previews when a public post or profile is shared in other apps (Discord,
   Slack, iMessage…): OpenGraph and Twitter card tags and oEmbed, for active,
   unprotected accounts only. Admin > Settings > Features switches them off
