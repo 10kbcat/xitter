@@ -245,7 +245,7 @@ export function linkCard(p: Preview) {
 	const youtube = youtubeOf(p.url);
 	if (youtube) {
 		const player = image ?? { url: proxied(`https://i.ytimg.com/vi/${youtube.id}/hqdefault.jpg`), width: 480, height: 360 };
-		values.player_url = str(`https://www.youtube-nocookie.com/embed/${youtube.id}?autoplay=1${youtube.start ? `&start=${youtube.start}` : ""}`);
+		values.player_url = str(`https://www.youtube-nocookie.com/embed/${youtube.id}${youtube.start ? `?start=${youtube.start}` : ""}`);
 		values.player_width = str("1280");
 		values.player_height = str("720");
 		for (const key of ["player_image", "player_image_large", "player_image_original"]) values[key] = img(player);
