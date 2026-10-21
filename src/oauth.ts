@@ -8,6 +8,7 @@ import { boundedBody } from "./api-input";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
+import { sniffImage } from "./media";
 import { requestIp } from "./login-history";
 import { clientMetadata, metadataClientId } from "./oauth-metadata";
 import { passwordStep } from "./password-sign-in";
@@ -33,11 +34,23 @@ export function validRedirect(value: string): boolean {
 }
 
 async function form(req: Request, limit = 8192): Promise<FormData | undefined> {
-	if (!(req.headers.get("content-type") ?? "").startsWith("application/x-www-form-urlencoded")) return undefined;
+	const type = req.headers.get("content-type") ?? "";
+	// multipart only where a file is expected (the developer page's icon upload)
+	if (!type.startsWith("application/x-www-form-urlencoded") && !(limit > 8192 && type.startsWith("multipart/form-data"))) return undefined;
 	try {
 		const bytes = await boundedBody(req, limit);
-		return await new Response(bytes, { headers: { "content-type": "application/x-www-form-urlencoded" } }).formData();
+		return await new Response(bytes, { headers: { "content-type": type.startsWith("multipart/") ? type : "application/x-www-form-urlencoded" } }).formData();
 	} catch { return undefined; }
+}
+
+const ICON_BYTES = 256 * 1024;
+const iconUrl = (id: string, at: Date | string) => `/oauth/apps/${id}/icon?v=${new Date(at).getTime()}`;
+
+// GET /oauth/apps/:id/icon: a registered app's uploaded icon
+export async function oauthAppIcon(id: string): Promise<Response> {
+	const [row] = isId(id) ? await sql`select icon, icon_mime from oauth_clients where id = ${id}::bigint and icon is not null` : [];
+	if (!row) return new Response("No icon.", { status: 404 });
+	return new Response(row.icon, { headers: { "content-type": row.icon_mime, "cache-control": "public, max-age=604800, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" } });
 }
 
 const value = (f: FormData, key: string) => String(f.get(key) ?? "");
@@ -76,7 +89,7 @@ export async function oauthToken(req: Request): Promise<Response> {
 
 // clientId is the client_id as the app sent it; dbId is its oauth_clients row,
 // which a metadata-document app only gets once someone approves it
-type RequestData = { clientId: string; dbId?: string; redirect: string; state: string; scope: "read" | "write"; challenge: string; name: string; owner: string | null };
+type RequestData = { clientId: string; dbId?: string; redirect: string; state: string; scope: "read" | "write"; challenge: string; name: string; owner: string | null; icon: string | null };
 
 async function authorization(values: URLSearchParams | FormData): Promise<RequestData | undefined> {
 	const get = (key: string) => String(values.get(key) ?? "");
@@ -89,12 +102,12 @@ async function authorization(values: URLSearchParams | FormData): Promise<Reques
 		if (!doc || !doc.redirects.includes(redirect)) return undefined;
 		const [row] = await sql`select id::text, revoked from oauth_clients where metadata_url = ${clientId}`;
 		if (row?.revoked) return undefined;
-		return { clientId, dbId: row?.id, redirect, state, scope: scope as "read" | "write", challenge, name: doc.name, owner: null };
+		return { clientId, dbId: row?.id, redirect, state, scope: scope as "read" | "write", challenge, name: doc.name, owner: null, icon: doc.logo };
 	}
-	const [client] = await sql`select c.name, c.redirect_uri, u.screen_name as owner from oauth_clients c join users u on u.id = c.owner_id
+	const [client] = await sql`select c.name, c.redirect_uri, c.icon_at, u.screen_name as owner from oauth_clients c join users u on u.id = c.owner_id
 		where c.id = ${clientId}::bigint and not c.revoked and u.status = 'active'`;
 	if (!client || client.redirect_uri !== redirect) return undefined;
-	return { clientId, dbId: clientId, redirect, state, scope: scope as "read" | "write", challenge, name: client.name, owner: client.owner };
+	return { clientId, dbId: clientId, redirect, state, scope: scope as "read" | "write", challenge, name: client.name, owner: client.owner, icon: client.icon_at ? iconUrl(clientId, client.icon_at) : null };
 }
 
 const redirectWith = (request: RequestData, params: Record<string, string>) => {
@@ -114,7 +127,8 @@ const backTo = (request: RequestData, cookies: string[]) => {
 
 const appCard = (request: RequestData) => {
 	const initial = esc([...request.name.trim()][0]?.toUpperCase() ?? "?");
-	return `<div class="app"><span class="mark" aria-hidden="true">${initial}</span><div><b>${esc(request.name)}</b><div class="dim">${request.owner ? `By @${esc(request.owner)} · ` : "From "}${esc(new URL(request.redirect).host)}</div></div><span class="pill">${request.scope === "write" ? "Read and write" : "Read only"}</span></div>`;
+	const mark = request.icon ? `<img class="mark" src="${esc(request.icon)}" alt="" referrerpolicy="no-referrer">` : `<span class="mark" aria-hidden="true">${initial}</span>`;
+	return `<div class="app">${mark}<div><b>${esc(request.name)}</b><div class="dim">${request.owner ? `By @${esc(request.owner)} · ` : "From "}${esc(new URL(request.redirect).host)}</div></div><span class="pill">${request.scope === "write" ? "Read and write" : "Read only"}</span></div>`;
 };
 
 // Signed out, the authorize page signs you in itself (password, then a
@@ -198,8 +212,8 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 			await tx`delete from oauth_codes where expires_at < now()`;
 			let clientId = request.dbId;
 			if (!isId(request.clientId)) {
-				const [row] = await tx`insert into oauth_clients(id, owner_id, name, redirect_uri, metadata_url) values(${newId()}::bigint, null, ${request.name}, ${request.redirect}, ${request.clientId})
-					on conflict (metadata_url) do update set name = excluded.name, redirect_uri = excluded.redirect_uri returning id::text, revoked`;
+				const [row] = await tx`insert into oauth_clients(id, owner_id, name, redirect_uri, metadata_url, logo_uri) values(${newId()}::bigint, null, ${request.name}, ${request.redirect}, ${request.clientId}, ${request.icon})
+					on conflict (metadata_url) do update set name = excluded.name, redirect_uri = excluded.redirect_uri, logo_uri = excluded.logo_uri returning id::text, revoked`;
 				if (row.revoked) throw new Error("This app has been revoked.");
 				clientId = row.id;
 			}
@@ -234,6 +248,15 @@ ${appCard(request)}
 
 const CHECK = "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
 const CROSS = "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
+const appIcon = (name: string, src: string | null) =>
+	src ? `<img class="icon" src="${esc(src)}" alt="" referrerpolicy="no-referrer">` : `<span class="icon" aria-hidden="true">${esc([...name.trim()][0]?.toUpperCase() ?? "?")}</span>`;
+const ICON_CSS = `
+.named{display:flex;align-items:center;gap:12px;min-width:0}
+.icon{width:40px;height:40px;border-radius:10px;flex:none;display:grid;place-items:center;background:var(--accent-fill,var(--accent));color:var(--accent-text,#fff);font-weight:800;object-fit:cover}
+img.icon{background:var(--surface)}
+label.file{flex:1 1 220px}
+`;
+
 const CONSENT_CSS = `
 .who,.app{display:flex;align-items:center;gap:12px}
 .who{padding-bottom:12px;border-bottom:1px solid var(--border)}
@@ -252,6 +275,7 @@ button.account>span:last-child{display:flex;flex-direction:column;min-width:0}
 .avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;background:var(--surface);font-weight:700}
 .app{border:1px solid var(--border);border-radius:16px;padding:12px 16px;flex-wrap:wrap}
 .app>div{flex:1 1 160px;min-width:0}
+img.mark{object-fit:cover;background:var(--surface)}
 .mark{width:48px;height:48px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--accent-fill,var(--accent));color:var(--accent-text,#fff);font-size:22px;font-weight:800}
 .pill{border:1px solid var(--outline);border-radius:9999px;padding:2px 10px;font-size:13px;font-weight:700;white-space:nowrap}
 main h1{margin-top:4px}
@@ -273,11 +297,11 @@ form.signin{justify-items:stretch}
 `;
 
 async function appsPage(req: Request, viewer: Viewer, message = ""): Promise<Response> {
-	const grants = await sql`select t.id::text, t.scope, t.created_at, t.last_used_at, t.expires_at, c.name, c.id::text as client_id, c.metadata_url
+	const grants = await sql`select t.id::text, t.scope, t.created_at, t.last_used_at, t.expires_at, c.name, c.id::text as client_id, c.metadata_url, c.icon_at, c.logo_uri
 		from api_tokens t join oauth_clients c on c.id = t.client_id where t.user_id = ${viewer.id}::bigint order by t.created_at desc`;
 	const hidden = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
-	return accountPage({ req, viewer, title: "Connected apps", referrer: "same-origin", body: `<h1>Connected apps</h1><p>Apps authorized to use your account. Removing one takes effect immediately.</p>
-${message ? `<p>${esc(message)}</p>` : ""}${grants.length ? grants.map((g) => `<div class="card split"><div><b>${esc(g.name)}</b><div class="dim">${g.metadata_url ? `${esc(new URL(g.metadata_url).host)} · ` : ""}${g.scope === "write" ? "Read and write" : "Read only"} · expires ${esc(new Date(g.expires_at).toLocaleDateString())}</div></div><form method="post">${hidden}<input type="hidden" name="id" value="${g.id}"><button class="danger">Remove</button></form></div>`).join("") : `<p class="dim">No connected apps.</p>`}
+	return accountPage({ req, viewer, title: "Connected apps", referrer: "same-origin", css: ICON_CSS, body: `<h1>Connected apps</h1><p>Apps authorized to use your account. Removing one takes effect immediately.</p>
+${message ? `<p>${esc(message)}</p>` : ""}${grants.length ? grants.map((g) => `<div class="card split"><div class="named">${appIcon(g.name, g.icon_at ? iconUrl(g.client_id, g.icon_at) : g.logo_uri)}<div><b>${esc(g.name)}</b><div class="dim">${g.metadata_url ? `${esc(new URL(g.metadata_url).host)} · ` : ""}${g.scope === "write" ? "Read and write" : "Read only"} · expires ${esc(new Date(g.expires_at).toLocaleDateString())}</div></div></div><form method="post">${hidden}<input type="hidden" name="id" value="${g.id}"><button class="danger">Remove</button></form></div>`).join("") : `<p class="dim">No connected apps.</p>`}
 <p><a href="/account/apps/developer">Register an app you are building</a></p>` });
 }
 
@@ -294,18 +318,18 @@ export async function connectedAppsRoute(req: Request, viewer: Viewer): Promise<
 }
 
 async function developerPage(req: Request, viewer: Viewer, message = ""): Promise<Response> {
-	const clients = await sql`select id::text, name, redirect_uri, revoked from oauth_clients where owner_id = ${viewer.id}::bigint order by created_at desc`;
+	const clients = await sql`select id::text, name, redirect_uri, revoked, icon_at from oauth_clients where owner_id = ${viewer.id}::bigint order by created_at desc`;
 	const hidden = `<input type="hidden" name="csrf" value="${esc(viewer.csrf)}">`;
-	return accountPage({ req, viewer, title: "Developer apps", referrer: "same-origin", body: `<h1>Developer apps</h1>
+	return accountPage({ req, viewer, title: "Developer apps", referrer: "same-origin", css: ICON_CSS, body: `<h1>Developer apps</h1>
 <p>Register a public app to use OAuth authorization-code with PKCE (S256). HTTPS redirect URLs and local loopback URLs are supported.</p>
 ${message ? `<p>${esc(message)}</p>` : ""}<form method="post">${hidden}<input type="hidden" name="action" value="register"><label>App name<input name="name" maxlength="80" required></label><label>Exact redirect URL<input name="redirect_uri" type="url" maxlength="2048" required></label><button>Register app</button></form>
-${clients.map((c) => `<div class="card"><b>${esc(c.name)}</b><p>Client ID: <code>${c.id}</code></p><p>Redirect: <code>${esc(c.redirect_uri)}</code></p><p>${c.revoked ? "Revoked" : "Active"}</p>${c.revoked ? "" : `<form method="post">${hidden}<input type="hidden" name="action" value="revoke"><input type="hidden" name="id" value="${c.id}"><button class="danger">Revoke app</button></form>`}</div>`).join("")}
+${clients.map((c) => `<div class="card"><div class="named">${appIcon(c.name, c.icon_at ? iconUrl(c.id, c.icon_at) : null)}<b>${esc(c.name)}</b></div><p>Client ID: <code>${c.id}</code></p><p>Redirect: <code>${esc(c.redirect_uri)}</code></p><p>${c.revoked ? "Revoked" : "Active"}</p>${c.revoked ? "" : `<form method="post" enctype="multipart/form-data" class="row">${hidden}<input type="hidden" name="action" value="icon"><input type="hidden" name="id" value="${c.id}"><label class="file">Icon (PNG, JPEG, WebP or GIF, up to 256 KB, square works best)<input type="file" name="icon" accept="image/png,image/jpeg,image/webp,image/gif" required></label><button class="secondary">${c.icon_at ? "Change icon" : "Set icon"}</button></form>${c.icon_at ? `<form method="post">${hidden}<input type="hidden" name="action" value="removeIcon"><input type="hidden" name="id" value="${c.id}"><button class="secondary">Remove icon</button></form>` : ""}<form method="post">${hidden}<input type="hidden" name="action" value="revoke"><input type="hidden" name="id" value="${c.id}"><button class="danger">Revoke app</button></form>`}</div>`).join("")}
 <p><a href="/api">API and OAuth documentation</a></p>` });
 }
 
 export async function developerAppsRoute(req: Request, viewer: Viewer): Promise<Response> {
 	if (req.method !== "POST") return developerPage(req, viewer);
-	const f = await form(req);
+	const f = await form(req, ICON_BYTES + 16 * 1024);
 	if (!f || value(f, "csrf") !== viewer.csrf || (req.headers.get("origin") && req.headers.get("origin") !== PUBLIC_ORIGIN)) return new Response("Invalid form.", { status: 403 });
 	if (viewer.status !== "active") return new Response("This account cannot register apps.", { status: 403 });
 	const limit = hit("write", viewer.id);
@@ -319,6 +343,21 @@ export async function developerAppsRoute(req: Request, viewer: Viewer): Promise<
 			await tx`delete from oauth_codes where client_id = ${id}::bigint and exists(select 1 from oauth_clients where id = ${id}::bigint and owner_id = ${viewer.id}::bigint)`;
 		});
 		return developerPage(req, viewer, "App revoked.");
+	}
+	if (value(f, "action") === "icon" || value(f, "action") === "removeIcon") {
+		const id = value(f, "id");
+		if (!isId(id)) return new Response("Invalid app.", { status: 400 });
+		if (value(f, "action") === "removeIcon") {
+			await sql`update oauth_clients set icon = null, icon_mime = null, icon_at = null where id = ${id}::bigint and owner_id = ${viewer.id}::bigint`;
+			return developerPage(req, viewer, "Icon removed.");
+		}
+		const file = f.get("icon");
+		const bytes = file instanceof Blob && file.size <= ICON_BYTES ? Buffer.from(await file.arrayBuffer()) : undefined;
+		const image = bytes && sniffImage(bytes);
+		if (!bytes || !image || image.width < 16 || image.height < 16 || image.width > 1024 || image.height > 1024)
+			return developerPage(req, viewer, "Use a PNG, JPEG, WebP or GIF of up to 256 KB, between 16 and 1024 pixels on each side.");
+		const done = await sql`update oauth_clients set icon = ${bytes}, icon_mime = ${image.mime}, icon_at = now() where id = ${id}::bigint and owner_id = ${viewer.id}::bigint and not revoked returning id`;
+		return developerPage(req, viewer, done.length ? "Icon saved." : "No such app.");
 	}
 	if (value(f, "action") !== "register") return new Response("Invalid action.", { status: 400 });
 	const name = value(f, "name").trim(), redirect = value(f, "redirect_uri").trim();

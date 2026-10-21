@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { sql } from "../src/db";
 import { newId } from "../src/ids";
 import type { Viewer } from "../src/auth";
-import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken, validRedirect } from "../src/oauth";
+import { connectedAppsRoute, developerAppsRoute, oauthAppIcon, oauthAuthorize, oauthToken, validRedirect } from "../src/oauth";
 import { publicApi } from "../src/public-api";
 import { PUBLIC_ORIGIN } from "../src/config";
 import { fetcher } from "../src/oauth-metadata";
@@ -118,6 +118,44 @@ try {
 	await assert.rejects(oauthAppActions.blockOAuthApp.run(staff, { url: "http://not-https.example/x.json" }), "only client ID URLs can be blocked by address");
 	await sql`delete from oauth_clients where metadata_url = ${doc}`;
 	fetcher.get = realGet;
+
+	// app icons: a registered app uploads one; a metadata document names a logo_uri
+	const [iconClient] = await sql`select id::text from oauth_clients where owner_id = ${developer}::bigint and not revoked limit 1`
+		.then(async (rows) => rows.length ? rows : (await developerAppsRoute(postForm("/account/apps/developer", { csrf: appOwner.csrf, action: "register", name: "Icon app", redirect_uri: redirect }), appOwner),
+			await sql`select id::text from oauth_clients where owner_id = ${developer}::bigint and not revoked limit 1`));
+	const png = (w: number, h: number) => {
+		const b = Buffer.alloc(64);
+		b.writeUInt32BE(0x89504e47, 0); b.writeUInt32BE(0x0d0a1a0a, 4); b.write("IHDR", 12, "latin1"); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20);
+		return b;
+	};
+	const upload = (fields: Record<string, string>, file?: Buffer) => {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.set(k, v);
+		if (file) body.set("icon", new Blob([file], { type: "image/png" }), "icon.png");
+		return developerAppsRoute(new Request(`${origin}/account/apps/developer`, { method: "POST", headers: { origin }, body }), appOwner);
+	};
+	assert((await (await upload({ csrf: appOwner.csrf, action: "icon", id: iconClient.id }, Buffer.from("not an image"))).text()).includes("Use a PNG"), "a non-image is refused");
+	assert((await (await upload({ csrf: appOwner.csrf, action: "icon", id: iconClient.id }, png(4000, 4000))).text()).includes("Use a PNG"), "a huge image is refused");
+	assert.equal((await upload({ csrf: "wrong", action: "icon", id: iconClient.id }, png(64, 64))).status, 403, "an icon upload needs CSRF");
+	assert((await (await upload({ csrf: appOwner.csrf, action: "icon", id: iconClient.id }, png(64, 64))).text()).includes("Icon saved."), "a PNG is saved");
+	const served = await oauthAppIcon(iconClient.id);
+	assert.equal(served.headers.get("content-type"), "image/png", "the icon is served as what it is");
+	assert.equal(served.headers.get("x-content-type-options"), "nosniff");
+	assert.deepEqual(Buffer.from(await served.arrayBuffer()), png(64, 64));
+	const iconAsk = new URL(`${origin}/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: iconClient.id, redirect_uri: redirect, state: "random-state-123", scope: "read", code_challenge: "a".repeat(43), code_challenge_method: "S256" })}`);
+	assert((await (await oauthAuthorize(new Request(iconAsk), iconAsk, user)).text()).includes(`<img class="mark" src="/oauth/apps/${iconClient.id}/icon?v=`), "the consent page shows it");
+	assert((await (await oauthAuthorize(new Request(iconAsk), iconAsk, undefined)).text()).includes(`/oauth/apps/${iconClient.id}/icon?v=`), "so does the sign-in page");
+	await developerAppsRoute(postForm("/account/apps/developer", { csrf: appOwner.csrf, action: "removeIcon", id: iconClient.id }), appOwner);
+	assert.equal((await oauthAppIcon(iconClient.id)).status, 404, "and it can be removed");
+	const otherOwner = viewer(account);
+	await developerAppsRoute(new Request(`${origin}/account/apps/developer`, { method: "POST", headers: { origin }, body: (() => { const b = new FormData(); b.set("csrf", otherOwner.csrf); b.set("action", "icon"); b.set("id", iconClient.id); b.set("icon", new Blob([png(64, 64)]), "x.png"); return b; })() }), otherOwner);
+	assert.equal((await oauthAppIcon(iconClient.id)).status, 404, "only the app's developer sets its icon");
+	const logoDoc = `https://logo-${account}.example/oauth-client.json`;
+	const savedGet = fetcher.get;
+	fetcher.get = async (url: string) => (url === logoDoc ? JSON.stringify({ client_id: logoDoc, client_name: "Logo app", redirect_uris: [`https://logo-${account}.example/`], logo_uri: `https://logo-${account}.example/icon.png` }) : undefined);
+	const logoAsk = new URL(`${origin}/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: logoDoc, redirect_uri: `https://logo-${account}.example/`, state: "random-state-123", scope: "read", code_challenge: "a".repeat(43), code_challenge_method: "S256" })}`);
+	assert((await (await oauthAuthorize(new Request(logoAsk), logoAsk, user)).text()).includes(`src="https://logo-${account}.example/icon.png"`), "a metadata document's logo_uri is the icon");
+	fetcher.get = savedGet;
 
 	// signed out, the authorize page signs you in and comes back to the request
 	await developerAppsRoute(postForm("/account/apps/developer", { csrf: appOwner.csrf, action: "register", name: "Sign-in app", redirect_uri: redirect }), appOwner);
