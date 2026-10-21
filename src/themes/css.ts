@@ -160,11 +160,16 @@ export const PAGE_CHROME_SLOTS: ChromeSlots = {
 	root: "html[data-xitter-theme]",
 	image: `${PAGE_GATE} body`,
 	imagePos: "fixed",
-	column: `${PAGE_GATE} [data-testid="primaryColumn"]`,
+	// Settings has no primary column: its list and its details are two regions
+	// of the main landmark (the timeline's own region sits inside the column)
+	column: `${PAGE_GATE} [data-testid="primaryColumn"],${PAGE_GATE} main[role="main"] section[role="region"]:not([data-testid="primaryColumn"] *)`,
 	nav: `${PAGE_GATE} header[role="banner"]>div>div`,
 	header: `${PAGE_GATE} [data-testid="primaryColumn"] [role="tablist"]:not([data-testid="toolBar"] *),${PAGE_GATE} [data-testid="primaryColumn"] [style*="position: sticky"]`,
-	sidebar: `${PAGE_GATE} [data-testid="sidebarColumn"] section,${PAGE_GATE} [data-testid="sidebarColumn"] aside[aria-label="Who to follow"]`,
-	search: `${PAGE_GATE} [role="search"],${PAGE_GATE} [data-testid="SearchBox_Search_Input"]`,
+	// The sidebar's cards and search pill are X's own rounded boxes, found by
+	// their classes in the page script (client.ts paint()), so the glass follows
+	// their corners. Nothing square in the sidebar is frosted here.
+	sidebar: "",
+	search: "",
 };
 
 export const PREVIEW_CHROME_SLOTS: ChromeSlots = {
@@ -238,7 +243,10 @@ export function pageChromeRules(slots: ChromeSlots): string {
 	const img = slots.image;
 	const pos = slots.imagePos;
 	const soft = `${glassSel(slots, slots.column)},${glassSel(slots, slots.header)}`;
-	const hard = `${glassSel(slots, slots.nav)},${glassSel(slots, slots.sidebar)},${glassSel(slots, slots.search)}`;
+	const hard = [slots.nav, slots.sidebar, slots.search]
+		.filter((sel) => sel)
+		.map((sel) => glassSel(slots, sel))
+		.join(",");
 	const tint = "background:color-mix(in srgb,var(--xt-surface) var(--xt-bg-panel),transparent)!important;";
 	return (
 		`${img}{position:relative;z-index:0}` +

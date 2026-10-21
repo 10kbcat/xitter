@@ -324,12 +324,20 @@ export const THEME_SCRIPT = String.raw`(function(){
 	var glassOn=false;
 	function wrap(sel, pageBg){
 		var skip=sel+':not(img):not(svg[data-testid="icon-verified"]):not(svg[aria-label="Translator account"]):not(.xitter-deco):not([data-xitter-badges]):not([data-xitter-frame]):not([data-xitter-framed]):not([data-xitter-decor-bg]):not(:is(svg[data-testid="icon-verified"] *,svg[aria-label="Translator account"] *,[data-xitter-badges] *,[data-xitter-frame],[data-xitter-framed] *,[data-xitter-decor-bg] *,.xitter-deco,[aria-label="Color options"] *))';
-		if(glassOn)skip+=':not([data-testid="primaryColumn"]):not([data-testid="primaryColumn"] [role="tablist"]:not([data-testid="toolBar"] *)):not([data-testid="primaryColumn"] [style*="position: sticky"]):not(header[role="banner"]>div>div):not([data-testid="sidebarColumn"] section):not([data-testid="sidebarColumn"] aside[aria-label="Who to follow"]):not([role="search"]):not([data-testid="SearchBox_Search_Input"])';
+		if(glassOn)skip+=':not([data-testid="primaryColumn"]):not(main[role="main"] section[role="region"]:not([data-testid="primaryColumn"] *)):not([data-testid="primaryColumn"] [role="tablist"]:not([data-testid="toolBar"] *)):not([data-testid="primaryColumn"] [style*="position: sticky"]):not(header[role="banner"]>div>div)';
 		if(pageBg)return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip;
 		return 'html[data-xitter-theme]:not([data-xitter-decor]) '+skip+',html[data-xitter-theme][data-xitter-decor] '+skip+':not([data-testid="primaryColumn"] *)';
 	}
+	var trailing=null;
 	function paint(){
-		if(!theme||Date.now()-at<1000)return;
+		if(!theme)return;
+		// at most once a second, but the last call is never dropped: X adds its
+		// classes with insertRule, which no observer sees, so a page that settles
+		// inside the second would otherwise keep its unthemed classes
+		if(Date.now()-at<1000){
+			if(!trailing)trailing=setTimeout(function(){trailing=null;tick()},1000-(Date.now()-at)+50);
+			return;
+		}
 		at=Date.now();
 		var p=pal(),found={pagebg:[],surface:[],text:[],secondary:[],muted:[],border:[],accentColor:[],accentBg:[],accentHover:[],accentSoft:[],accentOutline:[],button:[],buttonText:[],header:[],hover:[],menu:[],input:[],tooltip:[],icon:[],iconFill:[],iconActiveFill:[],repost:[],repostBg:[],like:[],likeBg:[],chirp:[]},posSels=[];
 		function note(kind,sel){if(!found[kind])found[kind]=[];if(found[kind].indexOf(sel)<0)found[kind].push(sel)}
@@ -340,6 +348,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 				var c=norm(r.style.color),bg=norm(r.style.backgroundColor),bd=norm(r.style.borderColor),fl=norm(r.style.fill),ol=norm(r.style.outlineColor),sel=r.selectorText;
 				var ff=r.style.fontFamily||"";
 				if(r.style.position==="fixed"||r.style.position==="absolute"){if(posSels.indexOf(sel)<0)posSels.push(sel)}
+				if(parseFloat(r.style.borderTopLeftRadius)>=12)note("rounded",sel);
 				if(ff.indexOf("TwitterChirp")>=0)note("chirp",sel);
 				if(p.bg[bg])note("pagebg",sel);
 				if(p.surface[bg])note("surface",sel);
@@ -411,9 +420,27 @@ export const THEME_SCRIPT = String.raw`(function(){
 			// Same frost skip as the transparent rule above, so these win on order
 			// instead of losing to its longer :not() chain on specificity.
 			glassOn=!!(theme.background&&typeof X.pageChrome==="string"&&X.pageChrome);
-			css.push(wrap(":is("+found.pagebg.join(",")+"):is("+posSels.join(",")+")") + "{background:var(--xt-menu)!important}");
-			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: fixed\"]") + "{background:var(--xt-menu)!important}");
-			css.push(wrap(":is("+found.pagebg.join(",")+")[style*=\"position: absolute\"]") + "{background:var(--xt-menu)!important}");
+			// The sidebar's search band is a fixed layer too, but it is a strip of
+			// page, not a popover: it stays clear and the pill inside is the glass.
+			var layer=":is("+found.pagebg.join(",")+")",band=":not(:has([role=\"search\"]))";
+			css.push(wrap(layer+":is("+posSels.join(",")+")"+band) + "{background:var(--xt-menu)!important}");
+			css.push(wrap(layer+"[style*=\"position: fixed\"]"+band) + "{background:var(--xt-menu)!important}");
+			css.push(wrap(layer+"[style*=\"position: absolute\"]"+band) + "{background:var(--xt-menu)!important}");
+			glassOn=false;
+		}
+		// Over an image, the glass goes on X's own rounded boxes in the sidebar:
+		// each module's card (empty ones too) and the search pill. They are found
+		// by their page-background and corner classes, so the tint follows the
+		// corners, and the square wrappers inside and around stay clear.
+		if(theme.background&&typeof X.pageChrome==="string"&&X.pageChrome&&(found.pagebg||[]).length&&(found.rounded||[]).length){
+			glassOn=true;
+			var card=wrap('[data-testid="sidebarColumn"] :is('+found.pagebg.join(",")+'):is('+found.rounded.join(",")+')'+(posSels.length?':not(:is('+posSels.join(",")+'))':''),true);
+			glassOn=false;
+			css.push(card+"{background:color-mix(in srgb,var(--xt-surface) var(--xt-bg-panel),transparent)!important;-webkit-backdrop-filter:blur(14px)!important;backdrop-filter:blur(14px)!important}");
+			css.push("@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){"+card+"{background:color-mix(in srgb,var(--xt-surface) 92%,transparent)!important}}");
+			// a module with nothing in it is only its border: a stray line over the picture
+			glassOn=true;
+			css.push(wrap('[data-testid="sidebarColumn"] :is('+found.pagebg.join(",")+'):is('+found.rounded.join(",")+'):empty',true)+"{display:none!important}");
 			glassOn=false;
 		}
 		add("surface","background:var(--xt-surface)!important",false);
@@ -847,4 +874,12 @@ export const THEME_SCRIPT = String.raw`(function(){
 	tick();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;tick()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 	new MutationObserver(syncDecor).observe(document.documentElement,{attributes:true,attributeFilter:["data-xitter-decor"]});
+	// and the rules X adds later, with no change to the page, are counted
+	var ruleCount=0;
+	setInterval(function(){
+		if(document.hidden)return;
+		var n=0;
+		[].forEach.call(document.styleSheets,function(ss){try{n+=ss.cssRules.length}catch(e){}});
+		if(n!==ruleCount){ruleCount=n;if(!timer)timer=setTimeout(function(){timer=null;tick()},150)}
+	},1500);
 })();`;
