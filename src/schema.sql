@@ -1542,8 +1542,11 @@ create table if not exists migration_objects (
 	kind text not null,
 	remote_id text not null,
 	local_id bigint not null,
+	created_at timestamptz not null default now(),
 	primary key (user_id, source, kind, remote_id)
 );
+-- when it came over: a move gets a daily allowance of posts (migration-import.ts)
+alter table migration_objects add column if not exists created_at timestamptz not null default now();
 -- where an account went, as handle@instance; set by the new instance when the import finished
 alter table users add column if not exists moved_to text;
 alter table users add column if not exists moved_at timestamptz;

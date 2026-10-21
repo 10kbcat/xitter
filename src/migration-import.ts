@@ -17,7 +17,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import type { Viewer } from "./auth";
-import { isBlockedEitherWay } from "./blocks";
+import { isBlockedEitherWay, replyLimited } from "./blocks";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
 import { FEDERATION_ON, INSTANCE_ID, isPeer, readLimited } from "./federation";
@@ -25,6 +25,7 @@ import { lookupRemoteUser } from "./federation-sync";
 import { flagValue } from "./flags";
 import { isId, newId, newIdAt } from "./ids";
 import { saveMentions } from "./mentions";
+import { checkLength, PostError, seenBy } from "./posts";
 import { MEDIA_DIR, sniffImage } from "./media";
 import { FORMAT, FORMAT_VERSION, type VersionInfo, versionInfo } from "./migration";
 import { blockedNameIn, forbiddenText } from "./names";
@@ -127,6 +128,11 @@ export type Check = {
 };
 
 const CODE_RE = /^xmig_[A-Za-z0-9_-]{43}$/;
+// the same accounts createPost refuses
+async function canPost(userId: string) {
+	const [u] = await sql`select status, deactivated_at from users where id = ${userId}::bigint`;
+	return !!u && u.status !== "restricted" && u.status !== "suspended" && !u.deactivated_at;
+}
 const sourceKey = (instance: string, userId: string) => `${instance}#${userId}`;
 const fileLimit = (kind: string, mime: string) => (kind === "video" ? maxVideoBytes() : mime === "image/gif" ? MAX_GIF : settings().limits.image_mb * 1024 * 1024);
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
@@ -148,6 +154,7 @@ export async function check(viewer: Viewer, sourceInput: string, codeInput: stri
 	if (info.account.status === "suspended") blockers.push({ code: "suspended", text: "The account is suspended or deactivated on the old instance." });
 	const [running] = await sql`select 1 from account_migrations where user_id = ${viewer.id}::bigint and state = 'running'`;
 	if (running) blockers.push({ code: "running", text: "An import into this account is already running. Wait for it to finish." });
+	if (!(await canPost(viewer.id))) blockers.push({ code: "restricted", text: "This account can't post right now, so nothing can be moved into it." });
 
 	if (info.version !== here.version)
 		warnings.push({ code: "version", text: `Version mismatch: ${source.host} runs Xitter ${info.version}, this instance runs ${here.version}. Anything one of them stores differently may be skipped or come over incomplete.` });
@@ -240,6 +247,7 @@ async function run(jobId: string, viewer: Viewer, checked: Check, code: string, 
 		count(kind, false);
 		if (skipped.length < 200) skipped.push(why);
 	};
+	let capped = false;
 	let lastSaved = 0;
 	const progress = async (step: string, done?: number, total?: number, force = false) => {
 		if (!force && Date.now() - lastSaved < 1000) return;
@@ -398,26 +406,56 @@ async function run(jobId: string, viewer: Viewer, checked: Check, code: string, 
 			// oldest first, so a reply finds the post it answers already here
 			const posts = arr(archive.posts).filter((p) => isId(p?.id)).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
 			const orphans = { replies: 0, quotes: 0 };
+			// posts brought over don't count against the daily caps (their ids are
+			// backdated), so a move gets its own allowance per day; the rest waits
+			// for the next run, which resumes
+			const caps = settings().daily_caps;
+			const [{ role }] = await sql`select role from users where id = ${me}::bigint`;
+			const [today] = await sql`select count(*)::int as n from migration_objects where user_id = ${me}::bigint and kind = 'post' and created_at > now() - interval '1 day'`;
+			let allowance = caps.enabled && !role ? caps.posts + caps.replies - today.n : Infinity;
 			n = 0;
 			for (const p of posts) {
 				await progress("Bringing over posts", ++n, posts.length);
 				if (mapped("post", p.id)) continue;
+				if (allowance <= 0) {
+					capped = true;
+					break;
+				}
+				if (n % 50 === 0 && !(await canPost(me))) throw new MigrationError("This account can't post right now, so the import stopped.");
 				const text = str(p.text, 100_000);
 				if (text && forbiddenText(text)) {
 					skip("posts", `"${text.slice(0, 60)}${text.length > 60 ? "…" : ""}" has words this instance doesn't allow.`);
 					continue;
 				}
+				try {
+					await checkLength(me, text);
+				} catch (e) {
+					if (!(e instanceof PostError)) throw e;
+					skip("posts", `"${text.slice(0, 60)}…" is longer than this instance allows.`);
+					continue;
+				}
+				// replies and quotes follow createPost's rules: the post must be one
+				// this account may see, and the thread must let it answer
 				let replyTo: string | null = null, replyToUser: string | null = null, conversation: string | null = null;
 				if (p.reply_to) {
 					const parent = await resolvePost(p.reply_to);
-					const [row] = parent ? await sql`select user_id::text, conversation_id::text from posts where id = ${parent}::bigint` : [];
-					if (row && !(row.user_id !== me && (await isBlockedEitherWay(me, row.user_id)))) {
+					const [row] = parent ? await sql`select p.user_id::text, p.conversation_id::text from posts p join users u on u.id = p.user_id where p.id = ${parent}::bigint and ${seenBy(me)}` : [];
+					const ok =
+						row &&
+						!(row.user_id !== me && (await isBlockedEitherWay(me, row.user_id))) &&
+						!(await sql`select 1 from posts p join users u on u.id = p.user_id where p.id = ${row.conversation_id}::bigint and not ${seenBy(me)}`).length &&
+						!(await replyLimited(row.conversation_id, me));
+					if (ok) {
 						replyTo = parent!;
 						replyToUser = row.user_id;
 						conversation = row.conversation_id;
 					} else orphans.replies++;
 				}
-				const quote = p.quote ? ((await resolvePost(p.quote)) ?? null) : null;
+				let quote = p.quote ? ((await resolvePost(p.quote)) ?? null) : null;
+				if (quote) {
+					const [q] = await sql`select p.user_id::text, u.protected from posts p join users u on u.id = p.user_id where p.id = ${quote}::bigint and ${seenBy(me)}`;
+					if (!q || (q.user_id !== me && (q.protected || (await isBlockedEitherWay(me, q.user_id))))) quote = null;
+				}
 				if (p.quote && !quote) orphans.quotes++;
 				const poll = mapped("poll", p.poll_id) ?? null;
 				const article = mapped("article", p.article_id) ?? null;
@@ -453,7 +491,9 @@ async function run(jobId: string, viewer: Viewer, checked: Check, code: string, 
 				// old instance; ones this instance doesn't know yet aren't looked up
 				if (text.includes("@")) await saveMentions(id!, text, srcInstance).catch(() => {});
 				count("posts", true);
+				allowance--;
 			}
+			if (capped) skipped.push(`This instance brings over at most ${caps.posts + caps.replies} posts a day. Start the move again tomorrow with a new code to bring over the rest; it resumes where it stopped.`);
 			if (orphans.replies) skipped.push(`${orphans.replies} replies answer posts this instance doesn't have, so they came over as posts of their own.`);
 			if (orphans.quotes) skipped.push(`${orphans.quotes} quoted posts aren't on this instance, so those posts came over without the quote.`);
 			for (const p of posts) {
@@ -646,7 +686,9 @@ async function run(jobId: string, viewer: Viewer, checked: Check, code: string, 
 		}
 
 		let finished: { ok: boolean; deactivated?: boolean; error?: string } | undefined;
-		if (options.finish) {
+		// a move that hit the daily allowance isn't finished: the old instance
+		// keeps the account (and the code) until the rest has come over
+		if (options.finish && !capped) {
 			await progress("Finishing on the old instance", undefined, undefined, true);
 			const to = `${viewer.screen_name}@${INSTANCE_ID}`;
 			finished = await callJson(source, code, "complete", { method: "POST", body: { to, note: options.note, deactivate: options.deactivate } })

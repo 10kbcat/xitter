@@ -282,6 +282,18 @@ try {
 		assert.equal(await n(b`select count(*) as n from account_migrations where user_id = ${other}::bigint`), 0);
 		await revoke(sa);
 	});
+	await step("a restricted account can't move posts in", async () => {
+		const limited = await user(b, `restr_${tag}`);
+		const sr = await signIn(B, `restr_${tag}`);
+		await b`update users set status = 'restricted' where id = ${limited}::bigint`;
+		const c = await newCode(sa);
+		const r = await form(B, sr, { action: "check", source: A_FROM_B, code: c });
+		assert.match(r.html, /can&#39;t post right now|can't post right now/);
+		const refused = await form(B, sr, { action: "start", source: A_FROM_B, code: c, ack: field(r.html, "ack") ?? "", content: "1", accept: "1" });
+		assert.equal(refused.status, 400);
+		assert.equal(await n(b`select count(*) as n from account_migrations where user_id = ${limited}::bigint`), 0);
+		await revoke(sa);
+	});
 } finally {
 	await a`delete from users where id in (${alice}::bigint, ${bob}::bigint, ${carol}::bigint)`;
 	await b`delete from users where screen_name like ${`%${tag}%`}`;
