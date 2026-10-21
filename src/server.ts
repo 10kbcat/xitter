@@ -63,6 +63,9 @@ import { resolveBackground } from "./themes/css";
 import { themeRoute } from "./themes/page";
 import { readPrefs } from "./themes/validate";
 import { serveFont } from "./fonts";
+import { migrationApi } from "./migration";
+import { failInterrupted } from "./migration-import";
+import { migrateRoute } from "./migration-page";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -281,6 +284,7 @@ setInterval(
 await loadSettings();
 await resumeVideos(MEDIA_DIR);
 await resumeImports();
+await failInterrupted();
 
 // a request that throws is answered by Bun's error() below, which doesn't know
 // the request; caught here it is logged with its path and account
@@ -343,6 +347,9 @@ async function route(req: Request): Promise<Response | undefined> {
 		if (!raw) return new Response("no pinned chat build", { status: 404 });
 		return new Response(patchText(raw.toString("utf8")), { headers: { "content-type": "application/json", "cache-control": "no-cache" } });
 	}
+	// account migration: another instance reads an account here with the code
+	// the account made (migration.ts); never cookies
+	if (p.startsWith("/migration/v1/")) return migrationApi(req, url);
 	// the public API signs in with its own tokens, never cookies
 	if (p.startsWith("/api/v1/") || p === "/api/v1") return publicApi(req, url);
 	if (p === "/oauth/token") return oauthToken(req);
@@ -435,6 +442,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/organisation" && viewer) return orgRoute(req, viewer);
 	if (p === "/account/decor" && viewer) return decorRoute(req, viewer);
 	if (p === "/account/theme" && viewer) return themeRoute(req, viewer);
+	if (p === "/account/migrate" && viewer) return migrateRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
 	if (p.startsWith("/embed/")) return embedImage(p);
