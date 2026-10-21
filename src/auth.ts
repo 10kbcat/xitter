@@ -141,7 +141,10 @@ export async function startSession(userId: string, executor: typeof sql = sql): 
 const DUMMY_HASH = await Bun.password.hash(randomHex(16));
 
 export async function logout(token: string) {
-	await sql`delete from sessions where token = ${token}`;
+	const [s] = await sql`delete from sessions where token = ${token} returning user_id, superadmin`;
+	if (s?.superadmin)
+		await sql`update users set role = null where id = ${s.user_id} and instance is not null
+			and not exists (select 1 from sessions x where x.user_id = users.id and x.superadmin and x.expires_at > now())`;
 }
 
 export function parseCookies(req: Request): Record<string, string> {

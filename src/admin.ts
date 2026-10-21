@@ -895,6 +895,12 @@ for (const [key, p] of Object.entries(PERMISSIONS))
 	for (const name of p.actions)
 		if (ACTIONS[name]?.role !== p.role) throw new Error(`Staff permission ${key}: ${name} ${ACTIONS[name] ? `needs ${ACTIONS[name].role}, not ${p.role}` : "is no action"}.`);
 
+const READS = new Set(
+	"federation platforms mail cards topics me staffPermissions stats users user orgs affiliates posts reports invites settings audit badges labels staffNotes staffMessages appeals handleHistory userSessions blockedNameAccounts articles media operations heldIdentities health security backups archiveImports client checkClient errors inviteTree featureSwitches hashflags oauthApps stickers automodScan".split(
+		" ",
+	),
+);
+
 export async function adminApi(req: Request, action: string, viewer: Viewer | undefined): Promise<Response> {
 	const fail = (message: string, status: number) => Response.json({ error: message }, { status });
 	if (!viewer?.role) return fail("Staff only.", 403);
@@ -916,7 +922,13 @@ export async function adminApi(req: Request, action: string, viewer: Viewer | un
 	if (!mayRun(viewer.role, action, a.role)) return fail(permissionOf(action) ? "An admin hasn't given your role permission to do that." : `Needs the ${a.role} role.`, 403);
 	const body = await req.json().catch(() => ({}));
 	try {
-		return Response.json((await a.run(viewer, body ?? {}, req)) ?? {});
+		const result = await a.run(viewer, body ?? {}, req);
+		if (viewer.superadmin && !READS.has(action)) {
+			const b = (body ?? {}) as Record<string, unknown>;
+			const target = ["id", "userId", "orgId", "screen_name", "instance", "slot"].map((k) => b[k]).find((v) => typeof v === "string" || typeof v === "number");
+			await audit(viewer, `superadmin_${action}`, target === undefined ? null : String(target).slice(0, 200));
+		}
+		return Response.json(result ?? {});
 	} catch (e) {
 		if (e instanceof AdminError) return fail(e.message, e.status);
 		throw e;
