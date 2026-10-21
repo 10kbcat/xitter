@@ -10,6 +10,7 @@ import { accountPage, esc } from "./account-page";
 import { type User, type Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
+import { FLAGS, flagList } from "./flags";
 import { callOperation } from "./graphql";
 import { isId, newId } from "./ids";
 import { absolute, mediaUpload, mediaUrl, posterUrl } from "./media";
@@ -82,6 +83,18 @@ function userJson(u: User) {
 		avatar_url: absolute(u.avatar_url),
 		banner_url: absolute(u.banner_url),
 		verified_type: u.verified_type,
+		verified_since: iso(u.verified_at),
+		// businesses and governments: X draws them with square pictures
+		organization: u.verified_type === "business" || u.verified_type === "government",
+		// the organisations it's an affiliate of; the first is the badge after its name
+		affiliations: [u.org, ...(u.more_orgs ?? [])].filter((o) => !!o).map((o) => ({ screen_name: o!.screen_name, name: o!.name, badge_url: absolute(o!.avatar_url) })),
+		// custom badges (staff-made, and from its home instance) and pride flags, in order
+		badges: [
+			...(u.badges ?? []).map((b) => ({ name: b.name, url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png` })),
+			...(u.remote_badges ?? []).map((b) => ({ name: b.name, url: b.url })),
+			...flagList(u.flag).map((f) => ({ name: `${FLAGS[f].name} flag`, url: `${PUBLIC_ORIGIN}/public/flag-${f}.svg` })),
+		],
+		...(u.affiliates ? { affiliates_count: u.affiliates } : {}),
 		protected: !!u.protected,
 		created_at: iso(u.created_at),
 		url: `${PUBLIC_ORIGIN}/${u.screen_name}`,
