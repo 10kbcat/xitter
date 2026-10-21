@@ -460,6 +460,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		if(layer){layer.remove();layer=null}
 		if(style){style.remove();style=null}
 		document.querySelectorAll("[data-xitter-glass],[data-xitter-clear]").forEach(function(el){el.removeAttribute("data-xitter-glass");el.removeAttribute("data-xitter-clear")});
+		seen=new WeakSet();
 		greys.textContent="";greyKey="";greyAt=0;
 		document.documentElement.removeAttribute("data-xitter-decor");
 		current=null;
@@ -494,7 +495,10 @@ export const DECOR_SCRIPT = String.raw`(function(){
 			layer.appendChild(v);
 		}else{var pic=document.createElement("img");pic.src=bg.image;pic.alt="";layer.appendChild(pic)}
 		document.body.prepend(layer);
-		css+='html[data-xitter-decor] header[role="banner"]>div>div,html[data-xitter-decor] [data-testid="primaryColumn"],html[data-xitter-decor] [data-xitter-glass]{background:'+glass+'!important;'+(t&&!light?"background:"+t.glass+"!important;":"")+'border-color:'+edge+'!important;'+frost+'}'+
+		var pane='background:'+glass+'!important;'+(t&&!light?"background:"+t.glass+"!important;":"")+frost;
+		css+='html[data-xitter-decor] header[role="banner"]>div>div,html[data-xitter-decor] [data-xitter-glass]{'+pane+';border-color:'+edge+'!important}'+
+			'html[data-xitter-decor] [data-testid="primaryColumn"]{background:transparent!important;position:relative;z-index:0;border-color:'+edge+'!important}'+
+			'html[data-xitter-decor] [data-testid="primaryColumn"]::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;'+pane+'}'+
 			'html[data-xitter-decor] [data-xitter-clear]{background:transparent!important}'+
 			'html[data-xitter-decor],html[data-xitter-decor] body{background:transparent!important}'+
 			'html[data-xitter-decor] #react-root>div>div,html[data-xitter-decor] #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
@@ -505,18 +509,18 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		style=document.createElement("style");style.setAttribute("data-xitter-decor-css","");style.textContent=css;document.head.appendChild(style);
 		greys.textContent="";greyKey="";glassAt=0;lighten();sidebar();
 	}
-	var glassAt=0,glassTimer=null;
+	var glassAt=0,glassTimer=null,seen=new WeakSet();
 	function sidebar(){
 		if(!current||!layer)return;
 		if(Date.now()-glassAt<300){if(!glassTimer)glassTimer=setTimeout(function(){glassTimer=null;sidebar()},300);return}
 		glassAt=Date.now();
-		var side=document.querySelector('[data-testid="sidebarColumn"]');
-		if(!side)return;
 		var page=document.body.style.backgroundColor||"rgb(0, 0, 0)";
-		side.querySelectorAll("div:not([data-xitter-glass]):not([data-xitter-clear])").forEach(function(el){
-			var cs=getComputedStyle(el);
-			if(cs.backgroundColor!==page)return;
-			el.setAttribute(parseFloat(cs.borderTopLeftRadius)>0?"data-xitter-glass":"data-xitter-clear","");
+		document.querySelectorAll('[data-testid="sidebarColumn"] div,[data-testid="primaryColumn"] div').forEach(function(el){
+			if(seen.has(el))return;
+			seen.add(el);
+			var cs=getComputedStyle(el),opaque=cs.backgroundColor===page;
+			if(el.closest('[data-testid="sidebarColumn"]')){if(opaque)el.setAttribute(parseFloat(cs.borderTopLeftRadius)>0?"data-xitter-glass":"data-xitter-clear","");return}
+			if(opaque||cs.backdropFilter!=="none"&&cs.backdropFilter)el.setAttribute("data-xitter-clear","");
 		});
 	}
 	// X adds its classes as it first uses them: the grey ones are looked for again
@@ -550,7 +554,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 	base.textContent='[data-xitter-framed] div{border-radius:4%!important}'+
 		'[data-xitter-frame]{position:absolute;left:-11%;top:-11%;width:122%;height:122%;max-width:none;pointer-events:none;z-index:1}'+
 		'[data-xitter-decor-bg]{position:fixed;inset:0;z-index:-1;background:#000;overflow:hidden;pointer-events:none}'+
-		'[data-xitter-decor-bg] video,[data-xitter-decor-bg] img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top}';
+		'[data-xitter-decor-bg] video,[data-xitter-decor-bg] img{position:absolute;left:50%;top:0;width:max(108vw,230vh);height:auto;max-width:none;transform:translateX(-50%)}';
 	document.head.appendChild(base);
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;scan()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 	addEventListener("popstate",scan);
