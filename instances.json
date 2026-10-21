@@ -31,6 +31,13 @@
 			"state": "active"
 		},
 		{
+			"id": "social.pixelatedaria.space",
+			"name": "social.pixelatedaria.space",
+			"source_url": "https://github.com/xittered/xitter",
+			"public_key": "yTE4xnSExcGTOgq_JAhElkvce0vif-MxTZefmy-8IeY",
+			"state": "active"
+		},
+		{
 			"id": "x.glitchprod.xyz",
 			"name": "Digital Circus",
 			"source_url": "https://github.com/MDCYT/xitter",
@@ -85,13 +92,6 @@
 			"source_url": "https://github.com/braidenhxyz/xitter-compose",
 			"public_key": "eiI4EMp0bupFbJ7EKy5A_MIo_yvhRMbljYSnzozwXIY",
 			"state": "active"
-		},
-		{
-		  "id": "social.pixelatedaria.space",
-		  "name": "everything happens so much",
-		  "source_url": "https://github.com/xittered/xitter",
-		  "public_key": "yTE4xnSExcGTOgq_JAhElkvce0vif-MxTZefmy-8IeY",
-		  "state": "active"
 		}
 	]
 }
