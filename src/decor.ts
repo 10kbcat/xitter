@@ -13,6 +13,7 @@ import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { MEDIA_DIR } from "./media";
 import { STAFF_HANDLE } from "./invites";
+import { RELATION_BUTTON } from "./x-selectors";
 import { FILE_RE, fileUrl, rewardPage, shopBrowserScript, steamItem, steamProfile, type Item, type Kind } from "./steam-items";
 
 const FILES = "https://shared.akamai.steamstatic.com/community_assets/images/items";
@@ -415,6 +416,7 @@ export async function decorRoute(req: Request, viewer: Viewer): Promise<Response
 // The page script: frames on avatars everywhere, and on a decorated profile its
 // background behind the page and its theme on the column.
 export const DECOR_SCRIPT = String.raw`(function(){
+	var RELATION=${JSON.stringify(RELATION_BUTTON)};
 	var known={},waiting={},queue=[],timer,current=null;
 	var still=matchMedia("(prefers-reduced-motion: reduce)").matches;
 	var RESERVED=/^(home|explore|notifications|messages|i|settings|search|compose|account|admin|login|logout|signup|tos|privacy|jobs|bookmarks|lists|communities|premium|verified-choose|public|abs|hashtag|intent)$/;
@@ -507,7 +509,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		var col=light?(t?"linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),"+t.background:"rgba(255,255,255,.88)"):(t?"linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),"+t.background:"rgba(0,0,0,.72)");
 		css+='html[data-xitter-decor] [data-testid="primaryColumn"]{background:'+col+'!important;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}';
 		dark=!light;
-		if(t&&!light)css+='html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] button,html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]{background:'+t.button+'!important;border-color:'+t.outline+'!important}';
+		if(t&&!light)css+='html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] '+RELATION+',html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]{background:'+t.button+'!important;border-color:'+t.outline+'!important}';
 		style=document.createElement("style");style.setAttribute("data-xitter-decor-css","");style.textContent=css;document.head.appendChild(style);
 		greys.textContent="";greyKey="";lighten();
 	}

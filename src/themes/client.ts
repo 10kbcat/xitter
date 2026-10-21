@@ -1,6 +1,7 @@
 // THEME_SCRIPT, the in-page boot script, and LINK_SCOPES it interpolates.
 
 import { STEAM_STILL_PATH, STEAM_VIDEO_PATH } from "../steam-items";
+import { RELATION_BUTTON } from "../x-selectors";
 import { ACCENT_IDS, ACCENTS } from "./presets";
 import { NIGHT_MODE_ATTR } from "./validate";
 
@@ -24,6 +25,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 	var scopes=${JSON.stringify(LINK_SCOPES)};
 	var presets=X.themePresets||[];
 	var sheet,fontSheet,accentSheet,at=0,timer,key="",accentKey="";
+	var RELATION=${JSON.stringify(RELATION_BUTTON)};
 	var CHIRP='TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
 	var TICK='<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.64 18.952l-5.55-4.861 1.317-1.504 3.951 3.459 8.459-10.948L19.4 6.32 9.64 18.952z"></path></g></svg>';
 	var GOLD={"226, 183, 25":1,"212, 167, 44":1};
@@ -491,7 +493,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 		css.push('html[data-xitter-theme] [data-testid="like"]:hover [style*="background-color: rgba(249, 24, 128"]{background-color:var(--xt-like-soft)!important}');
 		css.push('html[data-xitter-theme] [data-testid="app-text-transition-container"]{color:var(--xt-views)!important}');
 		css.push('html[data-xitter-theme] [data-testid="AppTabBar_Notifications_Link"] div[style*="background"]{background-color:var(--xt-badge)!important}');
-		css.push('html[data-xitter-theme] [data-testid="placementTracking"] button,html[data-xitter-theme] a[data-testid="editProfileButton"]{background:var(--xt-secondary-button)!important;border-color:var(--xt-secondary-button-border)!important;color:var(--xt-secondary-button-text)!important}');
+		css.push('html[data-xitter-theme] [data-testid="placementTracking"] '+RELATION+',html[data-xitter-theme] a[data-testid="editProfileButton"]{background:var(--xt-secondary-button)!important;border-color:var(--xt-secondary-button-border)!important;color:var(--xt-secondary-button-text)!important}');
 		if(theme.font&&fontOk(theme.font.ui)){
 			(found.chirp||[]).forEach(function(sel){css.push('html[data-xitter-theme] '+sel+'{font-family:"'+theme.font.ui+'",'+CHIRP+'!important}')});
 		}
