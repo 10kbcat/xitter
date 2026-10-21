@@ -1009,6 +1009,12 @@ alter table oauth_clients alter column owner_id drop not null;
 -- staff blocks (Admin > OAuth apps); a blocked app is also revoked
 alter table oauth_clients add column if not exists blocked_at timestamptz;
 alter table oauth_clients add column if not exists blocked_reason text;
+-- the app's icon: uploaded by its developer (icon, icon_mime, icon_at), or the
+-- logo_uri of its client ID metadata document
+alter table oauth_clients add column if not exists icon bytea;
+alter table oauth_clients add column if not exists icon_mime text;
+alter table oauth_clients add column if not exists icon_at timestamptz;
+alter table oauth_clients add column if not exists logo_uri text;
 alter table api_tokens add column if not exists client_id bigint references oauth_clients(id) on delete cascade;
 alter table api_tokens add column if not exists expires_at timestamptz;
 create index if not exists api_tokens_client_idx on api_tokens(client_id, user_id) where client_id is not null;

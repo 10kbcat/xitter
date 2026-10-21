@@ -45,7 +45,7 @@ import { instancesRoute } from "./federation-settings";
 import { importRoute, resumeImports } from "./archive-import";
 import { stickerImage, stickerPacks } from "./stickers";
 import { apiTokensRoute, publicApi } from "./public-api";
-import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken } from "./oauth";
+import { connectedAppsRoute, developerAppsRoute, oauthAppIcon, oauthAuthorize, oauthToken } from "./oauth";
 import { authorizationServerMetadata } from "./oauth-metadata";
 import { apiDocsPage } from "./api-docs";
 import { hashflagAsset } from "./hashflags";
@@ -343,6 +343,8 @@ async function route(req: Request): Promise<Response | undefined> {
 	// the public API signs in with its own tokens, never cookies
 	if (p.startsWith("/api/v1/") || p === "/api/v1") return publicApi(req, url);
 	if (p === "/oauth/token") return oauthToken(req);
+	const appIcon = /^\/oauth\/apps\/(\d{1,19})\/icon$/.exec(p);
+	if (appIcon && req.method === "GET") return oauthAppIcon(appIcon[1]!);
 	if (p === "/.well-known/oauth-authorization-server") return authorizationServerMetadata();
 	if (p === "/api" || p === "/api/") return apiDocsPage(req);
 	if (req.method === "OPTIONS") return new Response(null, { status: 204 });
