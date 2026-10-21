@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"sequence": 15,
+	"sequence": 16,
 	"instances": [
 		{
 			"id": "cro.corvine.vip",
@@ -35,6 +35,13 @@
 			"name": "Xitter",
 			"source_url": "https://github.com/gabytz777/xitter",
 			"public_key": "aE7RikVEmC2lKQPAkfVtNk1GpJtx87H7PYaLxHxbZTM",
+			"state": "active"
+		},
+		{
+			"id": "social.pixelatedaria.space",
+			"name": "social.pixelatedaria.space",
+			"source_url": "https://github.com/xittered/xitter",
+			"public_key": "yTE4xnSExcGTOgq_JAhElkvce0vif-MxTZefmy-8IeY",
 			"state": "active"
 		},
 		{
