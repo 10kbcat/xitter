@@ -1482,3 +1482,14 @@ alter table users add column if not exists decor jsonb;
 alter table posts add column if not exists conversation_card jsonb;
 
 alter table posts add column if not exists conversation_card_post_id bigint references posts (id) on delete set null;
+
+create table if not exists post_translations (
+	post_id bigint not null references posts (id) on delete cascade,
+	version int not null,
+	target_lang text not null,
+	source_hash text not null,
+	source_lang text not null,
+	text text not null,
+	created_at timestamptz not null default now(),
+	primary key (post_id, version, target_lang)
+);

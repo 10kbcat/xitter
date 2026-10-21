@@ -30,6 +30,7 @@ import { emailInfo, resendConfirmation } from "./email-address";
 import { pushSettingsRoute } from "./push";
 import { answerRequest, followList, knownFollowerCount, pendingRequests, setFollow, setProtected, suggestedUsers, updateFriendship, userById, userByName, usersByIds } from "./users";
 import { cleanText, oneLine } from "./text-clean";
+import { translateRoute } from "./translate";
 
 // friendships/show's shape, from the viewer's side (source) and the other account's (target)
 async function relationship(viewer: Viewer, targetId: string) {
@@ -416,6 +417,8 @@ export async function restRoute(method: string, path: string, viewer: Viewer, re
 	if (path === "/1.1/live_pipeline/update_subscriptions") return Response.json({ subscriptions: { errors: [] } });
 	if (path.endsWith("/p2"))
 		return Response.json({ totalEvents: 0, eventsFailed: 0, shouldRetry: false, retryAfterMs: null, eventsFailedSequenceNumbers: null, message: null });
+	const translation = await translateRoute(path, viewer);
+	if (translation) return translation;
 	if (TELEMETRY.test(path)) return Response.json({});
 	return undefined;
 }

@@ -10,6 +10,7 @@ import { CLIENT_DIR } from "./client-cache";
 import { PUBLIC_ORIGIN } from "./config";
 import type { ArticleEntity } from "./articles";
 import { FLAGS, flagList } from "./flags";
+import { guessLang } from "./lang-guess";
 import { homeOf, mentionsIn } from "./mentions";
 import { type MediaRow, absolute, mediaEntity, mediaUrl, posterUrl } from "./media";
 import { placeById } from "./places";
@@ -412,7 +413,7 @@ function editControl(p: PostRow) {
 const permalink = (p: PostRow) => `${PUBLIC_ORIGIN}/${p.author.screen_name}/status/${p.id}`;
 
 // @names in the text that belong to an account, with code point offsets as the client expects
-function userMentions(p: PostRow) {
+export function userMentions(p: PostRow) {
 	if (!p.mentions?.length) return [];
 	const byName = new Map(p.mentions.map((m) => [m.screen_name.toLowerCase(), m]));
 	return mentionsIn(p.text, homeOf(p.author.screen_name)).flatMap(({ key, start, end }) => {
@@ -425,7 +426,7 @@ const bioMentions = (u: User) =>
 	mentionsIn(u.bio ?? "", homeOf(u.screen_name)).map(({ key, start, end }) => ({ id_str: "", indices: [start, end], screen_name: key }));
 
 // #tags in the text; the client links each to a search for it
-function hashtags(text: string) {
+export function hashtags(text: string) {
 	// any script's letters (#привет), at least one letter, not glued to a word before it
 	return [...text.matchAll(/(?<![\p{L}\p{N}_#&])#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu)].map((m) => {
 		const start = [...text.slice(0, m.index)].length;
@@ -529,7 +530,6 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 		grok_analysis_button: false,
 		grok_annotations: {},
 		grok_translated_post_with_availability: { is_available: false },
-		is_translatable: false,
 		legacy: {
 			bookmark_count: p.bookmark_count,
 			bookmarked: p.bookmarked,
@@ -563,7 +563,7 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 						quoted_status_permalink: { url: quoteLink, expanded: quoteLink, display: quoteLink.replace(/^https?:\/\//, "") },
 					}
 				: {}),
-			lang: "und",
+			lang: guessLang(p.text),
 			quote_count: p.quote_count,
 			reply_count: p.reply_count,
 			retweet_count: p.repost_count,
