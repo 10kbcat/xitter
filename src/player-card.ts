@@ -1,10 +1,10 @@
-// X's client shows a "player" card by framing its own /i/cards/tfw/v1/<post id>
+// X's client shows a "player" card by framing its own /i/cards-frame/<post id>
 // page, not the card's player_url. This is that page: the post's player in a
 // frame of its own, for anyone who can see the post.
 
 import { getPost } from "./posts";
 
-const PLAYER_PAGE = /^\/i\/cards\/tfw\/v1\/(\d{1,19})\/?$/;
+const PLAYER_PAGE = /^\/i\/cards(?:-frame|\/tfw\/v1)\/(\d{1,19})\/?$/;
 // players the page may frame (links.ts makes these for YouTube)
 const PLAYER_ORIGINS = ["https://www.youtube-nocookie.com"];
 
