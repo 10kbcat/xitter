@@ -807,6 +807,15 @@ const ACTIONS: Record<string, Action> = {
 				await setSetting("post_limits", next);
 				changed.push("post_limits");
 			}
+			if (b.daily_caps && typeof b.daily_caps === "object") {
+				const cap = (v: unknown, name: string) => {
+					const x = Number(v);
+					if (!Number.isInteger(x) || x < 1 || x > 1_000_000) throw new AdminError(`The daily ${name} cap must be a whole number from 1 to 1000000.`);
+					return x;
+				};
+				await setSetting("daily_caps", { enabled: !!b.daily_caps.enabled, posts: cap(b.daily_caps.posts, "post"), replies: cap(b.daily_caps.replies, "reply") });
+				changed.push("daily_caps");
+			}
 			if (b.announcement && typeof b.announcement === "object") {
 				const text = String(b.announcement.text ?? "").trim().slice(0, 500);
 				const raw = Array.isArray(b.announcement.buttons) ? b.announcement.buttons : [];
