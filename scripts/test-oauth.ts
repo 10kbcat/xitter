@@ -8,6 +8,7 @@ import { connectedAppsRoute, developerAppsRoute, oauthAuthorize, oauthToken, val
 import { publicApi } from "../src/public-api";
 import { PUBLIC_ORIGIN } from "../src/config";
 import { fetcher } from "../src/oauth-metadata";
+import { codeAt, newSecret } from "../src/totp";
 import "../src/admin"; // first: oauth-admin.ts and admin.ts import each other
 import { oauthAppActions } from "../src/oauth-admin";
 
@@ -117,7 +118,46 @@ try {
 	await assert.rejects(oauthAppActions.blockOAuthApp.run(staff, { url: "http://not-https.example/x.json" }), "only client ID URLs can be blocked by address");
 	await sql`delete from oauth_clients where metadata_url = ${doc}`;
 	fetcher.get = realGet;
-	console.log("OAuth registration, consent, PKCE, scope, replay, revocation, client metadata document and admin block checks passed");
+
+	// signed out, the authorize page signs you in and comes back to the request
+	await developerAppsRoute(postForm("/account/apps/developer", { csrf: appOwner.csrf, action: "register", name: "Sign-in app", redirect_uri: redirect }), appOwner);
+	const [signInClient] = await sql`select id::text from oauth_clients where owner_id = ${developer}::bigint and name = 'Sign-in app'`;
+	await sql`update users set password_hash = ${await Bun.password.hash("right-password-1")}, email = ${`signin-${other}@example.org`} where id = ${other}::bigint`;
+	const ask = { response_type: "code", client_id: signInClient.id, redirect_uri: redirect, state: "random-state-123", scope: "read", code_challenge: "a".repeat(43), code_challenge_method: "S256" };
+	const askUrl = new URL(`${origin}/oauth/authorize?${new URLSearchParams(ask)}`);
+	const signInPage = await oauthAuthorize(new Request(askUrl), askUrl, undefined);
+	assert.equal(signInPage.status, 200, "signed out, the page opens");
+	const signInHtml = await signInPage.text();
+	assert(signInHtml.includes('name="password"') && signInHtml.includes("to continue to Sign-in app"), "it's a sign-in form for this app");
+	const badAsk = new URL(askUrl);
+	badAsk.searchParams.set("redirect_uri", "https://evil.example/callback");
+	assert.equal((await oauthAuthorize(new Request(badAsk), badAsk, undefined)).status, 400, "a bad request isn't offered sign-in");
+	const crossSite = new Request(`${origin}/oauth/authorize`, { method: "POST", headers: { origin: "https://evil.example", "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ ...ask, username: `oauth_${other}`, password: "right-password-1" }) });
+	assert.equal((await oauthAuthorize(crossSite, askUrl, undefined)).status, 403, "a sign-in posted from another site is refused");
+	const wrong = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, username: `oauth_${other}`, password: "nope" }), askUrl, undefined);
+	assert.equal(wrong.status, 401);
+	assert((await wrong.text()).includes("Wrong username or password."), "a wrong password says so");
+	const signedIn = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, username: `signin-${other}@example.org`, password: "right-password-1" }), askUrl, undefined);
+	assert.equal(signedIn.status, 303, "the right password (by email) signs in");
+	assert.equal(signedIn.headers.get("location"), `/oauth/authorize?${new URLSearchParams(ask)}`, "and goes back to the same request");
+	const sessionCookie = signedIn.headers.getSetCookie().find((c) => c.startsWith("auth_token="));
+	const sessionToken = sessionCookie?.split(";")[0]?.split("=")[1];
+	assert(sessionToken && (await sql`select 1 from sessions where token = ${sessionToken} and user_id = ${other}::bigint`).length, "with a real session for that account");
+	const denied = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, decision: "deny" }), askUrl, undefined);
+	assert.equal(new URL(denied.headers.get("location")!).searchParams.get("error"), "access_denied", "Cancel tells the app no without signing in");
+	// with two-factor on, the code comes next
+	const secret = newSecret();
+	await sql`update users set totp_enabled = true, totp_secret = ${secret} where id = ${other}::bigint`;
+	const codeStep = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, username: `oauth_${other}`, password: "right-password-1" }), askUrl, undefined);
+	const codeHtml = await codeStep.text();
+	const challengeId = /name="challenge" value="([^"]+)"/.exec(codeHtml)?.[1];
+	assert(challengeId && codeHtml.includes('name="code"'), "two-factor accounts are asked for a code");
+	const badCode = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, challenge: challengeId, code: "000000" }), askUrl, undefined);
+	assert((await badCode.text()).includes(`value="${challengeId}"`), "a wrong code can be tried again");
+	const goodCode = await oauthAuthorize(postForm("/oauth/authorize", { ...ask, challenge: challengeId, code: codeAt(secret, Math.floor(Date.now() / 30000)) }), askUrl, undefined);
+	assert.equal(goodCode.status, 303, "the right code signs in");
+	assert(goodCode.headers.getSetCookie().some((c) => c.startsWith("auth_token=")), "with a session");
+	console.log("OAuth registration, consent, PKCE, scope, replay, revocation, client metadata document and admin block and sign-in checks passed");
 } finally {
 	await sql`delete from users where id in (${developer}::bigint, ${account}::bigint, ${other}::bigint)`;
 	await sql.close();

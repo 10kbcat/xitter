@@ -2,7 +2,7 @@
 // client secrets and implicit grants are intentionally unsupported.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Viewer } from "./auth";
-import { otherAccounts, switchCookies } from "./accounts";
+import { otherAccounts, signInCookies, switchCookies } from "./accounts";
 import { accountPage, esc } from "./account-page";
 import { boundedBody } from "./api-input";
 import { PUBLIC_ORIGIN } from "./config";
@@ -10,7 +10,11 @@ import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { requestIp } from "./login-history";
 import { clientMetadata, metadataClientId } from "./oauth-metadata";
+import { passwordStep } from "./password-sign-in";
 import { hit, limitedResponse } from "./ratelimit";
+import { settings } from "./settings";
+import { loadLook, nightModeCookies } from "./themes/api";
+import { answerChallenge } from "./two-factor";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const challengeFor = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
@@ -99,8 +103,74 @@ const redirectWith = (request: RequestData, params: Record<string, string>) => {
 	return new Response(null, { status: 303, headers: { location: url.toString(), "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 };
 
+// the request's parameters, to carry it through a form or back to this page
+const requestParams = (request: RequestData) => ({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirect, state: request.state, scope: request.scope, code_challenge: request.challenge, code_challenge_method: "S256" });
+const hiddenFields = (fields: Record<string, string>) => Object.entries(fields).map(([key, val]) => `<input type="hidden" name="${key}" value="${esc(val)}">`).join("");
+const backTo = (request: RequestData, cookies: string[]) => {
+	const headers = new Headers({ location: `/oauth/authorize?${new URLSearchParams(requestParams(request))}`, "cache-control": "no-store" });
+	for (const c of cookies) headers.append("set-cookie", c);
+	return new Response(null, { status: 303, headers });
+};
+
+const appCard = (request: RequestData) => {
+	const initial = esc([...request.name.trim()][0]?.toUpperCase() ?? "?");
+	return `<div class="app"><span class="mark" aria-hidden="true">${initial}</span><div><b>${esc(request.name)}</b><div class="dim">${request.owner ? `By @${esc(request.owner)} · ` : "From "}${esc(new URL(request.redirect).host)}</div></div><span class="pill">${request.scope === "write" ? "Read and write" : "Read only"}</span></div>`;
+};
+
+// Signed out, the authorize page signs you in itself (password, then a
+// second-factor code if the account has one) and comes back to the request.
+async function signInFirst(req: Request, url: URL): Promise<Response> {
+	const ip = requestIp(req) ?? "unknown";
+	const f = req.method === "POST" ? await form(req) : undefined;
+	// a sign-in form posted from another site would sign you in as someone else
+	if (req.method === "POST" && (!f || req.headers.get("origin") !== PUBLIC_ORIGIN)) return new Response("Invalid sign-in form.", { status: 403 });
+	if (!f && metadataClientId(url.searchParams.get("client_id") ?? "")) {
+		const limit = hit("endpoint", `oauth-metadata:${ip}`);
+		if (!limit.ok) return limitedResponse(limit);
+	}
+	const request = await authorization(f ?? url.searchParams);
+	if (!request) return new Response("Invalid app authorization request.", { status: 400 });
+	let error = "", challenge = "", typed = "";
+	if (f) {
+		if (value(f, "decision") === "deny") return redirectWith(request, { error: "access_denied" });
+		const limit = hit("auth", ip);
+		if (!limit.ok) return limitedResponse(limit);
+		const signedIn = async (session: { token: string; csrf: string; userId: string }) =>
+			backTo(request, [...(await signInCookies(req, session)), ...nightModeCookies(await loadLook(session.userId))]);
+		if (value(f, "challenge")) {
+			const answer = await answerChallenge(value(f, "challenge"), value(f, "code"));
+			if (answer.session) return signedIn(answer.session);
+			if (answer.unknown) error = "That sign-in took too long. Enter your password again.";
+			else {
+				error = answer.error ?? "That code isn't right.";
+				// after too many wrong codes the challenge is spent: back to the password
+				if (!answer.error?.startsWith("Too many")) challenge = value(f, "challenge");
+			}
+		} else {
+			typed = value(f, "username");
+			const step = await passwordStep(typed, value(f, "password"));
+			if ("session" in step) return signedIn(step.session);
+			if ("challenge" in step) challenge = step.challenge;
+			else error = step.error;
+		}
+	}
+	const name = settings().instance_name;
+	const params = hiddenFields(requestParams(request));
+	const fields = challenge
+		? `<input type="hidden" name="challenge" value="${esc(challenge)}"><label>Code from your authenticator app<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20" required autofocus></label>`
+		: `<label>Username or email<input name="username" value="${esc(typed)}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="320" required${typed ? "" : " autofocus"}></label>
+<label>Password<input name="password" type="password" autocomplete="current-password" maxlength="1024" required${typed ? " autofocus" : ""}></label>`;
+	return accountPage({ req, title: "Sign in", referrer: "same-origin", status: error ? 401 : 200, css: CONSENT_CSS, body: `${appCard(request)}
+<h1>Sign in to ${esc(name)} to continue to ${esc(request.name)}</h1>
+<p class="dim">${challenge ? "Your account has two-factor authentication." : `You'll see what ${esc(request.name)} can do before anything is shared.`}</p>
+${error ? `<p class="error" role="alert">${esc(error)}</p>` : ""}<form method="post" class="signin">${params}${fields}
+<button>${challenge ? "Verify" : "Sign in"}</button></form>
+<form method="post" class="decide">${params}<button name="decision" value="deny" class="secondary">Cancel</button></form>
+<p class="fine">New here, or forgot your password? Go to <a href="/">${esc(name)}</a>, then reopen this link from ${esc(request.name)}.</p>` });
+}
+
 export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | undefined): Promise<Response> {
-	if (!viewer) return new Response("Sign in, then reopen this authorization link.", { status: 401 });
+	if (!viewer) return signInFirst(req, url);
 	if (viewer.status !== "active") return new Response("This account cannot authorize apps.", { status: 403 });
 	const f = req.method === "POST" ? await form(req) : undefined;
 	if (req.method === "POST" && (!f || value(f, "csrf") !== viewer.csrf || (req.headers.get("origin") && req.headers.get("origin") !== PUBLIC_ORIGIN))) return new Response("Invalid authorization form.", { status: 403 });
@@ -118,10 +188,7 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 			// make another signed-in account active, then show this same request to it
 			const cookies = await switchCookies(req, viewer, value(f, "user_id"));
 			if (!cookies) return new Response("That account isn't signed in here.", { status: 400 });
-			const again = new URLSearchParams({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirect, state: request.state, scope: request.scope, code_challenge: request.challenge, code_challenge_method: "S256" });
-			const headers = new Headers({ location: `/oauth/authorize?${again}`, "cache-control": "no-store" });
-			for (const c of cookies) headers.append("set-cookie", c);
-			return new Response(null, { status: 303, headers });
+			return backTo(request, cookies);
 		}
 		if (value(f, "decision") !== "approve") return redirectWith(request, { error: "access_denied" });
 		const fresh = code();
@@ -141,8 +208,7 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 		});
 		return redirectWith(request, { code: fresh });
 	}
-	const hidden = Object.entries({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirect, state: request.state, scope: request.scope, code_challenge: request.challenge, code_challenge_method: "S256", csrf: viewer.csrf })
-		.map(([key, val]) => `<input type="hidden" name="${key}" value="${esc(val)}">`).join("");
+	const hidden = hiddenFields({ ...requestParams(request), csrf: viewer.csrf });
 	// what public-api.ts lets a token of this scope do; keep the two in step
 	const reads = ["Read posts, profiles, and timelines your account can see", "See who you follow and who follows you", "Search posts and people"];
 	const can = request.scope === "write"
@@ -158,7 +224,7 @@ export async function oauthAuthorize(req: Request, url: URL, viewer: Viewer | un
 		? `<form method="post" class="accounts">${hidden}<input type="hidden" name="decision" value="switch">${others.map((u) => `<button name="user_id" value="${esc(u.id)}" class="account">${avatar(u)}<span><b>${esc(u.name || u.screen_name)}</b><span class="dim">@${esc(u.screen_name)}</span></span></button>`).join("")}</form>`
 		: `<p class="dim none">No other accounts are signed in on this browser. Add one from the account menu on the home page, then reopen this link.</p>`;
 	return accountPage({ req, viewer, title: "Authorize app", referrer: "same-origin", css: CONSENT_CSS, body: `<div class="who">${avatar(viewer)}<div class="name"><div class="dim">Signed in as</div><b>${esc(viewer.name || viewer.screen_name)}</b> <span class="dim">@${esc(viewer.screen_name)}</span></div><details class="switch"><summary>Switch account</summary><div class="menu">${accounts}</div></details></div>
-<div class="app"><span class="mark" aria-hidden="true">${initial(request.name)}</span><div><b>${esc(request.name)}</b><div class="dim">${request.owner ? `By @${esc(request.owner)} · ` : "From "}${esc(new URL(request.redirect).host)}</div></div><span class="pill">${request.scope === "write" ? "Read and write" : "Read only"}</span></div>
+${appCard(request)}
 <h1>Authorize ${esc(request.name)} to access your account?</h1>
 <section><h2>This app will be able to:</h2>${list(can, CHECK, "yes")}</section>
 <section><h2>It won't be able to:</h2>${list(cannot, CROSS, "no")}</section>
@@ -199,6 +265,10 @@ section h2{margin:4px 0 8px;font-size:17px;line-height:20px}
 form.decide{display:flex;gap:12px;margin-top:8px}
 form.decide button{flex:1 1 0;min-width:0;min-height:44px;font-size:16px}
 .fine{color:var(--muted);font-size:13px;line-height:16px}
+form.signin{justify-items:stretch}
+.signin label{display:grid;gap:6px;margin:0}
+.signin input{color:var(--text)}
+.signin button{min-height:44px;font-size:16px}
 .fine code{word-break:break-all}
 `;
 
