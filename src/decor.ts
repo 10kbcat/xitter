@@ -269,7 +269,7 @@ const clean = (d: unknown): Decor => {
 
 // what the page script draws: the files as our addresses
 const forClient = (d: Decor) => ({
-	theme: d.theme ? { id: d.theme, background: themeBackground(THEMES[d.theme]!), header: THEMES[d.theme]!.header, button: THEMES[d.theme]!.btn, buttonHover: THEMES[d.theme]!.btnHover, outline: THEMES[d.theme]!.outline } : null,
+	theme: d.theme ? { id: d.theme, background: themeBackground(THEMES[d.theme]!), header: THEMES[d.theme]!.header, button: THEMES[d.theme]!.btn, buttonHover: THEMES[d.theme]!.btnHover, outline: THEMES[d.theme]!.outline, glass: `color-mix(in srgb,rgb(from ${THEMES[d.theme]!.bg} r g b) 30%,rgb(0 0 0 / .45))` } : null,
 	background: d.background
 		? { image: fileUrl(d.background.appid, d.background.image), movie: d.background.movie ? fileUrl(d.background.appid, d.background.movie) : null, mp4: d.background.mp4 ? fileUrl(d.background.appid, d.background.mp4) : null }
 		: null,
@@ -459,6 +459,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 	function clearProfile(){
 		if(layer){layer.remove();layer=null}
 		if(style){style.remove();style=null}
+		document.querySelectorAll("[data-xitter-glass],[data-xitter-clear]").forEach(function(el){el.removeAttribute("data-xitter-glass");el.removeAttribute("data-xitter-clear")});
 		greys.textContent="";greyKey="";greyAt=0;
 		document.documentElement.removeAttribute("data-xitter-decor");
 		current=null;
@@ -478,40 +479,45 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		// computed one, and the decor follows X's mode, not the theme it replaces
 		var light=/^rgb\(255, 255, 255/.test(document.body.style.backgroundColor||getComputedStyle(document.body).backgroundColor);
 		document.documentElement.setAttribute("data-xitter-decor","");
-		var css="";
-		if(k.background){
-			layer=document.createElement("div");
-			layer.setAttribute("data-xitter-decor-bg","");
-			var bg=k.background;
-			// the whole picture, as wide as the window: covering it cut the sides
-			// off, where the art usually is. Below it, a blurred copy fills in.
-			var fill=document.createElement("div");fill.className="fill";fill.style.backgroundImage='url("'+bg.image+'")';
-			layer.appendChild(fill);
-			if(bg.movie||bg.mp4){
-				var v=document.createElement("video");
-				v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");v.poster=bg.image;
-				if(bg.movie){var s1=document.createElement("source");s1.src=bg.movie;s1.type="video/webm";v.appendChild(s1)}
-				if(bg.mp4){var s2=document.createElement("source");s2.src=bg.mp4;s2.type="video/mp4";v.appendChild(s2)}
-				if(matchMedia("(prefers-reduced-motion: reduce)").matches)v.autoplay=false;
-				layer.appendChild(v);
-			}else{var pic=document.createElement("img");pic.src=bg.image;pic.alt="";layer.appendChild(pic)}
-			document.body.prepend(layer);
-			// the page's own black goes, so the background shows around the columns
-			// the menu on the left sits on the background: blurred under it, so it reads
-			css+='html[data-xitter-decor] header[role="banner"]>div>div{-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);background:'+(light?"rgba(255,255,255,.45)":"rgba(0,0,0,.35)")+'!important}';
-			css+='html[data-xitter-decor],html[data-xitter-decor] body{background:transparent!important}'+
-				'html[data-xitter-decor] #react-root>div>div,html[data-xitter-decor] #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
-		}
-		// Steam's themes are dark: on X's light look they only tint a white column
 		var t=k.theme;
-		// and the bright ones (Lunar, Winter) drown X's grey text: a dark veil goes
-		// over the theme, and the grey turns lighter
-		var col=light?(t?"linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),"+t.background:"rgba(255,255,255,.88)"):(t?"linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),"+t.background:"rgba(0,0,0,.72)");
-		css+='html[data-xitter-decor] [data-testid="primaryColumn"]{background:'+col+'!important;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}';
+		var css="",glass=light?"rgba(255,255,255,.66)":"rgba(0,0,0,.55)",edge=light?"rgba(0,0,0,.08)":"rgba(255,255,255,.14)",frost="-webkit-backdrop-filter:blur(24px) saturate(1.4);backdrop-filter:blur(24px) saturate(1.4)";
+		layer=document.createElement("div");
+		layer.setAttribute("data-xitter-decor-bg","");
+		var bg=k.background;
+		if(!bg)layer.style.background=(light?"linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),":"linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),")+t.background;
+		else if(bg.movie||bg.mp4){
+			var v=document.createElement("video");
+			v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");v.poster=bg.image;
+			if(bg.movie){var s1=document.createElement("source");s1.src=bg.movie;s1.type="video/webm";v.appendChild(s1)}
+			if(bg.mp4){var s2=document.createElement("source");s2.src=bg.mp4;s2.type="video/mp4";v.appendChild(s2)}
+			if(still)v.autoplay=false;
+			layer.appendChild(v);
+		}else{var pic=document.createElement("img");pic.src=bg.image;pic.alt="";layer.appendChild(pic)}
+		document.body.prepend(layer);
+		css+='html[data-xitter-decor] header[role="banner"]>div>div,html[data-xitter-decor] [data-testid="primaryColumn"],html[data-xitter-decor] [data-xitter-glass]{background:'+glass+'!important;'+(t&&!light?"background:"+t.glass+"!important;":"")+'border-color:'+edge+'!important;'+frost+'}'+
+			'html[data-xitter-decor] [data-xitter-clear]{background:transparent!important}'+
+			'html[data-xitter-decor],html[data-xitter-decor] body{background:transparent!important}'+
+			'html[data-xitter-decor] #react-root>div>div,html[data-xitter-decor] #react-root>div>div>div:not([data-testid]){background-color:transparent!important}';
 		dark=!light;
-		if(t&&!light)css+='html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] '+RELATION+',html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]{background:'+t.button+'!important;border-color:'+t.outline+'!important}';
+		if(t&&!light)css+='html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] '+RELATION+',html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]{background:'+t.button+'!important;border-color:'+t.outline+'!important}'+
+			'html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] '+RELATION+' *,html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"] *{color:#fff!important}'+
+			'@media (hover:hover){html[data-xitter-decor] [data-testid="primaryColumn"] [data-testid="placementTracking"] '+RELATION+':hover,html[data-xitter-decor] [data-testid="primaryColumn"] a[data-testid="editProfileButton"]:hover{background:'+t.buttonHover+'!important}}';
 		style=document.createElement("style");style.setAttribute("data-xitter-decor-css","");style.textContent=css;document.head.appendChild(style);
-		greys.textContent="";greyKey="";lighten();
+		greys.textContent="";greyKey="";glassAt=0;lighten();sidebar();
+	}
+	var glassAt=0,glassTimer=null;
+	function sidebar(){
+		if(!current||!layer)return;
+		if(Date.now()-glassAt<300){if(!glassTimer)glassTimer=setTimeout(function(){glassTimer=null;sidebar()},300);return}
+		glassAt=Date.now();
+		var side=document.querySelector('[data-testid="sidebarColumn"]');
+		if(!side)return;
+		var page=document.body.style.backgroundColor||"rgb(0, 0, 0)";
+		side.querySelectorAll("div:not([data-xitter-glass]):not([data-xitter-clear])").forEach(function(el){
+			var cs=getComputedStyle(el);
+			if(cs.backgroundColor!==page)return;
+			el.setAttribute(parseFloat(cs.borderTopLeftRadius)>0?"data-xitter-glass":"data-xitter-clear","");
+		});
 	}
 	// X adds its classes as it first uses them: the grey ones are looked for again
 	// while a decorated profile is up, a second apart at most
@@ -528,7 +534,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 		if(!greys.isConnected)document.head.appendChild(greys);
 	}
 	function scan(){
-		frames();profile();lighten();
+		frames();profile();lighten();sidebar();
 		if(queue.length)load();
 	}
 	function load(){
@@ -544,8 +550,7 @@ export const DECOR_SCRIPT = String.raw`(function(){
 	base.textContent='[data-xitter-framed] div{border-radius:4%!important}'+
 		'[data-xitter-frame]{position:absolute;left:-11%;top:-11%;width:122%;height:122%;max-width:none;pointer-events:none;z-index:1}'+
 		'[data-xitter-decor-bg]{position:fixed;inset:0;z-index:-1;background:#000;overflow:hidden;pointer-events:none}'+
-		'[data-xitter-decor-bg] .fill{position:absolute;inset:-60px;background:center/cover no-repeat;filter:blur(40px) brightness(.55)}'+
-		'[data-xitter-decor-bg] video,[data-xitter-decor-bg] img{position:absolute;left:0;top:0;width:100%;height:auto;-webkit-mask-image:linear-gradient(#000 80%,transparent);mask-image:linear-gradient(#000 80%,transparent)}';
+		'[data-xitter-decor-bg] video,[data-xitter-decor-bg] img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top}';
 	document.head.appendChild(base);
 	new MutationObserver(function(){if(!timer)timer=setTimeout(function(){timer=null;scan()},150)}).observe(document.documentElement,{childList:true,subtree:true});
 	addEventListener("popstate",scan);
