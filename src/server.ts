@@ -66,6 +66,7 @@ import { serveFont } from "./fonts";
 import { migrationApi } from "./migration";
 import { failInterrupted } from "./migration-import";
 import { migrateRoute } from "./migration-page";
+import { acceptedEncoding, compressResponse, compressedFile } from "./compress";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -118,6 +119,7 @@ const MAX_UNKNOWN_PATHS = 1000;
 
 const apiError = (status: number, code: number, message: string) => Response.json({ errors: [{ code, message }] }, { status });
 
+// a hash of each patched file, for its tags
 const etags = new WeakMap<Buffer, string>();
 
 // The panel names the instance in its markup and in its scripts' single-quoted
@@ -156,13 +158,18 @@ async function serveClient(req: Request, pathname: string): Promise<Response> {
 		if (!raw) return new Response("not found", { status: 404 });
 		body = patchFile(cdnPath, raw);
 	}
-	let etag = etags.get(body);
-	if (!etag) {
-		etag = `"${Bun.hash(body).toString(36)}"`;
-		etags.set(body, etag);
+	let hash = etags.get(body);
+	if (!hash) {
+		hash = Bun.hash(body).toString(36);
+		etags.set(body, hash);
 	}
-	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
-	return new Response(new Uint8Array(body), { headers: { "content-type": type, "cache-control": "no-cache", etag } });
+	// each encoding is its own representation, with its own tag
+	const encoding = acceptedEncoding(req);
+	const etag = `"${hash}${encoding ? `-${encoding}` : ""}"`;
+	const headers: Record<string, string> = { "content-type": type, "cache-control": "no-cache", etag, vary: "accept-encoding" };
+	if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+	if (!encoding) return new Response(new Uint8Array(body), { headers });
+	return new Response(await compressedFile(body, encoding), { headers: { ...headers, "content-encoding": encoding } });
 }
 
 const MAX_API_BODY = 2 * 1024 * 1024;
@@ -290,7 +297,8 @@ await failInterrupted();
 // the request; caught here it is logged with its path and account
 async function handle(req: Request): Promise<Response | undefined> {
 	try {
-		return await asRequest(() => route(req));
+		const res = await asRequest(() => route(req));
+		return res && (await compressResponse(req, res, new URL(req.url).pathname));
 	} catch (e) {
 		const viewer = await getViewer(req).catch(() => undefined);
 		await recordError("server", e, { path: `${req.method} ${new URL(req.url).pathname}`, userId: viewer?.id });
