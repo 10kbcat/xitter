@@ -1,6 +1,6 @@
 # Instances
 
-Generated from [instances.json](instances.json), sequence 15. Edit that file, then run
+Generated from [instances.json](instances.json), sequence 16. Edit that file, then run
 `bun scripts/check-instances.ts --write-md` to update this one.
 
 | Instance | Name | State | Key | Source |
