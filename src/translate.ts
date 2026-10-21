@@ -1,10 +1,11 @@
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { isId } from "./ids";
-import { urlEntities } from "./links";
+import { bioEntities, urlEntities } from "./links";
 import { MENTION_HANDLE } from "./mentions";
-import { hashtags, userMentions } from "./model";
+import { bioMentions, hashtags, userMentions } from "./model";
 import { getPost } from "./posts";
+import { userById } from "./users";
 
 const ENDPOINT = "https://translate-pa.googleapis.com/v1/translateHtml";
 const API_KEY = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520";
@@ -70,7 +71,8 @@ const languageName = (code: string, inLang: string) => {
 const hashOf = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 
 const TRANSLATE_TWEET = /strato\/column\/None\/tweetId=(\d{1,19}),destinationLanguage=(None|Some\(([A-Za-z-]{2,10})\)),[^/]*\/translation\/service\/translateTweet$/;
-export const isTranslateRequest = (path: string) => path.includes("/translation/service/translateTweet");
+const TRANSLATE_PROFILE = /strato\/column\/None\/profileUserId=(\d{1,19}),destinationLanguage=(None|Some\(([A-Za-z-]{2,10})\)),[^/]*\/translation\/service\/translateProfile$/;
+export const isTranslateRequest = (path: string) => /\/translation\/service\/translate(Tweet|Profile)$/.test(path);
 
 const failure = (status: number, code: number, message: string) => Response.json({ errors: [{ code, message }] }, { status });
 
@@ -80,6 +82,8 @@ export async function translateRoute(path: string, viewer: Viewer): Promise<Resp
 	try {
 		decoded = decodeURIComponent(path);
 	} catch {}
+	const profile = TRANSLATE_PROFILE.exec(decoded);
+	if (profile) return translateProfile(profile, viewer);
 	const m = TRANSLATE_TWEET.exec(decoded);
 	if (!m || !isId(m[1])) return failure(400, 214, "That translation request isn't valid.");
 	const target = isValidLang(m[3]) ? m[3] : isValidLang(viewer.language) ? viewer.language : "en";
@@ -116,5 +120,38 @@ export async function translateRoute(path: string, viewer: Viewer): Promise<Resp
 		localizedSourceLanguage: languageName(translated.source, target),
 		destinationLanguage: target,
 		translationSource: "Google",
+	});
+}
+
+async function translateProfile(m: RegExpExecArray, viewer: Viewer): Promise<Response> {
+	if (!isId(m[1])) return failure(400, 214, "That translation request isn't valid.");
+	const target = isValidLang(m[3]) ? m[3] : isValidLang(viewer.language) ? viewer.language : "en";
+	const user = await userById(viewer.id, m[1]);
+	if (!user || user.status === "suspended" || user.stats?.blockedBy) return failure(404, 50, "User not found.");
+	const bio = user.bio?.trim() ?? "";
+	if (!bio || bio.length > MAX_CHARS) return failure(400, 214, "This bio can't be translated.");
+	const hash = hashOf(bio);
+	const [hit] = await sql`select source_lang, text from bio_translations
+		where user_id = ${user.id}::bigint and target_lang = ${target} and source_hash = ${hash}`;
+	let translated: { text: string; source: string } | undefined = hit ? { text: hit.text, source: hit.source_lang } : undefined;
+	if (!translated) {
+		translated = await googleTranslate(bio, target);
+		if (!translated) return failure(503, 131, "Translation isn't available right now. Try again later.");
+		await sql`insert into bio_translations (user_id, target_lang, source_hash, source_lang, text)
+			values (${user.id}::bigint, ${target}, ${hash}, ${translated.source}, ${translated.text})
+			on conflict (user_id, target_lang) do update set source_hash = excluded.source_hash, source_lang = excluded.source_lang, text = excluded.text, created_at = now()`.catch(() => {});
+	}
+	const text = translated.text;
+	return Response.json({
+		profileUserId: user.id,
+		profileTranslation: {
+			translation: text,
+			entities: { urls: bioEntities(text), user_mentions: bioMentions({ ...user, bio: text }), hashtags: hashtags(text), symbols: [] },
+			translationState: "Success",
+			sourceLanguage: translated.source,
+			localizedSourceLanguage: languageName(translated.source, target),
+			destinationLanguage: target,
+			translationSource: "Google",
+		},
 	});
 }

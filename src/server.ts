@@ -12,7 +12,7 @@ import { flagSvg } from "./flags";
 import { onboarding } from "./onboarding";
 import { cachedPatch, patchFile, patchText } from "./patch";
 import { clientError, recordError } from "./errors";
-import { asRequest, markStaff, staffGate } from "./staff-access";
+import { asRequest, markStaff, setRequestLanguage, staffGate } from "./staff-access";
 import { backupPath, startBackups } from "./backups";
 import { memberInvitesRoute } from "./member-invites";
 import { orgRoute } from "./org-manage";
@@ -393,6 +393,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/manifest.json") return manifest();
 
 	const viewer = await getViewer(req);
+	setRequestLanguage(viewer?.language ?? undefined);
 	const steam = /^\/public\/steam\/(\d+)\/([^/]+)$/.exec(p);
 	if (steam) return steamFile(req, steam[1]!, steam[2]!, url.searchParams.has("thumb"), !!viewer);
 	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();

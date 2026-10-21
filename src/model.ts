@@ -15,6 +15,7 @@ import { homeOf, mentionsIn } from "./mentions";
 import { type MediaRow, absolute, mediaEntity, mediaUrl, posterUrl } from "./media";
 import { placeById } from "./places";
 import { shownSource } from "./platforms";
+import { requestLanguage } from "./staff-access";
 import { settings } from "./settings";
 import { SHORT_POST, previewOf, weightedLength } from "./textlen";
 
@@ -226,6 +227,12 @@ function badgeLabel(u: User) {
 	};
 }
 
+const bioLanguage = (u: User) => {
+	const language = u.bio?.trim() ? guessLang(u.bio) : "und";
+	const viewer = requestLanguage()?.split("-")[0]?.toLowerCase();
+	return { profile_description_language: language, is_profile_translatable: !!viewer && language !== "und" && language !== viewer };
+};
+
 export function userResult(u: User) {
 	return {
 		__typename: "User",
@@ -233,6 +240,7 @@ export function userResult(u: User) {
 		affiliates_highlighted_label: badgeLabel(u),
 		...(u.verified_type === "business" || u.verified_type === "government" || u.affiliates ? { business_account: { affiliates_count: u.affiliates ?? 0 } } : {}),
 		avatar: { image_url: absolute(u.avatar_url) ?? DEFAULT_AVATAR },
+		...bioLanguage(u),
 		...(u.banner_url ? { banner: { image_url: absolute(u.banner_url) } } : {}),
 		core: { created_at: apiDate(u.created_at), name: u.name, screen_name: u.screen_name },
 		follow_request_sent: !!u.stats?.requestedByViewer,
@@ -283,7 +291,7 @@ export function legacyUser(u: User) {
 		id_str: u.id,
 		favourites_count: u.stats?.likes ?? 0,
 		creator_subscriptions_count: 0,
-		is_profile_translatable: false,
+		...bioLanguage(u),
 		location: u.location,
 		notifications: !!u.stats?.notifying,
 		want_retweets: !u.stats?.repostsMuted,
@@ -422,7 +430,7 @@ export function userMentions(p: PostRow) {
 	});
 }
 
-const bioMentions = (u: User) =>
+export const bioMentions = (u: User) =>
 	mentionsIn(u.bio ?? "", homeOf(u.screen_name)).map(({ key, start, end }) => ({ id_str: "", indices: [start, end], screen_name: key }));
 
 // #tags in the text; the client links each to a search for it

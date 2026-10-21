@@ -276,7 +276,7 @@ export function bucketsFor(method: string, path: string, operation: string | und
 		return method === "GET" || (operationTypes.queries.has(operation) && !operationTypes.mutations.has(operation)) ? ["read"] : ["read", "write"];
 	}
 	if (ENGAGE_REST.test(path)) return ["read", "engage"];
-	if (path.endsWith("/translation/service/translateTweet")) return ["read", "translate"];
+	if (/\/translation\/service\/translate(Tweet|Profile)$/.test(path)) return ["read", "translate"];
 	return method === "GET" ? ["read"] : ["read", "write"];
 }
 

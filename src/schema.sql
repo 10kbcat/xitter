@@ -1494,3 +1494,13 @@ create table if not exists post_translations (
 	created_at timestamptz not null default now(),
 	primary key (post_id, version, target_lang)
 );
+
+create table if not exists bio_translations (
+	user_id bigint not null references users (id) on delete cascade,
+	target_lang text not null,
+	source_hash text not null,
+	source_lang text not null,
+	text text not null,
+	created_at timestamptz not null default now(),
+	primary key (user_id, target_lang)
+);
