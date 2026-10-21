@@ -31,6 +31,7 @@ import { twoFactorRoute } from "./two-factor";
 import { passkeySignInRoute, passkeysRoute } from "./passkeys";
 import { extraBadges, instanceCard } from "./badges";
 import { decorationFile, decorationsFor } from "./decorations";
+import { pronounsFor } from "./pronouns";
 import { decorationRoute } from "./decoration-settings";
 import { startScheduler } from "./scheduled";
 import { federationRoute, startFederation } from "./federation-routes";
@@ -214,6 +215,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/moderation") return noticesApi(req, viewer);
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
 	if (path === "/xitter/decorations") return decorationsFor(url);
+	if (path === "/xitter/pronouns") return pronounsFor(url);
 	if (path === "/xitter/instance") return instanceCard(viewer.id, url);
 	if (path === "/xitter/decor") return decorFor(url);
 	if (path === "/xitter/decor/shop") return decorShop(url);

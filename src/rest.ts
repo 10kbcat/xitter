@@ -11,6 +11,7 @@ import { addKeyword, mutedKeywords, removeKeywords, setBlock, setMute, updateKey
 import { getPost } from "./posts";
 import { sql } from "./db";
 import { flagValue, unknownFlag } from "./flags";
+import { pronounsProblem } from "./pronouns";
 import { isId } from "./ids";
 import { isVerified, legacyUser, tweetResult } from "./model";
 import { markSeen } from "./notifications";
@@ -72,7 +73,7 @@ const changedUser = async (viewer: Viewer) => Response.json(legacyUser((await us
 // account/update_profile, update_profile_image, update_profile_banner, remove_profile_banner,
 // and our own update_flag (the pride flag badge, from the picker shell.ts adds to the dialog)
 async function profileRoute(path: string, viewer: Viewer, req: Request): Promise<Response | undefined> {
-	const m = /^\/1\.1\/account\/(update_profile|update_profile_image|update_profile_banner|remove_profile_banner|update_flag)\.json$/.exec(path);
+	const m = /^\/1\.1\/account\/(update_profile|update_profile_image|update_profile_banner|remove_profile_banner|update_flag|update_pronouns)\.json$/.exec(path);
 	if (!m || req.method !== "POST") return undefined;
 	const f = await form(req);
 
@@ -107,6 +108,23 @@ async function profileRoute(path: string, viewer: Viewer, req: Request): Promise
 		if (unknownFlag(f.flag)) return profileError("Unknown flag.");
 		const flag = flagValue(f.flag);
 		await sql`update users set flag = ${flag} where id = ${viewer.id}::bigint`;
+		return changedUser(viewer);
+	}
+	if (m[1] === "update_pronouns") {
+		const value = oneLine(f.pronouns ?? "").trim();
+		const problem = pronounsProblem(value);
+		if (problem) return profileError(problem);
+		const hate = hateIn(value);
+		if (hate) {
+			await automodStrike(viewer.id, hate, "profile", value);
+			return profileError("Your pronouns contain a slur or hate speech this instance doesn't allow.");
+		}
+		if (blockedWordIn(value)) {
+			if (!viewer.role) await suspendForName(viewer.id, value);
+			return profileError("Your pronouns contain a word this instance doesn't allow.");
+		}
+		if (hasBlockedPhrase(value)) return profileError("Your pronouns contain a phrase this instance doesn't allow.");
+		await sql`update users set pronouns = ${value || null} where id = ${viewer.id}::bigint`;
 		return changedUser(viewer);
 	}
 	if (m[1] === "remove_profile_banner") {

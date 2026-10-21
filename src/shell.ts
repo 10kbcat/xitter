@@ -20,6 +20,7 @@ import { DEFAULT_ACCENT, swatches, themeColorOf, type Accent } from "./themes/pr
 import { clientLook, themeForClient, type Look } from "./themes/validate";
 import { NOTICE_SCRIPT } from "./automod-notice";
 import { FLAG_PICKER_CSS, FLAG_PICKER_SCRIPT, flagPickerData } from "./flag-picker";
+import { PRONOUNS_CSS, PRONOUNS_SCRIPT, pronounsData } from "./pronouns";
 import { PUBLIC_ORIGIN } from "./config";
 import { legacyUser } from "./model";
 import { patchText } from "./patch";
@@ -289,16 +290,18 @@ html{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 @media (display-mode:standalone){body{overscroll-behavior-y:none}}${LOGO_CSS}
 ${hideCss()}
 ${FLAG_PICKER_CSS}
+${PRONOUNS_CSS}
 ${STICKER_PICKER_CSS}${bootAccentCss(accent)}${theme ? bootCss(theme, paint) : ""}
 ${CONVERSATION_CARD_CSS}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags, accent))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), tidy: tidyData(links), theme: clientTheme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches(), pageChrome: pageChromeCss(paint), steamMotion: steamMotion(paint), ...(user && csrf ? { csrf } : {}) })};
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), ...pronounsData(user), tidy: tidyData(links), theme: clientTheme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches(), pageChrome: pageChromeCss(paint), steamMotion: steamMotion(paint), ...(user && csrf ? { csrf } : {}) })};
 ${user ? ERROR_SCRIPT : ""}
 ${TIDY_SCRIPT}
 ${FRESH_SCRIPT}
 ${FORGOT_SCRIPT}
 ${user ? "" : PASSKEY_SCRIPT}
+${PRONOUNS_SCRIPT}
 ${FLAG_PICKER_SCRIPT}
 ${user ? STICKER_PICKER_SCRIPT : ""}
 ${user ? CONVERSATION_CARD_SCRIPT : ""}

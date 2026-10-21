@@ -398,6 +398,7 @@ create table if not exists invites (
 alter table users add column if not exists invite_code text references invites (code) on delete set null;
 -- a pride flag shown next to the name (see flags.ts), picked at sign-up
 alter table users add column if not exists flag text;
+alter table users add column if not exists pronouns text;
 
 -- Admin panel. Staff roles: admin (everything), moderator (users' standing and
 -- posts), support (read, password resets, sign-outs). Every staff action is logged.
@@ -1393,11 +1394,11 @@ begin
 end $$;
 create or replace trigger federation_user_insert after insert on users for each row execute function federation_user_changed();
 alter table users add column if not exists decoration jsonb;
-create or replace trigger federation_user_update after update of screen_name, name, bio, location, website, avatar_url, banner_url, protected, status, deactivated_at, verified_type, translator, flag, parody_label, count_overrides, decoration on users for each row
+create or replace trigger federation_user_update after update of screen_name, name, bio, location, website, avatar_url, banner_url, protected, status, deactivated_at, verified_type, translator, flag, pronouns, parody_label, count_overrides, decoration on users for each row
 	when (old.screen_name is distinct from new.screen_name or old.name is distinct from new.name or old.bio is distinct from new.bio or old.location is distinct from new.location or old.website is distinct from new.website
 		or old.avatar_url is distinct from new.avatar_url or old.banner_url is distinct from new.banner_url or old.protected is distinct from new.protected
 		or old.status is distinct from new.status or old.deactivated_at is distinct from new.deactivated_at or old.verified_type is distinct from new.verified_type
-		or old.translator is distinct from new.translator or old.flag is distinct from new.flag or old.parody_label is distinct from new.parody_label
+		or old.translator is distinct from new.translator or old.flag is distinct from new.flag or old.pronouns is distinct from new.pronouns or old.parody_label is distinct from new.parody_label
 		or old.count_overrides is distinct from new.count_overrides or old.decoration is distinct from new.decoration)
 	execute function federation_user_changed();
 create or replace function federation_badges_changed() returns trigger language plpgsql as $$
