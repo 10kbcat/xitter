@@ -23,10 +23,10 @@ form.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1
 form.editor{display:grid;gap:16px;width:100%;max-width:100%;min-width:0;justify-items:stretch}
 .toks{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;width:100%;min-width:0}
 @media (max-width:520px){.toks{grid-template-columns:1fr}}
-.tok{display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;margin:0;min-width:0}
+.tok{display:grid;grid-template-columns:minmax(0,1fr) 40px 28px 28px;gap:6px;align-items:center;margin:0;min-width:0}
 .tok > span{font-size:13px;color:var(--muted);min-width:0}
 .tok input[type=color]{width:40px;height:28px;min-height:28px;padding:1px;border:1px solid var(--outline);border-radius:6px;background:none;cursor:pointer}
-.tok .x,.tok .g{min-height:28px;min-width:28px;padding:0 8px;font-size:14px}
+.tok .x,.tok .g{min-height:28px;min-width:28px;width:28px;padding:0;font-size:14px}
 .tok .g[aria-pressed="true"]{background:var(--hover)}
 .grow{display:grid;gap:8px;width:100%;min-width:0}
 .grow > span{font-size:13px;line-height:16px;color:var(--muted)}
@@ -97,6 +97,8 @@ details.adv summary{cursor:pointer;font-weight:700}
 #theme-import-errors li.head{font-weight:700}
 #theme-import-errors li{margin:0 0 4px}
 .bgopt{display:grid;gap:8px}
+.bgopt .ang{display:grid;grid-template-columns:7.5em minmax(0,1fr) 5ch;gap:8px}
+.bgopt .ang .deg{text-align:right}
 .bgopt .line{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .bgopt select{min-height:36px;border-radius:8px;border:1px solid var(--outline);background:var(--field);color:var(--text)}
 .live .stage{position:relative;z-index:1}
@@ -237,7 +239,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 		if(warn){warn.textContent="";msgs.forEach(function(m){var p=document.createElement("p");p.textContent=m;warn.appendChild(p)})}
 		["bg_dim","bg_blur","bg_scale","bg_panel"].forEach(function(name){
 			var num=document.querySelector('[data-num="'+name+'"]');
-			if(num&&f[name])num.textContent=f[name].value;
+			if(num&&f[name])num.textContent=f[name].value+(num.getAttribute("data-unit")||"");
 		});
 		var surfaceHex=val("surface");
 		prev.style.setProperty("--xt-surface",/^#[0-9a-f]{6}$/i.test(surfaceHex)?surfaceHex:"#000000");
@@ -320,9 +322,17 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 		if(!list)return;
 		list.replaceChildren();
 		if(errors&&errors.length){var head=document.createElement("li");head.className="head";head.textContent="This theme file was rejected. Nothing was applied.";list.appendChild(head)}
+		// the API speaks in paths ("theme.bg: missing"); people read the labels on this page
+		var whole={"invalid json":"It isn't a JSON file.","invalid file":"It isn't a Xitter theme file. Export a theme from this page to see the format.","unknown format":"It isn't a Xitter theme file. Export a theme from this page to see the format.","unknown version":"It was made by a newer version of Xitter."};
+		var labels={"theme.id":"Theme","theme.base":"Dark or light","theme.bg":"Background","theme.surface":"Surface","theme.text":"Text","theme.accent":"Accent / links","theme.button":"Primary button","theme.buttonText":"Button text","theme.font":"Font","theme.background":"Background image"};
+		var shown={};
 		(errors||[]).forEach(function(error){
+			var msg=whole[error.message];
+			var text=msg?msg:error.path?(labels[error.path]||error.path.replace(/^theme\./,""))+(error.message==="missing"?" is missing.":": "+error.message):error.message;
+			if(shown[text])return;
+			shown[text]=1;
 			var item=document.createElement("li");
-			item.textContent=error.path?error.path+": "+error.message:error.message;
+			item.textContent=text;
 			list.appendChild(item);
 		});
 	}
@@ -495,7 +505,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 	if(file)file.addEventListener("change",function(){
 		var picked=file.files&&file.files[0];
 		if(!picked)return;
-		if(picked.size>65536){showErrors([{path:"",message:"file is too large"}]);file.value="";return}
+		if(picked.size>65536){showErrors([{path:"",message:"The file is over 64 KB, which is too big for a theme file."}]);file.value="";return}
 		picked.text().then(function(text){
 			return fetch("/i/api/xitter/theme/import",{method:"POST",headers:{"x-csrf-token":csrf(),"content-type":"text/plain"},body:text}).then(function(r){return r.json()});
 		}).then(function(data){
@@ -503,7 +513,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			showErrors([]);
 			showWarnings(data.warnings);
 			applyImported(data.theme, data.preview);
-		}).catch(function(){showErrors([{path:"",message:"import failed"}])});
+		}).catch(function(){showErrors([{path:"",message:"The import didn't go through. Try again."}])});
 		file.value="";
 	});
 	var bgFile=document.getElementById("bg-file");
@@ -511,18 +521,18 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 		var picked=bgFile.files&&bgFile.files[0];
 		if(!picked)return;
 		var note=document.getElementById("bg-note");
-		if(picked.size>8*1024*1024){if(note)note.textContent="image is too large";bgFile.value="";return}
+		if(picked.size>8*1024*1024){if(note)note.textContent="The image is over 8 MB. Pick a smaller one.";bgFile.value="";return}
 		if(note)note.textContent="";
 		var headers={"x-csrf-token":csrf()};
 		fetch("/i/media/upload.json?command=INIT&total_bytes="+picked.size+"&media_type="+encodeURIComponent(picked.type||"image/png")+"&media_category=theme_background",{method:"POST",headers:headers}).then(function(r){return r.json()}).then(function(init){
-			if(!init||!init.media_id_string)throw new Error((init&&init.error)||"upload failed");
+			if(!init||!init.media_id_string)throw new Error((init&&init.error)||"The upload didn't go through. Try again.");
 			var body=new FormData();
 			body.set("media",picked);
 			return fetch("/i/media/upload.json?command=APPEND&media_id="+init.media_id_string+"&segment_index=0",{method:"POST",headers:headers,body:body}).then(function(){
 				return fetch("/i/media/upload.json?command=FINALIZE&media_id="+init.media_id_string,{method:"POST",headers:headers}).then(function(r){return r.json()});
 			});
 		}).then(function(done){
-			if(!done||!done.media_id_string)throw new Error((done&&done.error)||"upload failed");
+			if(!done||!done.media_id_string)throw new Error((done&&done.error)||"The upload didn't go through. Try again.");
 			setv("background_on","1");
 			setv("background_clear","");
 			setv("background_media",done.media_id_string);
@@ -530,7 +540,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 			prev.removeAttribute("data-movie");
 			prev.removeAttribute("data-mp4");
 			if(typeof done.theme_path==="string"){prev.setAttribute("data-bg",done.theme_path);showBg()}
-		}).catch(function(err){if(note)note.textContent=err&&err.message?err.message:"upload failed"});
+		}).catch(function(err){if(note)note.textContent=err&&err.message?err.message:"The upload didn't go through. Try again."});
 		bgFile.value="";
 	});
 	var bgClear=document.getElementById("bg-clear");
@@ -571,7 +581,7 @@ const EDITOR_SCRIPT = "(function(){\n" + chromeVarsEs5 + String.raw`
 		function sync(){
 			if(val("background_clear")!=="1")setv("background_on","1");
 			var num=document.querySelector('[data-num="'+name+'"]');
-			if(num)num.textContent=el.value;
+			if(num)num.textContent=el.value+(num.getAttribute("data-unit")||"");
 			showBg();
 		}
 		el.addEventListener("input",sync);
@@ -590,7 +600,7 @@ function gradRow(label: string, name: string, g: Gradient) {
 }
 
 function colorRow(label: string, name: string, value: string, set: boolean, reset = true) {
-	return `<label class="tok"><span>${label}</span><input type="color" name="${name}" data-adv="${name}" value="${value}"><input type="hidden" name="${name}_set" value="${set ? "1" : ""}">${reset ? `<button type="button" class="secondary x" data-reset="${name}" title="Reset">×</button>` : `<span></span>`}<span></span></label>`;
+	return `<label class="tok"><span>${label}</span><input type="color" name="${name}" data-adv="${name}" value="${value}"><input type="hidden" name="${name}_set" value="${set ? "1" : ""}"><span></span>${reset ? `<button type="button" class="secondary x" data-reset="${name}" title="Reset">×</button>` : `<span></span>`}</label>`;
 }
 
 function asGrad(v: Fill, fallback: string): Gradient {
@@ -684,7 +694,7 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 	const mp4Path = ownedBg?.mp4 && STEAM_VIDEO_PATH.test(ownedBg.mp4) ? ownedBg.mp4 : "";
 	const steamDef = bg && "steam" in bg && bg.steam ? String(bg.steam.defid) : "";
 	const body = `<h1>Theme</h1>
-	<p class="dim">X dropped Dim; this puts it back, and lets you pick a look of your own. Dark themes sit on Lights out, light ones on Default. A typeface rides with a theme — Default / Lights out is X's own and has no custom font. Organisation profile decor keeps its own colours on the profile column.</p>
+	<p class="dim">X dropped Dim; this puts it back, and lets you pick a look of your own. Dark themes sit on Lights out, light ones on Default. A typeface rides with a theme — Default / Lights out is X's own and has no custom font. On an organisation's profile, its decor replaces your theme until you leave.</p>
 	${notices.error ? `<p class="error">${esc(notices.error)}</p>` : ""}
 	${(notices.warnings ?? []).map((w) => `<p class="dim">${esc(w)}</p>`).join("")}
 	<h2>Share</h2>
@@ -807,10 +817,10 @@ async function themePage(req: Request, viewer: Viewer, current: Theme | null, no
 				<label>Position<select name="bg_position"><option value="center"${!bg || bg.position === "center" ? " selected" : ""}>Center</option><option value="top"${bg?.position === "top" ? " selected" : ""}>Top</option><option value="bottom"${bg?.position === "bottom" ? " selected" : ""}>Bottom</option></select></label>
 				<label id="bg-space"${bg?.fit === "tile" ? "" : " hidden"}>Spacing<select name="bg_repeat"><option value="repeat"${!bg || !bg.repeat || bg.repeat === "repeat" ? " selected" : ""}>Repeat</option><option value="space"${bg?.repeat === "space" ? " selected" : ""}>Space</option><option value="round"${bg?.repeat === "round" ? " selected" : ""}>Round</option></select></label>
 			</div>
-			<label class="ang">Dim<input type="range" name="bg_dim" min="0" max="80" value="${bg?.dim ?? 0}"><span class="deg" data-num="bg_dim">${bg?.dim ?? 0}</span></label>
-			<label class="ang">Blur<input type="range" name="bg_blur" min="0" max="20" value="${bg?.blur ?? 0}"><span class="deg" data-num="bg_blur">${bg?.blur ?? 0}</span></label>
-			<label class="ang">Scale<input type="range" name="bg_scale" min="10" max="400" value="${bg?.scale ?? 100}"><span class="deg" data-num="bg_scale">${bg?.scale ?? 100}</span></label>
-			<label class="ang">Panel opacity<input type="range" name="bg_panel" min="20" max="90" value="${bg?.panel ?? 72}"><span class="deg" data-num="bg_panel">${bg?.panel ?? 72}</span></label>
+			<label class="ang">Dim<input type="range" name="bg_dim" min="0" max="80" value="${bg?.dim ?? 0}"><span class="deg" data-num="bg_dim" data-unit="%">${bg?.dim ?? 0}%</span></label>
+			<label class="ang">Blur<input type="range" name="bg_blur" min="0" max="20" value="${bg?.blur ?? 0}"><span class="deg" data-num="bg_blur" data-unit="px">${bg?.blur ?? 0}px</span></label>
+			<label class="ang">Scale<input type="range" name="bg_scale" min="10" max="400" value="${bg?.scale ?? 100}"><span class="deg" data-num="bg_scale" data-unit="%">${bg?.scale ?? 100}%</span></label>
+			<label class="ang">Panel opacity<input type="range" name="bg_panel" min="20" max="90" value="${bg?.panel ?? 72}"><span class="deg" data-num="bg_panel" data-unit="%">${bg?.panel ?? 72}%</span></label>
 			<div class="line">
 				<label class="secondary file">Upload image<input type="file" id="bg-file" accept="image/png,image/gif,image/webp,image/jpeg"></label>
 				<button type="button" class="secondary" id="bg-steam">Steam background</button>
