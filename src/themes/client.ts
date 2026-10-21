@@ -309,7 +309,7 @@ export const THEME_SCRIPT = String.raw`(function(){
 			muted:{"113, 118, 123":1,"89, 93, 98":1},
 			border:{"47, 51, 54":1,"51, 54, 57":1,"62, 65, 68":1,"75, 78, 82":1},
 			surface:{"22, 24, 28":1,"32, 35, 39":1},
-			menu:{"32, 35, 39":1,"42, 45, 48":1},
+			menu:{"32, 35, 39":1,"42, 45, 48":1,"20, 20, 20":1},
 			header:{"0, 0, 0, 0.65":1},
 			buttonBg:{"239, 243, 244":1},
 			buttonText:{"15, 20, 25":1},
@@ -426,6 +426,9 @@ export const THEME_SCRIPT = String.raw`(function(){
 			css.push(wrap(layer+":is("+posSels.join(",")+")"+band) + "{background:var(--xt-menu)!important}");
 			css.push(wrap(layer+"[style*=\"position: fixed\"]"+band) + "{background:var(--xt-menu)!important}");
 			css.push(wrap(layer+"[style*=\"position: absolute\"]"+band) + "{background:var(--xt-menu)!important}");
+			// Inside a dialog the page's black is the dialog's own surface, as in the
+			// media viewer's reply panel: made clear, the page behind read through it
+			css.push(wrap('[aria-modal="true"] '+layer) + "{background:var(--xt-menu)!important}");
 			glassOn=false;
 		}
 		// Over an image, the glass goes on X's own rounded boxes in the sidebar:
@@ -438,10 +441,14 @@ export const THEME_SCRIPT = String.raw`(function(){
 			glassOn=false;
 			css.push(card+"{background:color-mix(in srgb,var(--xt-surface) var(--xt-bg-panel),transparent)!important;-webkit-backdrop-filter:blur(14px)!important;backdrop-filter:blur(14px)!important}");
 			css.push("@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){"+card+"{background:color-mix(in srgb,var(--xt-surface) 92%,transparent)!important}}");
-			// a module with nothing in it is only its border: a stray line over the picture
-			glassOn=true;
-			css.push(wrap('[data-testid="sidebarColumn"] :is('+found.pagebg.join(",")+'):is('+found.rounded.join(",")+'):empty',true)+"{display:none!important}");
-			glassOn=false;
+		}
+		// A sidebar module with nothing to show is hidden: one that is only its
+		// border, and one whose only content is X's empty-state message ("No
+		// items"). It's matched on what the card holds, not when it was seen, so
+		// a module that fills in later comes back, and one that empties goes.
+		if((found.pagebg||[]).length&&(found.rounded||[]).length){
+			var box='[data-testid="sidebarColumn"] :is('+found.pagebg.join(",")+'):is('+found.rounded.join(",")+')';
+			css.push(wrap(box+':is(:empty,:has(> [data-testid="emptyState"]):not(:has(> :not([data-testid="emptyState"]))))',true)+"{display:none!important}");
 		}
 		add("surface","background:var(--xt-surface)!important",false);
 		add("menu","background:var(--xt-menu)!important",false);
