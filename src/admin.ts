@@ -9,6 +9,7 @@
 // written to the audit log.
 
 import { isSuperadminViewer } from "./superadmin";
+import { oneLine } from "./text-clean";
 import { SUPERADMINS, isSuperadminHome, superadminNameHere, superadminOf } from "./superadmins";
 import { FEDERATION_ON, ID_RE, INSTANCE_ID, acceptKeyChange, isBlocked as isFederationBlocked, isPeer, liftBlock, listBlocks, listed, listedInstance, pendingKeyChange, publicKey, registryCheckedAt, registryError, registrySequence, setBlock as setFederationBlock } from "./federation";
 import { dropRemoteMedia, pullFrom, savedRemoteMedia, storesRemoteMedia } from "./federation-sync";
@@ -808,10 +809,17 @@ const ACTIONS: Record<string, Action> = {
 			}
 			if (b.announcement && typeof b.announcement === "object") {
 				const text = String(b.announcement.text ?? "").trim().slice(0, 500);
-				const link = String(b.announcement.link ?? "").trim();
-				if (link && !/^https?:\/\/\S+$/.test(link)) throw new AdminError("The announcement link must be an http or https address.");
+				const raw = Array.isArray(b.announcement.buttons) ? b.announcement.buttons : [];
+				if (raw.length > 4) throw new AdminError("An announcement has at most 4 buttons.");
+				const buttons = raw
+					.map((x: any) => ({ label: oneLine(String(x?.label ?? "")).slice(0, 30), url: String(x?.url ?? "").trim() }))
+					.filter((x: { label: string; url: string }) => x.label || x.url);
+				for (const x of buttons) {
+					if (!x.label) throw new AdminError("Give every announcement button a label.");
+					if (!/^https?:\/\/\S{1,500}$/.test(x.url)) throw new AdminError(`The link for "${x.label}" must be an http or https address.`);
+				}
 				// a new id brings the banner back for people who closed the old one
-				await setSetting("announcement", { id: text ? newId() : "", text, link });
+				await setSetting("announcement", { id: text ? newId() : "", text, link: "", buttons });
 				changed.push("announcement");
 			}
 			if (Array.isArray(b.default_follows)) {
