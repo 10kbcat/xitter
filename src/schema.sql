@@ -1504,3 +1504,46 @@ create table if not exists bio_translations (
 	created_at timestamptz not null default now(),
 	primary key (user_id, target_lang)
 );
+
+-- account migration between instances (migration.ts, migration-import.ts).
+-- The old instance hands out a migration code (stored as its SHA-256) that
+-- lets the new one read the account's archive and files; the new instance
+-- keeps a job per import and maps every object it brought over, so running
+-- the same import again resumes instead of duplicating.
+create table if not exists migration_tokens (
+	token_hash text primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	expires_at timestamptz not null,
+	-- the instance that last used it, and when the import there finished
+	used_by text,
+	used_at timestamptz,
+	completed_at timestamptz
+);
+create index if not exists migration_tokens_user_idx on migration_tokens (user_id);
+create table if not exists account_migrations (
+	id bigint primary key,
+	user_id bigint not null references users (id) on delete cascade,
+	source text not null,
+	source_user_id bigint not null,
+	source_handle text not null,
+	state text not null check (state in ('running', 'done', 'failed')),
+	progress jsonb not null default '{}',
+	report jsonb not null default '{}',
+	error text,
+	created_at timestamptz not null default now(),
+	finished_at timestamptz
+);
+create index if not exists account_migrations_user_idx on account_migrations (user_id, created_at desc);
+create unique index if not exists account_migrations_running_idx on account_migrations (user_id) where state = 'running';
+create table if not exists migration_objects (
+	user_id bigint not null references users (id) on delete cascade,
+	source text not null,
+	kind text not null,
+	remote_id text not null,
+	local_id bigint not null,
+	primary key (user_id, source, kind, remote_id)
+);
+-- where an account went, as handle@instance; set by the new instance when the import finished
+alter table users add column if not exists moved_to text;
+alter table users add column if not exists moved_at timestamptz;
