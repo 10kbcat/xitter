@@ -46,8 +46,12 @@ const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toSt
 // Affiliates of an organisation wear X's checkmark next to the organisation's
 // badge, as on X, even without a badge of their own.
 export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
-// a business account to X: a business or government, or anyone with affiliates
-export const isOrganization = (u: User) => u.verified_type === "business" || u.verified_type === "government" || !!u.affiliates;
+// a business or government badge: what makes an account an organisation on
+// its own, and gives it a square picture
+export const hasOrgBadge = (u: User) => u.verified_type === "business" || u.verified_type === "government";
+// a business account to X: an organisation badge, or anyone with affiliates
+// (isOrganizationSql in users.ts is the same rule in SQL)
+export const isOrganization = (u: User) => hasOrgBadge(u) || !!u.affiliates;
 // "Verified since": an affiliate's date of joining its organisation, else when the badge was given
 export const verifiedSince = (u: User): Date | null => (u.org?.since ? new Date(u.org.since) : u.verified_at ? new Date(u.verified_at) : null);
 
@@ -56,7 +60,7 @@ export const verifiedSince = (u: User): Date | null => (u.org?.since ? new Date(
 export const translatorType = (u: User) => (u.translator === "translator" ? "badged" : u.translator ? "moderator" : "none");
 
 // organisations, businesses and governments alike, have square pictures; people round ones
-export const pictureShape = (u: User) => (u.verified_type === "business" || u.verified_type === "government" ? "Square" : "Circle");
+export const pictureShape = (u: User) => (hasOrgBadge(u) ? "Square" : "Circle");
 
 // The sheet a checkmark opens: why the account wears it, and since when. The
 // client draws the organisation's row itself from the badge label. Entity

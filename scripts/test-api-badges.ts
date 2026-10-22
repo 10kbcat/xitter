@@ -8,6 +8,8 @@ import { newId } from "../src/ids";
 import { createToken, publicApi } from "../src/public-api";
 import { applyUser } from "../src/federation-sync";
 import { PUBLIC_ORIGIN } from "../src/config";
+import { isOrganizationSql } from "../src/users";
+import { menuLinks } from "../src/tidy";
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://localhost/xitter");
 assert(["localhost", "127.0.0.1"].includes(database.hostname) && /test|codex/.test(database.pathname), "Use a disposable local test database.");
@@ -58,6 +60,12 @@ try {
 	// an account with affiliates is a business account even without a badge
 	const club = await get(token, `/users/${name("unverifiedOrg")}`);
 	assert.deepEqual([club.organization, club.affiliates_count, club.verified], [true, 1, false]);
+
+	// the same rule in SQL (the admin panel's organisation list, the Organisation menu)
+	const orgs = await sql`select u.id::text from users u where ${isOrganizationSql(sql`u`)} and u.id = any(${sql.array(Object.values(ids), "INT8")})`;
+	assert.deepEqual(orgs.map((r: { id: string }) => r.id).sort(), [ids.org, ids.lonelyOrg, ids.unverifiedOrg].sort(), "SQL and TypeScript agree on organisations");
+	const hasMenu = async (id: string) => (await menuLinks(id)).some((l) => l.href === "/account/organisation");
+	assert.deepEqual([await hasMenu(ids.unverifiedOrg), await hasMenu(ids.member), await hasMenu(ids.plain)], [true, true, false], "Organisation menu for organisations and their people");
 
 	// an affiliate: the checkmark the app shows, dated from joining the organisation
 	const a = await get(token, `/users/${name("person")}`);

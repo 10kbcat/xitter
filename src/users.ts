@@ -5,6 +5,10 @@ import { sql } from "./db";
 import { PUBLIC_ORIGIN } from "./config";
 import { INSTANCE_ID } from "./federation";
 
+// a business account (isOrganization in model.ts), in SQL for the account `u` names
+export const isOrganizationSql = (u: unknown) =>
+	sql`(coalesce(${u}.verified_type in ('business', 'government'), false) or exists (select 1 from affiliations x where x.org_id = ${u}.id))`;
+
 // where a custom badge's image is served
 export const badgeUrl = (id: string) => `${PUBLIC_ORIGIN}/public/badge-${id}.png`;
 

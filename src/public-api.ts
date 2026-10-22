@@ -98,7 +98,7 @@ function userJson(u: User) {
 		// what it wears after its name, as the web client draws it (badgeList):
 		// its organisations first, then custom badges, pride flags and, for an
 		// account from another instance, a globe
-		affiliations: shown.filter((b) => b.org).map((b) => ({ screen_name: b.org!, name: b.description, badge_url: b.url })),
+		affiliations: shown.flatMap((b) => (b.org ? [{ screen_name: b.org, name: b.description, badge_url: b.url }] : [])),
 		badges: shown.filter((b) => !b.org).map((b) => ({ name: b.description, url: b.url })),
 		protected: !!u.protected,
 		created_at: iso(u.created_at),
