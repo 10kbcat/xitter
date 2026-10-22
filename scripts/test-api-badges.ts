@@ -25,6 +25,7 @@ try {
 		(${person}::bigint, ${names.person}, 'Affiliate', 'unused', null, null),
 		(${plain}::bigint, ${names.plain}, 'Plain', 'unused', null, null)`;
 	await sql`update users set flag = 'pride,trans' where id = ${person}::bigint`;
+	await sql`update users set parody_label = 'Fan', automated_by = ${org}::bigint where id = ${person}::bigint`;
 	await sql`insert into affiliations(org_id, user_id) values(${org}::bigint, ${person}::bigint)`;
 	await sql`insert into custom_badges(id, name, image, mime) values(${badge}::bigint, 'Early supporter', '\\x00'::bytea, 'image/png')`;
 	await sql`insert into user_badges(user_id, badge_id) values(${person}::bigint, ${badge}::bigint)`;
@@ -45,9 +46,11 @@ try {
 		{ name: "Transgender flag", url: `${PUBLIC_ORIGIN}/public/flag-trans.svg` },
 	], "custom badges, then flags");
 	assert(!("affiliates_count" in a), "only organisations have affiliates");
+	assert.equal(a.parody_label, "Fan", "PCF label");
+	assert.equal(a.automated_by, names.org, "automated label names the owner");
 
 	const p = await get(token, `/users/${names.plain}`);
-	assert.deepEqual([p.affiliations, p.badges, p.organization, p.verified_since], [[], [], false, null], "no badges, no noise");
+	assert.deepEqual([p.affiliations, p.badges, p.organization, p.verified_since, p.parody_label, p.automated_by], [[], [], false, null, null, null], "no badges or labels, no noise");
 
 	// the same shape on post authors
 	const post = newId();

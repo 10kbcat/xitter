@@ -84,6 +84,10 @@ function userJson(u: User) {
 		banner_url: absolute(u.banner_url),
 		verified_type: u.verified_type,
 		verified_since: iso(u.verified_at),
+		// X's profile label: "Parody", "Commentary" or "Fan" (null for none)
+		parody_label: u.parody_label && u.parody_label !== "None" ? u.parody_label : null,
+		// a bot's owner, for X's "Automated by @owner" label
+		automated_by: u.automated_by ?? null,
 		// businesses and governments: X draws them with square pictures
 		organization: u.verified_type === "business" || u.verified_type === "government",
 		// the organisations it's an affiliate of; the first is the badge after its name
