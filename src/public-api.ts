@@ -10,16 +10,15 @@ import { accountPage, esc } from "./account-page";
 import { type User, type Viewer } from "./auth";
 import { PUBLIC_ORIGIN } from "./config";
 import { sql } from "./db";
-import { FLAGS, flagList } from "./flags";
 import { callOperation } from "./graphql";
 import { isId, newId } from "./ids";
 import { absolute, mediaUpload, mediaUrl, posterUrl } from "./media";
-import type { PostRow } from "./model";
+import { type PostRow, badgeList, isOrganization, isVerified, verifiedSince } from "./model";
 import { PostError, feed, getPost, postsByIds, replies, type FeedItem } from "./posts";
 import { type Bucket, limitHeaders, limitedResponse, noteRefusal, take } from "./ratelimit";
 import { searchPosts, searchUsers } from "./search";
 import { settings } from "./settings";
-import { followList, setFollow, userByName, usersByIds } from "./users";
+import { badgeUrl, followList, setFollow, userByName, usersByIds } from "./users";
 
 const hash = (token: string) => new Bun.CryptoHasher("sha256").update(token).digest("hex");
 const MAX_TOKENS = 10;
@@ -73,6 +72,7 @@ async function tokenViewer(req: Request): Promise<{ viewer: Viewer; scope: strin
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 
 function userJson(u: User) {
+	const shown = badgeList(u);
 	return {
 		id: u.id,
 		screen_name: u.screen_name,
@@ -83,22 +83,23 @@ function userJson(u: User) {
 		avatar_url: absolute(u.avatar_url),
 		banner_url: absolute(u.banner_url),
 		verified_type: u.verified_type,
-		verified_since: iso(u.verified_at),
-		// X's profile label: "Parody", "Commentary" or "Fan" (null for none)
+		// what the web client shows, from the same rules (model.ts): a checkmark
+		// also for an organisation's affiliates, and its "Verified since" date
+		verified: isVerified(u),
+		verified_since: iso(isVerified(u) ? verifiedSince(u) : null),
+		// X's profile labels: "Parody", "Commentary" or "Fan"; one an admin made
+		// (Admin > Labels); and a bot's owner, for "Automated by @owner"
 		parody_label: u.parody_label && u.parody_label !== "None" ? u.parody_label : null,
-		// a bot's owner, for X's "Automated by @owner" label
+		label: u.label ? { text: u.label.text, url: u.label.url ?? null, badge_url: u.label.badge_id ? badgeUrl(u.label.badge_id) : null } : null,
 		automated_by: u.automated_by ?? null,
-		// businesses and governments: X draws them with square pictures
-		organization: u.verified_type === "business" || u.verified_type === "government",
-		// the organisations it's an affiliate of; the first is the badge after its name
-		affiliations: [u.org, ...(u.more_orgs ?? [])].filter((o) => !!o).map((o) => ({ screen_name: o!.screen_name, name: o!.name, badge_url: absolute(o!.avatar_url) })),
-		// custom badges (staff-made, and from its home instance) and pride flags, in order
-		badges: [
-			...(u.badges ?? []).map((b) => ({ name: b.name, url: `${PUBLIC_ORIGIN}/public/badge-${b.id}.png` })),
-			...(u.remote_badges ?? []).map((b) => ({ name: b.name, url: b.url })),
-			...flagList(u.flag).map((f) => ({ name: `${FLAGS[f].name} flag`, url: `${PUBLIC_ORIGIN}/public/flag-${f}.svg` })),
-		],
-		...(u.affiliates ? { affiliates_count: u.affiliates } : {}),
+		// a business account: a business or government, or anyone with affiliates
+		organization: isOrganization(u),
+		...(isOrganization(u) ? { affiliates_count: u.affiliates ?? 0 } : {}),
+		// what it wears after its name, as the web client draws it (badgeList):
+		// its organisations first, then custom badges, pride flags and, for an
+		// account from another instance, a globe
+		affiliations: shown.filter((b) => b.org).map((b) => ({ screen_name: b.org!, name: b.description, badge_url: b.url })),
+		badges: shown.filter((b) => !b.org).map((b) => ({ name: b.description, url: b.url })),
 		protected: !!u.protected,
 		created_at: iso(u.created_at),
 		url: `${PUBLIC_ORIGIN}/${u.screen_name}`,
