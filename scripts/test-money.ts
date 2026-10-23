@@ -234,6 +234,20 @@ try {
 	const affCard = (await sa.json(`money/cards?ids=p${affId}&by=${a}`))[`p${affId}`] as string;
 	check("an affiliate wears a blue check and its organisation", affCard.includes("#1d9bf0") && affCard.includes('class="xm-org"'));
 
+	// ---- the To field's list of accounts
+	const people = async (q: string) => (await fetch(`${origin}/account/money/people?q=${encodeURIComponent(q)}`, { headers: sa.headers })).json();
+	const found = await people(`@${b.slice(0, -1)}`);
+	check("typing in To lists matching accounts", found.some((p: any) => p.screen_name === b) && found.some((p: any) => p.screen_name === c));
+	check("never yourself", !found.some((p: any) => p.screen_name === a));
+	check("with their checkmarks", typeof found[0]?.badges === "string" && typeof found[0]?.avatar === "string");
+	check("by name too", (await people("money b")).some((p: any) => p.screen_name === b));
+	// A is an admin by now, and admins can't be blocked: B is
+	await sql`insert into blocks (blocker_id, blocked_id) values (${ids[2]}::bigint, ${ids[1]}::bigint) on conflict do nothing`;
+	const forB = await (await fetch(`${origin}/account/money/people?q=${c}`, { headers: sb.headers })).json();
+	check("not accounts that blocked you", Array.isArray(forB) && !forB.some((p: any) => p.screen_name === c));
+	await sql`delete from blocks where blocker_id = ${ids[2]}::bigint and blocked_id = ${ids[1]}::bigint`;
+	check("odd input lists nothing", (await people("%_")).length === 0 && (await people("")).length === 0);
+
 	// ---- release checks
 	await sql`update money_wallets set balance_cents = 10000 where user_id = any(${sql.array(ids.slice(0, 3), "INT8")})`;
 	const twice = crypto.randomUUID();
