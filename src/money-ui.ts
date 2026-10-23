@@ -1,7 +1,8 @@
-// X Money in the client (money.ts): payment cards drawn over the summary card
-// of a post carrying a payment's link, the composer's $ button that puts one of
-// your payments in the post, and opening the composer with a payment in it
-// from the Money page (window.__xitterCompose).
+// X Money in the client (money.ts): payment and "Pay @name" cards drawn over
+// the summary card of a post carrying a payment's or request's link, the
+// composer's $ button that puts a Pay button or one of your payments in the
+// post, and opening the composer with one in it from the Money pages
+// (window.__xitterCompose).
 
 import { MONEY_ICON } from "./tidy";
 
@@ -11,7 +12,12 @@ export const CARD_CSS = `.xm-card{display:block;position:relative;overflow:hidde
 .xm-card:hover{background:color-mix(in srgb,currentColor 3%,transparent);text-decoration:none}
 .xm-card b{font-weight:700}
 .xm-dim{color:color-mix(in srgb,currentColor 55%,transparent)}
-.xm-badge{width:18px;height:18px;vertical-align:-3px;margin-left:2px}
+.xm-badge{width:18px;height:18px;vertical-align:-3px;margin-left:2px;flex:none}
+.xm-org{width:16px;height:16px;border-radius:3px;object-fit:cover;vertical-align:-2px;margin-left:3px;flex:none;box-shadow:0 0 0 1px color-mix(in srgb,currentColor 20%,transparent)}
+.xm-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
+.xm-who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+img.xm-sq{border-radius:8px!important}
+.xm-card[data-xm-go]{cursor:pointer}
 .xm-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .xm-amt{font-size:36px;line-height:44px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .xm-p2p{padding:12px 16px 14px}
@@ -30,6 +36,13 @@ export const CARD_CSS = `.xm-card{display:block;position:relative;overflow:hidde
 .xm-shop .xm-logo{display:block;width:56px;height:56px;margin-top:-28px;border-radius:12px;object-fit:cover;border:2px solid var(--xm-bg,#000);background:var(--xm-bg,#000)}
 .xm-shop .xm-row{margin-top:8px;font-size:17px}
 .xm-rule{height:1px;margin:12px 0 6px;background:color-mix(in srgb,currentColor 18%,transparent)}
+.xm-req{display:flex;align-items:center;gap:12px;padding:14px 16px}
+.xm-req .xm-line{font-size:17px;line-height:22px}
+.xm-req .xm-logo{width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none}
+.xm-req .xm-sub{font-size:15px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xm-pay{flex:none;display:inline-flex;align-items:center;min-height:40px;padding:0 22px;border-radius:9999px;background:var(--xm-fg,#fff);color:var(--xm-bg,#000)!important;font-weight:700;font-size:17px;text-decoration:none!important}
+.xm-pay:hover{opacity:.9}
+.xm-state{flex:none;padding:6px 14px;border-radius:9999px;border:1px solid color-mix(in srgb,currentColor 25%,transparent);color:color-mix(in srgb,currentColor 60%,transparent);font-weight:700;font-size:14px}
 .xm-mark{display:inline-flex;align-items:center;gap:1px;font-weight:700;color:var(--xm-text,currentColor)}
 .xm-mark svg{width:16px;height:16px;fill:currentColor}`;
 
@@ -46,14 +59,20 @@ export const MONEY_UI_CSS = `${CARD_CSS}
 #xitter-pay .xp-dim{color:color-mix(in srgb,currentColor 55%,transparent);font-size:14px}
 #xitter-pay .xp-foot{padding:12px 16px;border-top:1px solid color-mix(in srgb,currentColor 15%,transparent)}
 #xitter-pay .xp-send{display:block;width:100%;min-height:36px;border:0;border-radius:9999px;background:var(--xt-accent,#1d9bf0);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+#xitter-pay .xp-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:#000;flex:none;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .15)}
+#xitter-pay .xp-icon svg{width:26px;height:26px;fill:#fff}
+#xitter-pay .xp-label{padding:12px 16px 4px;font-size:13px;font-weight:700;color:color-mix(in srgb,currentColor 55%,transparent)}
 #xitter-pay .xp-empty{padding:24px 16px;text-align:center;color:color-mix(in srgb,currentColor 55%,transparent)}`;
 
 export const MONEY_UI_SCRIPT = `(function(){
 	var X=window.__XITTER__||{},T=X.tidy||{};
 	if(!(T.links||[]).some(function(l){return l.href==="/account/money"}))return;
-	var PAY=/\\/i\\/xmoney\\/p\\/(\\d{1,19})(?:[/?#]|$)/;
+	// a payment's (p) or a request's (r) address, as "p<id>" or "r<id>"
+	var KEY=/\\/i\\/xmoney\\/([pr])\\/(\\d{1,19})(?:[/?#]|$)/;
+	function keyOf(href){var m=KEY.exec(href||"");return m?m[1]+m[2]:null}
 	function go(p){if(window.__xitterGo)window.__xitterGo(p);else location.assign(p)}
 	function bg(){var b=getComputedStyle(document.body).backgroundColor;return b&&b!=="rgba(0, 0, 0, 0)"?b:"#fff"}
+	function csrf(){return (document.cookie.match(/(?:^|;\\s*)ct0=([^;]+)/)||[])[1]||""}
 
 	// the composer with a payment in it: the text waits for the editor to appear
 	window.__xitterCompose=function(text){
@@ -96,31 +115,31 @@ export const MONEY_UI_SCRIPT = `(function(){
 	function cards(){
 		var want={};
 		document.querySelectorAll('[data-testid="card.wrapper"]:not([data-xm-hidden])').forEach(function(w){
-			var a=[].find.call(w.querySelectorAll("a[href]"),function(a){return PAY.test(a.getAttribute("href"))});
+			var a=[].find.call(w.querySelectorAll("a[href]"),function(a){return keyOf(a.getAttribute("href"))});
 			if(!a)return;
-			var id=PAY.exec(a.getAttribute("href"))[1],by=authorOf(w),key=id+"|"+by;
+			var id=keyOf(a.getAttribute("href")),by=authorOf(w),key=id+"|"+by;
 			if(cache[key]===undefined){(want[by]=want[by]||[]).push(id);return}
 			if(!cache[key])return;
 			var box=document.createElement("div");
 			box.setAttribute("data-xm-card",id);
-			box.style.setProperty("--xm-bg",bg());
+			box.style.setProperty("--xm-bg",bg());box.style.setProperty("--xm-fg",getComputedStyle(document.body).color);
 			box.innerHTML=cache[key];
 			w.setAttribute("data-xm-hidden","");
 			w.parentNode.insertBefore(box,w.nextSibling);
 			// the link in the text is the card's; the card shows it instead
 			var art=w.closest("article");
-			if(art)[].forEach.call(art.querySelectorAll('[data-testid="tweetText"] a[href]'),function(t){if(PAY.test(t.getAttribute("href"))&&PAY.exec(t.getAttribute("href"))[1]===id)t.setAttribute("data-xm-hidden","")});
+			if(art)[].forEach.call(art.querySelectorAll('[data-testid="tweetText"] a[href]'),function(t){if(keyOf(t.getAttribute("href"))===id)t.setAttribute("data-xm-hidden","")});
 		});
 		// a card whose post the client drew again without it
 		document.querySelectorAll("[data-xm-card]").forEach(function(c){var w=c.previousElementSibling;if(!w||!w.hasAttribute("data-xm-hidden"))c.remove()});
 		for(var by in want)fetchCards(by,want[by]);
 	}
+	// a card opens its page, its Pay button the payment, inside the client
 	document.addEventListener("click",function(e){
-		var a=e.target.closest&&e.target.closest("a[data-xmoney]");
+		var a=e.target.closest&&e.target.closest("[data-xm-card] [data-xm-go]");
 		if(!a||e.metaKey||e.ctrlKey||e.shiftKey||e.button)return;
 		e.preventDefault();e.stopPropagation();
-		if(open)close();
-		go("/account/money/p/"+a.getAttribute("data-xmoney"));
+		go(a.getAttribute("data-xm-go"));
 	},true);
 
 	// the composer's $ button: a copy of its emoji button, like the sticker one
@@ -134,11 +153,25 @@ export const MONEY_UI_SCRIPT = `(function(){
 		close();
 		var box=el("div");box.id="xitter-pay";
 		box.style.background=bg();box.style.color=getComputedStyle(document.body).color;
-		box.appendChild(el("div","xp-head","Add a payment"));
-		var list=el("div","xp-list");list.appendChild(el("div","xp-empty","Loading…"));
+		box.appendChild(el("div","xp-head","X Money"));
+		var list=el("div","xp-list");
+		function action(title,sub,run){
+			var b=el("button","xp-item");b.type="button";
+			var i=el("span","xp-icon");i.innerHTML='<svg viewBox="0 0 24 24"><path d="${MONEY_ICON}"></path></svg>';b.appendChild(i);
+			var t=el("div","xp-text");t.appendChild(el("div",null,title));t.appendChild(el("div","xp-dim",sub));b.appendChild(t);
+			b.onclick=run;list.appendChild(b);
+		}
+		// a "Pay @you" card anyone who sees the post can pay
+		action("Add a Pay button","Anyone who sees the post can pay you",function(){
+			fetch("/i/api/xitter/money/payme",{method:"POST",credentials:"include",headers:{"x-csrf-token":csrf()}}).then(function(r){return r.json()}).then(function(d){
+				close();var ed=editorOf(rootOf(toolbar));if(ed&&d.url)insert(ed,d.url);
+			},function(){});
+		});
+		action("Request money","Ask for an amount, from anyone or one account",function(){close();go("/account/money/request")});
+		var loading=el("div","xp-empty","Loading…");list.appendChild(loading);
 		box.appendChild(list);
 		var foot=el("div","xp-foot"),send=el("button","xp-send","Send money");
-		send.type="button";send.onclick=function(){close();go("/account/money")};
+		send.type="button";send.onclick=function(){close();go("/account/money/send")};
 		foot.appendChild(send);box.appendChild(foot);
 		document.body.appendChild(box);open=box;
 		var r=button.getBoundingClientRect(),top=r.bottom+6;
@@ -146,8 +179,9 @@ export const MONEY_UI_SCRIPT = `(function(){
 		box.style.top=top+"px";box.style.left=Math.max(8,Math.min(r.left,innerWidth-box.offsetWidth-8))+"px";
 		fetch("/i/api/xitter/money/recent",{credentials:"include"}).then(function(r){return r.ok?r.json():[]}).then(function(items){
 			if(open!==box)return;
-			list.innerHTML="";
-			if(!items.length){list.appendChild(el("div","xp-empty","No payments yet. Send money, then share it here."));return}
+			loading.remove();
+			if(!items.length)return;
+			list.appendChild(el("div","xp-label","Your payments"));
 			items.forEach(function(p){
 				var b=el("button","xp-item");b.type="button";
 				var img=el("img");img.src=p.avatar;img.alt="";b.appendChild(img);
@@ -158,7 +192,7 @@ export const MONEY_UI_SCRIPT = `(function(){
 				b.onclick=function(){close();var ed=editorOf(rootOf(toolbar));if(ed)insert(ed,p.url)};
 				list.appendChild(b);
 			});
-		},function(){list.innerHTML="";list.appendChild(el("div","xp-empty","Couldn't load your payments."))});
+		},function(){loading.textContent="Couldn't load your payments."});
 	}
 	function buttons(){
 		document.querySelectorAll('[data-testid="toolBar"]').forEach(function(toolbar){

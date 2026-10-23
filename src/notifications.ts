@@ -23,8 +23,8 @@ type Mention = { kind: "post"; postId: string; at: number; reason: "reply" | "qu
 // a message, warning or strike from staff, or the decision on an appeal
 // a notice from the instance; `url` is where it leads, /account/notices if none
 type Staff = { kind: "staff"; key: string; at: number; text: string; url?: string };
-// money sent to the viewer (money.ts); `users` holds the sender
-type Money = { kind: "money"; key: string; at: number; users: string[]; transferId: string; text: string; postId?: undefined };
+// money sent to the viewer, asked of them, or their request declined (money.ts); `users` holds who did it
+type Money = { kind: "money"; key: string; at: number; users: string[]; path: string; text: string; postId?: undefined };
 type Item = Group | Mention | Staff | Money;
 
 const ms = (d: Date) => d.getTime();
@@ -90,7 +90,18 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			where t.recipient_id = ${viewerId}::bigint and t.sender_id not in ${hidden} and t.created_at >= ${lo} and t.created_at < ${hi}
 			order by t.created_at desc limit ${opts.limit}`;
 		for (const r of paid)
-			out.push({ kind: "money", key: `money-${r.id}`, at: ms(r.at), users: [String(r.sender_id)], transferId: String(r.id), text: `sent you ${formatCents(Number(r.amount_cents))}${r.note ? `: “${clip(r.note)}”` : ""}` });
+			out.push({ kind: "money", key: `money-${r.id}`, at: ms(r.at), users: [String(r.sender_id)], path: `/i/xmoney/p/${r.id}`, text: `sent you ${formatCents(Number(r.amount_cents))}${r.note ? `: “${clip(r.note)}”` : ""}` });
+		// requests of the viewer, and the viewer's own that were declined
+		const requested = await sql`select q.id, q.requester_id, q.amount_cents, q.note, q.created_at as at from money_requests q
+			where q.payer_id = ${viewerId}::bigint and q.requester_id not in ${hidden} and q.created_at >= ${lo} and q.created_at < ${hi}
+			order by q.created_at desc limit ${opts.limit}`;
+		for (const r of requested)
+			out.push({ kind: "money", key: `request-${r.id}`, at: ms(r.at), users: [String(r.requester_id)], path: `/i/xmoney/r/${r.id}`, text: `requested ${formatCents(Number(r.amount_cents))} from you${r.note ? `: “${clip(r.note)}”` : ""}` });
+		const declined = await sql`select q.id, q.payer_id, q.amount_cents, q.resolved_at as at from money_requests q
+			where q.requester_id = ${viewerId}::bigint and q.status = 'declined' and q.payer_id not in ${hidden} and q.resolved_at >= ${lo} and q.resolved_at < ${hi}
+			order by q.resolved_at desc limit ${opts.limit}`;
+		for (const r of declined)
+			out.push({ kind: "money", key: `declined-${r.id}`, at: ms(r.at), users: [String(r.payer_id)], path: `/i/xmoney/r/${r.id}`, text: `declined your request for ${formatCents(Number(r.amount_cents))}` });
 		const asked = await sql`select o.id, o.screen_name, r.created_at as at from affiliation_requests r join users o on o.id = r.org_id
 			where r.user_id = ${viewerId}::bigint and r.created_at >= ${lo} and r.created_at < ${hi} order by r.created_at desc limit ${opts.limit}`;
 		for (const r of asked)
@@ -205,7 +216,7 @@ function moneyEntry(m: Money, users: Map<string, User>) {
 				id: m.key,
 				notification_icon: "bell_icon",
 				rich_message: message([from], 1, m.text),
-				notification_url: { url: `${IN_APP}/i/xmoney/p/${m.transferId}`, urlType: "ExternalUrl" },
+				notification_url: { url: `${IN_APP}${m.path}`, urlType: "ExternalUrl" },
 				template: {
 					__typename: "TimelineNotificationAggregateUserActions",
 					target_objects: [],
@@ -341,7 +352,7 @@ export async function pushItems(viewerId: string, sinceMs: number): Promise<Push
 		}
 		if (i.kind === "money") {
 			const from = users.get(i.users[0]);
-			out.push({ kind: "money", key: i.key, at: i.at, text: `${name(from)} ${i.text}`, url: `/i/xmoney/p/${i.transferId}` });
+			out.push({ kind: "money", key: i.key, at: i.at, text: `${name(from)} ${i.text}`, url: i.path });
 			continue;
 		}
 		const post = i.postId ? posts.get(i.postId) : undefined;

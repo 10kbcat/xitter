@@ -91,17 +91,27 @@ copy during setup, and it stays on that machine.
   week old can import, and staff approve each import first (Admin > Settings,
   Import from X)
 - X Money (Money in the side bar): every account has a wallet and sends money
-  to other accounts here, with a note, and sees what it sent and received. It
-  is the instance's own play money, not real currency: a wallet starts with
-  `money.starting_cents` (default $100), one payment moves up to
-  `money.max_transfer_cents` (default $1,000), and admins add or take money on
-  the same page (recorded in the audit log). Each payment has a page
-  (`/i/xmoney/p/<id>`); its link in a post by either side shows as a payment
-  card, as on X ("$100 sent to liza", or "$3.52 at Taco Bell" for a gold
-  business account), added from the composer's $ button, "Share it in a post"
-  when sending, or the payment's page. The recipient gets a notification and a
-  browser push. Admin > Settings, feature switches turns it off.
-  `bun scripts/test-money.ts` checks it
+  to other accounts here, with a note. It is the instance's own play money,
+  not real currency: a wallet starts with `money.starting_cents` (default
+  $100), one payment moves up to `money.max_transfer_cents` (default $1,000),
+  each like on your posts earns you `money.like_cents` (default 50¢, once per
+  post and account) and admins add or take money on the Money page (recorded
+  in the audit log).
+  - Requests: ask one account for an amount (it gets a notification to pay or
+    decline), or anyone, as a "Pay @you" card in a post that anyone who sees it
+    can pay, with or without a set amount
+  - A payment's or request's link (`/i/xmoney/p/<id>`, `/i/xmoney/r/<id>`) in a
+    post by its own side shows as X's card: "$100 sent to liza", "Pay @james"
+    with a Pay button, or a purchase ("$3.52 at Taco Bell"). The composer's $
+    button adds a Pay button or one of your payments; "Share it in a post" does
+    it when sending or requesting
+  - Merchant mode (Settings > Your account > X Money), for gold organisations:
+    payments to them read as purchases under the name they choose, with their
+    banner if they like
+  - Payments show checkmarks and an affiliate's organisation badge; money
+    received, requests and declined requests come as notifications and pushes
+  - Admin > Settings, feature switches turns it off. `bun scripts/test-money.ts`
+    checks it
 - Polls with a photo on each choice
 - YouTube links (videos, Shorts, live, youtu.be, with `t=` start times) become
   player cards: the thumbnail comes through `EMBED_PROXY`, and pressing play

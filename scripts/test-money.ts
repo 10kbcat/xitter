@@ -31,7 +31,10 @@ async function signIn(username: string) {
 	const page = async (query = "") => (await fetch(`${origin}/account/money${query}`, { headers })).text();
 	const send = (body: Record<string, string>) =>
 		fetch(`${origin}/account/money`, { method: "POST", headers, body: new URLSearchParams({ idem: crypto.randomUUID(), ...body }), redirect: "manual" });
-	return { headers, page, send, gql, get, json };
+	const form = (path: string, body: Record<string, string>) =>
+		fetch(`${origin}${path}`, { method: "POST", headers, body: new URLSearchParams(body), redirect: "manual" });
+	const postApi = async (path: string) => (await fetch(`${origin}/i/api/xitter/${path}`, { method: "POST", headers: api })).json();
+	return { headers, page, send, gql, get, json, form, postApi };
 }
 const balance = async (name: string) => {
 	const [w] = await sql`select w.balance_cents from money_wallets w join users u on u.id = w.user_id where u.screen_name = ${name}`;
@@ -66,14 +69,14 @@ try {
 	check("the payment has its own page", receipt.includes("Completed") && receipt.includes("data-compose"));
 	const sc = await signIn(c);
 	check("a stranger can't see an unshared payment", (await fetch(`${origin}/account/money/p/${payId}`, { headers: sc.headers })).status === 404);
-	check("nor its card", !(payId in (await sc.json(`money/cards?ids=${payId}`))));
+	check("nor its card", !(`p${payId}` in (await sc.json(`money/cards?ids=p${payId}`))));
 	const recent = await sa.json("money/recent");
 	check("the composer lists the payment", recent[0]?.id === payId && recent[0].url.endsWith(`/i/xmoney/p/${payId}`), recent[0]);
 	const made = await sa.gql("CreateTweet", { tweet_text: `Fast & Free Payments ${recent[0].url}` });
 	const post = made.data.create_tweet.tweet_results.result;
 	check("a post with the payment's link gets its card", post.card?.legacy?.name === "summary" && JSON.stringify(post.card).includes(`$12.50 sent to Money B`), post.card?.legacy?.binding_values?.[0]);
-	check("a stranger now sees the card", typeof (await sc.json(`money/cards?ids=${payId}&by=${a}`))[payId] === "string");
-	const html = (await sb.json(`money/cards?ids=${payId}&by=${a}`))[payId] as string;
+	check("a stranger now sees the card", typeof (await sc.json(`money/cards?ids=p${payId}&by=${a}`))[`p${payId}`] === "string");
+	const html = (await sb.json(`money/cards?ids=p${payId}&by=${a}`))[`p${payId}`] as string;
 	check("the card reads as X's", html.includes("$12.50") && html.includes("sent to") && html.includes("i miss you"));
 	check("its page opens for them too", (await fetch(`${origin}/account/money/p/${payId}`, { headers: sc.headers })).status === 200);
 	const copied = await sc.gql("CreateTweet", { tweet_text: `look ${recent[0].url}` });
@@ -111,9 +114,77 @@ try {
 	const shell = await fetch(`${origin}/account/money`, { headers: { ...sa.headers, "sec-fetch-dest": "document" }, redirect: "manual" });
 	check("opened on its own, it goes to the client's page", shell.status === 302 && shell.headers.get("location") === "/i/xmoney", shell.headers.get("location"));
 	check("signed out it isn't there", (await fetch(`${origin}/account/money`, { redirect: "manual" })).status === 302);
+
+	// ---- earning from likes
+	await sql`update money_wallets set balance_cents = 10000 where user_id = any(${sql.array(ids, "INT8")})`;
+	const liked = (await sc.gql("CreateTweet", { tweet_text: "like me" })).data.create_tweet.tweet_results.result.rest_id;
+	await sb.gql("FavoriteTweet", { tweet_id: liked });
+	check("a like pays the post's author 50¢", (await balance(c)) === 10050, await balance(c));
+	await sb.gql("UnfavoriteTweet", { tweet_id: liked });
+	await sb.gql("FavoriteTweet", { tweet_id: liked });
+	check("unliking and liking again pays nothing more", (await balance(c)) === 10050);
+	await sc.gql("FavoriteTweet", { tweet_id: liked });
+	check("liking your own post pays nothing", (await balance(c)) === 10050);
+	check("earnings show in Activity", (await sc.page()).includes("Likes on your posts"));
+
+	// ---- a request of one account
+	r = await sb.form("/account/money/request", { from: a, amount: "5", note: "pizza" });
+	const reqId = /\/account\/money\/r\/(\d+)/.exec(r.headers.get("location") ?? "")?.[1];
+	check("a request is made", r.status === 303 && !!reqId, r.status);
+	const aNotes = JSON.stringify(await sa.get("NotificationsTimeline", { timeline_type: "All", count: 40 }));
+	check("the account asked is notified", aNotes.includes("requested $5.00 from you") && aNotes.includes(`/i/xmoney/r/${reqId}`));
+	check("and sees it on the Money page", (await sa.page()).includes("Asks for $5"));
+	check("someone else can't see it", (await fetch(`${origin}/account/money/r/${reqId}`, { headers: sc.headers })).status === 404);
+	check("paying the wrong amount is refused", (await sa.form("/account/money/send", { to: b, amount: "4", request: reqId!, idem: crypto.randomUUID() })).status === 400);
+	r = await sa.form("/account/money/send", { to: b, amount: "5", request: reqId!, idem: crypto.randomUUID() });
+	const [paidReq] = await sql`select status from money_requests where id = ${reqId}::bigint`;
+	check("paying it pays and closes it", r.status === 303 && paidReq.status === "paid" && (await balance(b)) === 10500, [r.status, paidReq.status]);
+	check("it can't be paid twice", (await sa.form("/account/money/send", { to: b, amount: "5", request: reqId!, idem: crypto.randomUUID() })).status >= 400 && (await balance(b)) === 10500);
+	r = await sb.form("/account/money/request", { from: a, amount: "3", note: "" });
+	const declineId = /\/r\/(\d+)/.exec(r.headers.get("location") ?? "")?.[1];
+	await sa.form(`/account/money/r/${declineId}`, { action: "decline" });
+	const bNotes = JSON.stringify(await sb.get("NotificationsTimeline", { timeline_type: "All", count: 40 }));
+	check("declining tells the requester", bNotes.includes("declined your request for $3.00"));
+	check("asking without an amount of one account is refused", (await sb.form("/account/money/request", { from: a, amount: "", note: "" })).status === 400);
+
+	// ---- a Pay button anyone can use
+	const payMe = await sb.postApi("money/payme");
+	check("the composer's Pay button makes a request link", /\/i\/xmoney\/r\/\d+$/.test(payMe.url ?? ""), payMe);
+	check("and gives the same one again", (await sb.postApi("money/payme")).url === payMe.url);
+	const openId = payMe.url.split("/").pop();
+	const payPost = (await sb.gql("CreateTweet", { tweet_text: `Testing ${payMe.url}` })).data.create_tweet.tweet_results.result;
+	check("a post with it gets a Pay card", JSON.stringify(payPost.card ?? {}).includes(`Pay @${b}`));
+	const payCard = (await sc.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string;
+	check("the card has a Pay button for others", payCard.includes(`Pay @${b}`) && payCard.includes(`send?request=${openId}`));
+	check("but not for its owner", !((await sb.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string).includes("xm-pay"));
+	r = await sc.form("/account/money/send", { to: b, amount: "2.25", request: openId, idem: crypto.randomUUID() });
+	r = await sa.form("/account/money/send", { to: b, amount: "1", request: openId, idem: crypto.randomUUID() });
+	check("anyone pays it, as often as they like", (await sb.page(`/r/${openId}`)).includes("2 times"));
+	const copiedPay = (await sc.gql("CreateTweet", { tweet_text: `pay them ${payMe.url}` })).data.create_tweet.tweet_results.result;
+	check("someone else's post with it gets no card", !copiedPay.card);
+
+	// ---- merchant mode and badges
+	r = await sa.form("/account/merchant", { on: "1", name: "Shop A" });
+	check("merchant mode is only for gold organisations", !(await sql`select 1 from money_merchants where user_id = ${ids[0]}::bigint`).length);
+	await sql`update users set verified_type = 'business' where id = ${ids[2]}::bigint`;
+	await sc.form("/account/merchant", { on: "1", name: "Taco Bell", banner: "1" });
+	const [merchant] = await sql`select name from money_merchants where user_id = ${ids[2]}::bigint`;
+	check("a gold organisation turns it on", merchant?.name === "Taco Bell");
+	r = await sb.send({ to: c, amount: "3.52", note: "" });
+	const shopId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
+	const shopCard = (await sb.json(`money/cards?ids=p${shopId}&by=${b}`))[`p${shopId}`] as string;
+	check("payments to it read as purchases", shopCard.includes("$3.52") && shopCard.includes("Taco Bell") && shopCard.includes(">at<"));
+	check("with its gold checkmark", shopCard.includes("#e2b719"));
+	await sql`insert into affiliations (org_id, user_id) values (${ids[2]}::bigint, ${ids[1]}::bigint) on conflict do nothing`;
+	r = await sa.send({ to: b, amount: "1", note: "" });
+	const affId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
+	const affCard = (await sa.json(`money/cards?ids=p${affId}&by=${a}`))[`p${affId}`] as string;
+	check("an affiliate wears a blue check and its organisation", affCard.includes("#1d9bf0") && affCard.includes('class="xm-org"'));
 } finally {
 	for (const id of ids) {
 		await sql`delete from audit_log where target = ${id}`;
+		await sql`delete from money_like_rewards where author_id = ${id}::bigint or liker_id = ${id}::bigint`;
+		await sql`delete from posts where user_id = ${id}::bigint`;
 		await sql`delete from users where id = ${id}::bigint`;
 	}
 	await sql.close();

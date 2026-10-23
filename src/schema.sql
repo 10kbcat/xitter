@@ -1602,3 +1602,38 @@ create table if not exists money_transfers (
 create unique index if not exists money_transfers_idem_idx on money_transfers (sender_id, idem);
 create index if not exists money_transfers_sender_idx on money_transfers (sender_id, id desc);
 create index if not exists money_transfers_recipient_idx on money_transfers (recipient_id, id desc);
+-- money requests (money.ts): asked of one account, or of anyone (payer_id
+-- null: a "Pay @name" card in a post, paid as often as people like)
+create table if not exists money_requests (
+	id bigint primary key,
+	requester_id bigint not null references users (id) on delete cascade,
+	payer_id bigint references users (id) on delete cascade,
+	amount_cents bigint check (amount_cents > 0),
+	note text not null default '',
+	status text not null default 'open' check (status in ('open', 'paid', 'declined', 'cancelled')),
+	created_at timestamptz not null default now(),
+	resolved_at timestamptz,
+	check (payer_id is null or amount_cents is not null),
+	check (payer_id is distinct from requester_id)
+);
+create index if not exists money_requests_requester_idx on money_requests (requester_id, id desc);
+create index if not exists money_requests_payer_idx on money_requests (payer_id, id desc) where payer_id is not null;
+alter table money_transfers add column if not exists request_id bigint references money_requests (id) on delete set null;
+-- merchant mode (Settings > X Money), for gold organisations: payments to
+-- them read as purchases ("$3.52 at Taco Bell")
+create table if not exists money_merchants (
+	user_id bigint primary key references users (id) on delete cascade,
+	name text not null default '',
+	show_banner boolean not null default true,
+	updated_at timestamptz not null default now()
+);
+-- what each like paid the post's author, once per post and account
+create table if not exists money_like_rewards (
+	post_id bigint not null,
+	liker_id bigint not null references users (id) on delete cascade,
+	author_id bigint not null references users (id) on delete cascade,
+	cents bigint not null,
+	created_at timestamptz not null default now(),
+	primary key (post_id, liker_id)
+);
+create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);

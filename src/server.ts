@@ -68,7 +68,8 @@ import { failInterrupted } from "./migration-import";
 import { migrateRoute } from "./migration-page";
 import { acceptedEncoding, compressResponse, compressedFile } from "./compress";
 import { forgetRanking } from "./ranking";
-import { cardsApi, moneyRoute, recentApi } from "./money";
+import { cardsApi, payMeApi, recentApi } from "./money";
+import { merchantRoute, moneyRoute } from "./money-page";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -87,7 +88,7 @@ const MIME: Record<string, string> = {
 // The client also calls outside services on its own (grok.com checkout, ads
 // measurement). Requests from the page may only reach this instance.
 const SETTINGS_PAGES = new Set(
-	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa"].map((s) => `/account/${s}`),
+	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa", "merchant"].map((s) => `/account/${s}`),
 );
 
 const PAGE_CSP ="connect-src 'self' blob: data:; font-src 'self'";
@@ -246,6 +247,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
 	if (path === "/xitter/money/cards") return cardsApi(viewer, url);
 	if (path === "/xitter/money/recent") return recentApi(viewer);
+	if (path === "/xitter/money/payme" && req.method === "POST") return payMeApi(viewer);
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
 	if (viewer.status === "restricted" && bucketsFor(req.method, path, operation, url).some((b) => b === "post" || b === "dm"))
 		return apiError(403, 326, "Your account can't post or send messages right now.");
@@ -476,6 +478,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/theme" && viewer) return themeRoute(req, viewer);
 	if (p === "/account/migrate" && viewer) return migrateRoute(req, viewer);
 	if ((p === "/account/money" || p.startsWith("/account/money/")) && viewer) return moneyRoute(req, viewer);
+	if (p === "/account/merchant" && viewer) return merchantRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
 	if (p.startsWith("/embed/")) return embedImage(p);
