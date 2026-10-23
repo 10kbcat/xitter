@@ -48,6 +48,14 @@ img.xm-sq{border-radius:8px!important}
 
 export const MONEY_UI_CSS = `${CARD_CSS}
 [data-xm-hidden]{display:none!important}
+[data-xm-link]{font-size:0!important;line-height:0!important}
+[data-xm-compose]{position:relative;margin:4px 0 8px}
+[data-xm-compose] .xm-card{margin-top:0;cursor:default}
+[data-xm-compose] .xm-card:hover{background:none}
+.xm-remove{position:absolute;top:8px;right:8px;z-index:1;display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:rgb(15 20 25 / .75);color:#fff;font:20px/1 -apple-system,"Segoe UI",sans-serif;cursor:pointer;backdrop-filter:blur(4px)}
+.xm-remove:hover{background:rgb(39 44 48 / .75)}
+[data-xm-compose] .xm-req{padding-right:56px}
+[data-xm-compose] .xm-req .xm-pay{pointer-events:none}
 #xitter-pay{position:fixed;z-index:10000;width:360px;max-width:calc(100vw - 16px);max-height:min(440px,calc(100vh - 16px));display:flex;flex-direction:column;border-radius:16px;overflow:hidden;font-family:TwitterChirp,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;box-shadow:rgba(101,119,134,.2) 0 0 15px,rgba(101,119,134,.15) 0 0 3px 1px}
 #xitter-pay .xp-head{padding:12px 16px;font-weight:800;font-size:17px;border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent)}
 #xitter-pay .xp-list{overflow-y:auto}
@@ -104,13 +112,15 @@ export const MONEY_UI_SCRIPT = `(function(){
 		var link=a&&a.querySelector('[data-testid="User-Name"] a[href^="/"]');
 		return link?link.getAttribute("href").slice(1).split("/")[0].toLowerCase():"";
 	}
-	function fetchCards(by,ids){
-		ids=ids.filter(function(id){return !asked[id+"|"+by]});
+	// preview: as other people will see it (the composer's mockup)
+	function fetchCards(by,ids,preview){
+		var tail=preview?"|preview":"";
+		ids=ids.filter(function(id){return !asked[id+"|"+by+tail]});
 		if(!ids.length)return;
-		ids.forEach(function(id){asked[id+"|"+by]=true});
-		fetch("/i/api/xitter/money/cards?ids="+ids.join(",")+"&by="+encodeURIComponent(by),{credentials:"include"})
+		ids.forEach(function(id){asked[id+"|"+by+tail]=true});
+		fetch("/i/api/xitter/money/cards?ids="+ids.join(",")+"&by="+encodeURIComponent(by)+(preview?"&preview=1":""),{credentials:"include"})
 			.then(function(r){return r.ok?r.json():{}})
-			.then(function(d){ids.forEach(function(id){cache[id+"|"+by]=d[id]||null});cards()},function(){});
+			.then(function(d){ids.forEach(function(id){cache[id+"|"+by+tail]=d[id]||null});cards();composers()},function(){});
 	}
 	function cards(){
 		var want={};
@@ -214,8 +224,59 @@ export const MONEY_UI_SCRIPT = `(function(){
 		});
 	}
 
+	// The composer: a payment's or request's link in the post being written
+	// shows as its card under the text, as the post will, with the link itself
+	// out of sight; the card's × takes the link out of the post.
+	var me="";
+	try{var S=window.__INITIAL_STATE__;me=S.entities.users.entities[S.session.user_id].screen_name.toLowerCase()}catch(e){}
+	function linkIn(text){
+		var base=location.origin+"/i/xmoney/",at=text.indexOf(base);
+		var m=at<0?null:/^[pr]\\/\\d{1,19}/.exec(text.slice(at+base.length));
+		return m?base+m[0]:null;
+	}
+	// the smallest element holding the link and nothing else, if the editor gives it one
+	function linkNode(editor,url){
+		return [].find.call(editor.querySelectorAll("span"),function(n){return n.textContent===url&&!(n.firstElementChild&&n.firstElementChild.textContent===url)});
+	}
+	function drop(editor,url){
+		var n=linkNode(editor,url);
+		if(!n)return;
+		editor.focus();
+		var range=document.createRange();range.selectNodeContents(n);
+		var sel=getSelection();sel.removeAllRanges();sel.addRange(range);
+		document.execCommand("delete");
+	}
+	function composers(){
+		document.querySelectorAll('[contenteditable="true"][data-testid^="tweetTextarea_"]').forEach(function(editor){
+			var root=editor;
+			while(root.parentElement&&!root.parentElement.querySelector('[data-testid="toolBar"]'))root=root.parentElement;
+			var shown=root.parentElement&&[].find.call(root.parentElement.children,function(c){return c.hasAttribute("data-xm-compose")});
+			var url=linkIn(editor.textContent||""),key=url&&keyOf(url);
+			[].forEach.call(editor.querySelectorAll("[data-xm-link]"),function(n){if(n.textContent!==url){n.removeAttribute("data-xm-link")}});
+			if(!key||!root.parentElement){if(shown)shown.remove();return}
+			var ck=key+"|"+me+"|preview";
+			if(cache[ck]===undefined){fetchCards(me,[key],true);return}
+			if(!cache[ck]){if(shown)shown.remove();return}
+			var n=linkNode(editor,url);
+			if(n&&!n.hasAttribute("data-xm-link"))n.setAttribute("data-xm-link","");
+			if(shown&&shown.getAttribute("data-xm-compose")===key)return;
+			if(shown)shown.remove();
+			var box=document.createElement("div");
+			box.setAttribute("data-xm-compose",key);
+			box.style.setProperty("--xm-bg",bg());box.style.setProperty("--xm-fg",getComputedStyle(document.body).color);
+			box.innerHTML=cache[ck];
+			// a mockup: nothing in it opens or pays while writing
+			[].forEach.call(box.querySelectorAll("[data-xm-go]"),function(a){a.removeAttribute("data-xm-go");a.removeAttribute("href");a.removeAttribute("tabindex")});
+			var x=document.createElement("button");
+			x.type="button";x.className="xm-remove";x.setAttribute("aria-label","Remove");x.textContent="\u00d7";
+			x.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();drop(editor,url);box.remove()});
+			box.appendChild(x);
+			root.parentNode.insertBefore(box,root.nextSibling);
+		});
+	}
+
 	var timer;
-	function run(){timer=null;pending();cards();buttons()}
+	function run(){timer=null;pending();cards();composers();buttons()}
 	run();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(run,60)}).observe(document.documentElement,{childList:true,subtree:true});
 })();`;

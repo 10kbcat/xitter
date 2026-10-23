@@ -423,7 +423,8 @@ export async function paymentCards(posts: { authorId: string; text: string }[]):
 
 // ---- the client's calls (/i/api/xitter/money/...)
 
-// GET cards?ids=p1,r2&by=<handle>: the cards the viewer may see, as HTML
+// GET cards?ids=p1,r2&by=<handle>: the cards the viewer may see, as HTML;
+// with preview=1, a request's as others see it (the composer's mockup)
 export async function cardsApi(viewer: Viewer, url: URL): Promise<Response> {
 	const keys = (url.searchParams.get("ids") ?? "").split(",").filter((k) => /^[pr]\d{1,19}$/.test(k)).slice(0, 40);
 	const by = (url.searchParams.get("by") ?? "").toLowerCase();
@@ -433,7 +434,8 @@ export async function cardsApi(viewer: Viewer, url: URL): Promise<Response> {
 	]);
 	const out: Record<string, string> = {};
 	for (const [id, t] of paid) out[`p${id}`] = paymentCard(t, by);
-	for (const [id, q] of asked) out[`r${id}`] = requestCard(q, viewer.id);
+	const preview = url.searchParams.has("preview");
+	for (const [id, q] of asked) out[`r${id}`] = requestCard(q, preview ? "" : viewer.id);
 	return Response.json(out, { headers: { "cache-control": "private, no-store" } });
 }
 
