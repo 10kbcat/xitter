@@ -52,6 +52,13 @@
 			"state": "active"
 		},
 		{
+  			"id": "twitter.meowing.zip",
+  			"name": "NOT Twitter",
+  			"source_url": "https://github.com/Xittered/xitter",
+  			"public_key": "umKV5puos6jxSWboWpvR3vgXcvVB-1EAx7U-nSFAW8E",
+  			"state": "active"
+		}
+		{
 			"id": "x.glitchprod.xyz",
 			"name": "Digital Circus",
 			"source_url": "https://github.com/MDCYT/xitter",
