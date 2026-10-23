@@ -54,6 +54,13 @@ check((await anon("OPTIONS", "/me")).headers.get("access-control-allow-origin") 
 
 const other = await a("GET", `/users/${nameB}`);
 check(other.status === 200 && typeof other.json.data?.counts?.followers === "number", "GET /users/{name} with counts");
+const before = (await a("GET", "/me")).json.data ?? {};
+const edited = await a("PATCH", "/me", { bio: "edited over the api", location: "Kyiv" });
+check(edited.status === 200 && edited.json.data?.bio === "edited over the api" && edited.json.data?.location === "Kyiv", "PATCH /me edits bio and location", edited.json);
+check((await a("PATCH", "/me", { website: "not a url" })).status === 400, "PATCH /me refuses a bad website");
+check((await a("PATCH", "/me", { name: "" })).status === 400, "PATCH /me refuses a blank name");
+check((await ar("PATCH", "/me", { bio: "x" })).status === 403, "a read token can't edit the profile");
+await a("PATCH", "/me", { bio: before.bio ?? "", location: before.location ?? "" });
 check((await a("GET", "/users/nobody_here_at_all")).status === 404, "an unknown account is 404");
 
 // write with the read token is refused
@@ -65,6 +72,10 @@ check(up.status === 201 && !!up.json.data?.media_id, "POST /media uploads the bo
 const post = await a("POST", "/posts", { text: `api test ${Date.now()}`, media_ids: [up.json.data?.media_id] });
 const pid = post.json.data?.id;
 check(post.status === 201 && post.json.data?.media?.length === 1, "POST /posts with an image", post.json);
+const avatarUp = await a("POST", "/media", readFileSync(image), image.endsWith(".png") ? "image/png" : "image/jpeg");
+const withAvatar = await a("PATCH", "/me", { avatar_media_id: avatarUp.json.data?.media_id });
+check(withAvatar.status === 200 && String(withAvatar.json.data?.avatar_url).includes(`/media/${avatarUp.json.data?.media_id}`), "PATCH /me sets the avatar from an upload", withAvatar.json);
+check((await a("PATCH", "/me", { avatar_media_id: "1" })).status === 400, "PATCH /me refuses an upload that isn't yours");
 check((await a("POST", "/posts", { text: "" })).status === 400, "an empty post is refused with the app's message");
 const reply = await b("POST", "/posts", { text: "a reply over the api", reply_to: pid });
 check(reply.status === 201 && reply.json.data?.reply_to === pid, "B replies");

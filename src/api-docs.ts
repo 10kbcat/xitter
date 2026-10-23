@@ -9,6 +9,7 @@ type Endpoint = [method: string, path: string, scope: "read" | "write", what: st
 
 const ENDPOINTS: Endpoint[] = [
 	["GET", "/me", "read", "Your account."],
+	["PATCH", "/me", "write", "Edit your profile: <code>name</code>, <code>bio</code>, <code>location</code>, <code>website</code> (an empty string clears), <code>avatar_media_id</code> and <code>banner_media_id</code> from <code>POST /media</code>, <code>remove_banner: true</code>. Answers with the account."],
 	["GET", "/users/{screen_name}", "read", "An account."],
 	["GET", "/users/{screen_name}/posts", "read", "Its posts and reposts, newest first. <code>replies=true</code> includes replies, <code>replies=only</code> gives just the replies."],
 	["GET", "/users/{screen_name}/followers", "read", "Who follows it (up to <code>limit</code>, 200 at most)."],
