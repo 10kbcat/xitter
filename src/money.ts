@@ -260,13 +260,14 @@ export const MONEY_WORDMARK = `<span class="xm-mark"><svg viewBox="0 0 24 24" ar
 
 // ---- payments
 
-export type Payment = { id: string; amount: number; note: string; at: Date; sender: Party; recipient: Party };
+// reversed: staff sent the money back (Admin > Money)
+export type Payment = { id: string; amount: number; note: string; at: Date; sender: Party; recipient: Party; reversed?: boolean };
 
 // payments by id, with both sides; `visibleTo` keeps the ones that account is
 // part of or that one side put in a post
 export async function payments(ids: string[], visibleTo?: string): Promise<Map<string, Payment>> {
 	if (!ids.length) return new Map();
-	const rows = await sql`select t.id::text, t.amount_cents, t.note, t.created_at, t.sender_id::text, t.recipient_id::text from money_transfers t
+	const rows = await sql`select t.id::text, t.amount_cents, t.note, t.created_at, t.sender_id::text, t.recipient_id::text, t.reversed_at is not null as reversed from money_transfers t
 		where t.id = any(${sql.array(ids, "INT8")})
 		${
 			visibleTo
@@ -278,7 +279,7 @@ export async function payments(ids: string[], visibleTo?: string): Promise<Map<s
 	return new Map(
 		rows
 			.filter((r: any) => who.has(r.sender_id) && who.has(r.recipient_id))
-			.map((r: any) => [r.id, { id: r.id, amount: Number(r.amount_cents), note: r.note, at: new Date(r.created_at), sender: who.get(r.sender_id)!, recipient: who.get(r.recipient_id)! }]),
+			.map((r: any) => [r.id, { id: r.id, amount: Number(r.amount_cents), note: r.note, at: new Date(r.created_at), sender: who.get(r.sender_id)!, recipient: who.get(r.recipient_id)!, reversed: r.reversed }]),
 	);
 }
 

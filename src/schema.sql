@@ -1639,3 +1639,6 @@ create table if not exists money_like_rewards (
 create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);
 -- when the account accepted X Money's disclaimer (money-page.ts), shown the first time Money opens
 alter table money_wallets add column if not exists disclaimer_at timestamptz;
+-- a payment staff reversed (Admin > Money): the money went back to its sender
+alter table money_transfers add column if not exists reversed_at timestamptz;
+alter table money_transfers add column if not exists reversed_by bigint references users (id) on delete set null;

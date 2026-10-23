@@ -36,6 +36,7 @@ async function signIn(username: string) {
 	const postApi = async (path: string) => (await fetch(`${origin}/i/api/xitter/${path}`, { method: "POST", headers: api })).json();
 	return { headers, page, send, gql, get, json, form, postApi };
 }
+const csrfOf = (s: { headers: Record<string, string> }) => s.headers.cookie.match(/ct0=([^;]+)/)?.[1] ?? "";
 const balance = async (name: string) => {
 	const [w] = await sql`select w.balance_cents from money_wallets w join users u on u.id = w.user_id where u.screen_name = ${name}`;
 	return w ? Number(w.balance_cents) : null;
@@ -113,13 +114,33 @@ try {
 	await Promise.all(Array.from({ length: 10 }, () => sb.send({ to: a, amount: "20" })));
 	check("concurrent sends never overdraw", (await balance(b))! >= 0 && (await balance(b))! + (await balance(a))! === 8650 + 11350 && (await balance(b)) === 1350, [await balance(a), await balance(b)]);
 
-	check("a non-admin can't adjust", (await sb.send({ action: "adjust", to: a, amount: "50" })).status === 403);
+	// ---- Admin > Money
+	const admin = (s: { headers: Record<string, string> }, action: string, body: object = {}) =>
+		fetch(`${origin}/admin/api/${action}`, { method: "POST", headers: { ...s.headers, "x-csrf-token": csrfOf(s), "content-type": "application/json" }, body: JSON.stringify(body) });
+	check("the Money page has no admin form any more", !(await sa.page()).includes('value="adjust"'));
+	check("a non-admin can't adjust", (await admin(sb, "adjustMoney", { handle: a, amount: "50" })).status === 403);
 	await sql`update users set role = 'admin' where id = ${ids[0]}::bigint`;
 	const before = (await balance(b))!;
-	r = await sa.send({ action: "adjust", to: b, amount: "50" });
-	check("an admin adds money", r.status === 200 && (await balance(b)) === before + 5000);
-	await sa.send({ action: "adjust", to: b, amount: "-100000" });
+	r = await admin(sa, "adjustMoney", { handle: b, amount: "50" });
+	check("an admin adds money", r.status === 200 && (await balance(b)) === before + 5000, r.status);
+	await admin(sa, "adjustMoney", { handle: b, amount: "-100000" });
 	check("and takes it away, never below zero", (await balance(b)) === 0);
+	const overview = await (await admin(sa, "money")).json();
+	check("the admin page totals the money", overview.totals.wallets >= 3 && overview.settings.like_cents === 50 && overview.recent.length > 0, overview.totals);
+	const was = { ...overview.settings };
+	check("bad settings are refused", (await admin(sa, "saveMoney", { starting: "lots", max_transfer: "1000", like: "0.5" })).status === 400);
+	r = await admin(sa, "saveMoney", { starting: "25", max_transfer: "500", like: "0.10" });
+	check("settings are saved", r.status === 200 && (await (await admin(sa, "money")).json()).settings.like_cents === 10);
+	check("and used: a payment over the new limit is refused", (await sa.send({ to: b, amount: "600" })).status === 400);
+	await admin(sa, "saveMoney", { starting: String(was.starting_cents / 100), max_transfer: String(was.max_transfer_cents / 100), like: String(was.like_cents / 100) });
+	await sql`update money_wallets set balance_cents = 1000 where user_id = ${ids[0]}::bigint`;
+	r = await sa.send({ to: b, amount: "4" });
+	const revId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
+	r = await admin(sa, "reverseTransfer", { id: revId });
+	check("an admin reverses a payment", r.status === 200 && (await balance(a)) === 1000 && (await balance(b)) === 0, r.status);
+	check("only once", (await admin(sa, "reverseTransfer", { id: revId })).status === 400);
+	check("and both sides see it reversed", (await sa.page(`/p/${revId}`)).includes("Reversed") && (await sb.page()).includes("Reversed"));
+	await sql`update money_wallets set balance_cents = 0 where user_id = ${ids[1]}::bigint`;
 
 	const shell = await fetch(`${origin}/account/money`, { headers: { ...sa.headers, "sec-fetch-dest": "document" }, redirect: "manual" });
 	check("opened on its own, it goes to the client's page", shell.status === 302 && shell.headers.get("location") === "/i/xmoney", shell.headers.get("location"));

@@ -95,8 +95,10 @@ copy during setup, and it stays on that machine.
   not real currency: a wallet starts with `money.starting_cents` (default
   $100), one payment moves up to `money.max_transfer_cents` (default $1,000),
   each like on your posts earns you `money.like_cents` (default 50¢, once per
-  post and account) and admins add or take money on the Money page (recorded
-  in the audit log).
+  post and account). Admin > Money sets those three, shows the money in
+  circulation, the biggest balances and every payment, and has staff adjust a
+  balance or reverse a payment (Staff permissions: X Money; all recorded in
+  the audit log).
   - Requests: ask one account for an amount (it gets a notification to pay or
     decline), or anyone, as a "Pay @you" card in a post that anyone who sees it
     can pay, with or without a set amount

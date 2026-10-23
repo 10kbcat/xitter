@@ -11,7 +11,6 @@ import { CARD_CSS } from "./money-ui";
 import {
 	MoneyError,
 	type Party,
-	adjust,
 	badges,
 	acceptDisclaimer,
 	balanceOf,
@@ -104,9 +103,6 @@ a.tx:hover{text-decoration:none}
 dl{margin:0;padding:16px;display:grid;grid-template-columns:auto 1fr;gap:14px 16px;border-top:1px solid var(--border)}
 dt{color:var(--muted)}
 dd{margin:0;text-align:right;overflow-wrap:anywhere;display:flex;justify-content:flex-end;align-items:center;gap:4px}
-details.admin{padding:16px;border-top:1px solid var(--border);color:var(--muted)}
-details.admin summary{cursor:pointer;font-size:14px}
-details.admin form{margin-top:12px}
 .settings{padding:16px;display:grid;gap:16px}
 .settings h2{margin:8px 0 0}
 .preview{display:grid;gap:12px}
@@ -150,11 +146,11 @@ async function activity(userId: string) {
 		if (!t) continue;
 		const sent = t.sender.id === userId;
 		const other = sent ? t.recipient : t.sender;
-		const what = sent ? (other.merchant ? "Purchase" : "Sent") : "Received";
+		const what = t.reversed ? "Reversed" : sent ? (other.merchant ? "Purchase" : "Sent") : "Received";
 		items.push({
 			at: t.at,
-			html: `<a class="tx" href="/account/money/p/${t.id}">${face(other)}<div>${who(other)}<div class="sub">${t.note ? esc(t.note) : what} · ${date(t.at)}</div></div>
-<div class="amt${sent ? "" : " in"}">${sent ? "−" : "+"}${shortCents(t.amount)}</div></a>`,
+			html: `<a class="tx" href="/account/money/p/${t.id}">${face(other)}<div>${who(other)}<div class="sub">${t.reversed ? "Reversed" : t.note ? esc(t.note) : what} · ${date(t.at)}</div></div>
+<div class="amt${sent || t.reversed ? "" : " in"}"${t.reversed ? ' style="text-decoration:line-through;color:var(--muted)"' : ""}>${sent ? "−" : "+"}${shortCents(t.amount)}</div></a>`,
 		});
 	}
 	for (const l of likes)
@@ -186,7 +182,6 @@ async function waiting(userId: string) {
 
 async function home(req: Request, viewer: Viewer, status = 200, notice = "", error = "") {
 	const [balance, items, asks] = await Promise.all([balanceOf(viewer.id), activity(viewer.id), waiting(viewer.id)]);
-	const isAdmin = viewer.role === "admin" && !viewer.actor;
 	let month = "";
 	const list = items.length
 		? items
@@ -209,11 +204,7 @@ ${likes > 0 ? `<p class="dim" style="margin-top:12px">You earn ${likes < 100 ? `
 ${notice ? `<div class="notice" role="status">${notice}</div>` : ""}${error ? `<div class="notice error" role="alert">${esc(error)}</div>` : ""}
 ${asks.length ? `<section aria-label="Requests"><div class="month">Requests</div>${asks.join("\n")}</section>` : ""}
 <section aria-label="Activity">${list}</section>
-${
-	isAdmin
-		? `<details class="admin"><summary>Adjust a balance (admins)</summary><form method="post" action="/account/money" class="row"><input type="hidden" name="action" value="adjust"><input name="to" required placeholder="@username" aria-label="Username"><input name="amount" required placeholder="20 or -5.00" aria-label="Amount"><button type="submit" class="secondary">Apply</button></form><p class="dim">Never below $0.00. Recorded in the audit log.</p></details>`
-		: ""
-}`,
+`,
 		status,
 		{ href: "/home", label: "Back to home" },
 	);
@@ -315,7 +306,7 @@ ${mine ? `<div class="row">${postButton(paymentUrl(t.id), "Post", post)}<a class
 <dt>To</dt><dd>${link(t.recipient)}</dd>
 <dt>Amount</dt><dd>${formatCents(t.amount)}</dd>
 <dt>Date</dt><dd>${t.at.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</dd>
-<dt>Status</dt><dd style="color:var(--success)">Completed</dd>
+<dt>Status</dt><dd${t.reversed ? "" : ' style="color:var(--success)"'}>${t.reversed ? "Reversed: the money went back to the sender" : "Completed"}</dd>
 </dl>`,
 	);
 }
@@ -475,19 +466,6 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 	const form = await req.formData();
 	const field = (k: string) => String(form.get(k) ?? "");
 	const values = { to: field("to"), amount: field("amount"), note: field("note"), request: field("request") || undefined };
-	if (field("action") === "adjust") {
-		if (viewer.role !== "admin" || viewer.actor) return home(req, viewer, 403, "", "Only admins can adjust balances.");
-		const negative = values.amount.trim().startsWith("-");
-		const cents = parseAmount(values.amount.trim().replace(/^-/, ""));
-		if (!cents) return home(req, viewer, 400, "", "Enter an amount, like 20 or -5.00.");
-		try {
-			const r = await adjust(viewer, values.to, negative ? -cents : cents);
-			return home(req, viewer, 200, `@${esc(r.to)} now has ${formatCents(r.balance)}.`);
-		} catch (e) {
-			if (e instanceof MoneyError) return home(req, viewer, 400, "", e.message);
-			throw e;
-		}
-	}
 	if (viewer.actor) return home(req, viewer, 403, "", `Only @${viewer.screen_name} can send money from this account.`);
 	if (!hit("write", viewer.id).ok) return sendView(req, viewer, 429, values, "You're sending too fast. Wait a few minutes and try again.");
 	const cents = parseAmount(values.amount);
