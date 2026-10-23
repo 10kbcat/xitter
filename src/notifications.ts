@@ -11,7 +11,7 @@ import { sql } from "./db";
 import { plainTweetResult, tweetResult, userResult } from "./model";
 import type { PostRow } from "./model";
 import { postsByIds } from "./posts";
-import { settings } from "./settings";
+import { feature, settings } from "./settings";
 import { usersByIds } from "./users";
 import { formatCents } from "./money";
 
@@ -86,22 +86,25 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			where user_id = ${viewerId}::bigint and resolved_at >= ${lo} and resolved_at < ${hi} order by resolved_at desc limit ${opts.limit}`;
 		for (const r of appeals)
 			out.push({ kind: "staff", key: `appeal-${r.id}`, at: ms(r.at), text: `${team[0].toUpperCase()}${team.slice(1)} ${r.status === "accepted" ? "accepted" : "turned down"} your appeal.` });
-		const paid = await sql`select t.id, t.sender_id, t.amount_cents, t.note, t.created_at as at from money_transfers t
-			where t.recipient_id = ${viewerId}::bigint and t.sender_id not in ${hidden} and t.created_at >= ${lo} and t.created_at < ${hi}
-			order by t.created_at desc limit ${opts.limit}`;
-		for (const r of paid)
-			out.push({ kind: "money", key: `money-${r.id}`, at: ms(r.at), users: [String(r.sender_id)], path: `/i/xmoney/p/${r.id}`, text: `sent you ${formatCents(Number(r.amount_cents))}${r.note ? `: “${clip(r.note)}”` : ""}` });
-		// requests of the viewer, and the viewer's own that were declined
-		const requested = await sql`select q.id, q.requester_id, q.amount_cents, q.note, q.created_at as at from money_requests q
-			where q.payer_id = ${viewerId}::bigint and q.requester_id not in ${hidden} and q.created_at >= ${lo} and q.created_at < ${hi}
-			order by q.created_at desc limit ${opts.limit}`;
-		for (const r of requested)
-			out.push({ kind: "money", key: `request-${r.id}`, at: ms(r.at), users: [String(r.requester_id)], path: `/i/xmoney/r/${r.id}`, text: `requested ${formatCents(Number(r.amount_cents))} from you${r.note ? `: “${clip(r.note)}”` : ""}` });
-		const declined = await sql`select q.id, q.payer_id, q.amount_cents, q.resolved_at as at from money_requests q
-			where q.requester_id = ${viewerId}::bigint and q.status = 'declined' and q.payer_id not in ${hidden} and q.resolved_at >= ${lo} and q.resolved_at < ${hi}
-			order by q.resolved_at desc limit ${opts.limit}`;
-		for (const r of declined)
-			out.push({ kind: "money", key: `declined-${r.id}`, at: ms(r.at), users: [String(r.payer_id)], path: `/i/xmoney/r/${r.id}`, text: `declined your request for ${formatCents(Number(r.amount_cents))}` });
+		// X Money's, while it is switched on (money.ts)
+		if (feature("money")) {
+			const paid = await sql`select t.id, t.sender_id, t.amount_cents, t.note, t.created_at as at from money_transfers t
+				where t.recipient_id = ${viewerId}::bigint and t.sender_id not in ${hidden} and t.created_at >= ${lo} and t.created_at < ${hi}
+				order by t.created_at desc limit ${opts.limit}`;
+			for (const r of paid)
+				out.push({ kind: "money", key: `money-${r.id}`, at: ms(r.at), users: [String(r.sender_id)], path: `/i/xmoney/p/${r.id}`, text: `sent you ${formatCents(Number(r.amount_cents))}${r.note ? `: “${clip(r.note)}”` : ""}` });
+			// requests of the viewer, and the viewer's own that were declined
+			const requested = await sql`select q.id, q.requester_id, q.amount_cents, q.note, q.created_at as at from money_requests q
+				where q.payer_id = ${viewerId}::bigint and q.requester_id not in ${hidden} and q.created_at >= ${lo} and q.created_at < ${hi}
+				order by q.created_at desc limit ${opts.limit}`;
+			for (const r of requested)
+				out.push({ kind: "money", key: `request-${r.id}`, at: ms(r.at), users: [String(r.requester_id)], path: `/i/xmoney/r/${r.id}`, text: `requested ${formatCents(Number(r.amount_cents))} from you${r.note ? `: “${clip(r.note)}”` : ""}` });
+			const declined = await sql`select q.id, q.payer_id, q.amount_cents, q.resolved_at as at from money_requests q
+				where q.requester_id = ${viewerId}::bigint and q.status = 'declined' and q.payer_id not in ${hidden} and q.resolved_at >= ${lo} and q.resolved_at < ${hi}
+				order by q.resolved_at desc limit ${opts.limit}`;
+			for (const r of declined)
+				out.push({ kind: "money", key: `declined-${r.id}`, at: ms(r.at), users: [String(r.payer_id)], path: `/i/xmoney/r/${r.id}`, text: `declined your request for ${formatCents(Number(r.amount_cents))}` });
+		}
 		const asked = await sql`select o.id, o.screen_name, r.created_at as at from affiliation_requests r join users o on o.id = r.org_id
 			where r.user_id = ${viewerId}::bigint and r.created_at >= ${lo} and r.created_at < ${hi} order by r.created_at desc limit ${opts.limit}`;
 		for (const r of asked)

@@ -36,6 +36,8 @@ async function signIn(username: string) {
 	const postApi = async (path: string) => (await fetch(`${origin}/i/api/xitter/${path}`, { method: "POST", headers: api })).json();
 	return { headers, page, send, gql, get, json, form, postApi };
 }
+const adminCall = (s: { headers: Record<string, string> }, action: string, body: object = {}) =>
+	fetch(`${origin}/admin/api/${action}`, { method: "POST", headers: { ...s.headers, "x-csrf-token": csrfOf(s), "content-type": "application/json" }, body: JSON.stringify(body) });
 const csrfOf = (s: { headers: Record<string, string> }) => s.headers.cookie.match(/ct0=([^;]+)/)?.[1] ?? "";
 const balance = async (name: string) => {
 	const [w] = await sql`select w.balance_cents from money_wallets w join users u on u.id = w.user_id where u.screen_name = ${name}`;
@@ -52,8 +54,17 @@ const [saved] = await sql`select value from settings where key = 'money'`;
 const starting = Number(saved?.value?.starting_cents ?? 500);
 const fresh = await createUser(`m${stamp}d`, "Money D", "testpass123");
 ids.push(fresh);
+// staff, to switch Money on for the run and off again
+const staffId = await createUser(`m${stamp}x`, "Money Staff", "testpass123");
+ids.push(staffId);
+let featuresBefore: Record<string, boolean> | undefined;
 await sql`insert into money_wallets (user_id, balance_cents) select unnest(${sql.array(ids.slice(0, 3), "INT8")}::bigint[]), 10000`;
 try {
+	// Money is off by default: on for this run, put back as it was after
+	await sql`update users set role = 'admin' where id = ${staffId}::bigint`;
+	const sx = await signIn(`m${stamp}x`);
+	featuresBefore = (await (await adminCall(sx, "settings")).json()).settings.features;
+	await adminCall(sx, "saveSettings", { features: { ...featuresBefore, money: true } });
 	const sa = await signIn(a);
 	const sb = await signIn(b);
 	const gate = await sa.page("/send");
@@ -124,8 +135,7 @@ try {
 	check("concurrent sends never overdraw", (await balance(b))! >= 0 && (await balance(b))! + (await balance(a))! === 8650 + 11350 && (await balance(b)) === 1350, [await balance(a), await balance(b)]);
 
 	// ---- Admin > Money
-	const admin = (s: { headers: Record<string, string> }, action: string, body: object = {}) =>
-		fetch(`${origin}/admin/api/${action}`, { method: "POST", headers: { ...s.headers, "x-csrf-token": csrfOf(s), "content-type": "application/json" }, body: JSON.stringify(body) });
+	const admin = adminCall;
 	check("the Money page has no admin form any more", !(await sa.page()).includes('value="adjust"'));
 	check("a non-admin can't adjust", (await admin(sb, "adjustMoney", { handle: a, amount: "50" })).status === 403);
 	await sql`update users set role = 'admin' where id = ${ids[0]}::bigint`;
@@ -223,7 +233,24 @@ try {
 	const affId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
 	const affCard = (await sa.json(`money/cards?ids=p${affId}&by=${a}`))[`p${affId}`] as string;
 	check("an affiliate wears a blue check and its organisation", affCard.includes("#1d9bf0") && affCard.includes('class="xm-org"'));
+
+	// ---- switched off: posts keep their cards, everything else goes
+	await admin(sa, "saveSettings", { features: { ...featuresBefore, money: false } });
+	try {
+		const offCard = (await sc.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string;
+		check("off: a post's Pay card still shows", typeof offCard === "string" && offCard.includes(`Pay @${b}`));
+		check("off: without its Pay button", !offCard.includes("xm-pay"));
+		check("off: payment cards still show", typeof (await sa.json(`money/cards?ids=p${affId}&by=${a}`))[`p${affId}`] === "string");
+		check("off: the Money pages are closed", (await fetch(`${origin}/account/money`, { headers: sa.headers })).status === 404 && (await fetch(`${origin}/account/money/r/${openId}`, { headers: sc.headers })).status === 404);
+		check("off: nothing can be sent", (await sa.send({ to: b, amount: "1" })).status === 404);
+		const offNotes = JSON.stringify(await sa.get("NotificationsTimeline", { timeline_type: "All", count: 40 }));
+		check("off: no money notifications", !offNotes.includes("/i/xmoney/"));
+		check("off: no composer list", (await sa.json("money/recent")).length === 0);
+	} finally {
+		await admin(sa, "saveSettings", { features: { ...featuresBefore, money: true } });
+	}
 } finally {
+	if (featuresBefore) await adminCall(await signIn(`m${stamp}x`), "saveSettings", { features: featuresBefore });
 	for (const id of ids) {
 		await sql`delete from audit_log where target = ${id}`;
 		await sql`delete from money_like_rewards where author_id = ${id}::bigint or liker_id = ${id}::bigint`;

@@ -74,7 +74,8 @@ export const MONEY_UI_CSS = `${CARD_CSS}
 
 export const MONEY_UI_SCRIPT = `(function(){
 	var X=window.__XITTER__||{},T=X.tidy||{};
-	if(!(T.links||[]).some(function(l){return l.href==="/account/money"}))return;
+	// with Money switched off, posts keep their cards; the composer gets nothing
+	var on=(T.links||[]).some(function(l){return l.href==="/account/money"});
 	// a payment's (p) or a request's (r) address, as "p<id>" or "r<id>"
 	var KEY=/\\/i\\/xmoney\\/([pr])\\/(\\d{1,19})(?:[/?#]|$)/;
 	function keyOf(href){var m=KEY.exec(href||"");return m?m[1]+m[2]:null}
@@ -276,7 +277,7 @@ export const MONEY_UI_SCRIPT = `(function(){
 	}
 
 	var timer;
-	function run(){timer=null;pending();cards();composers();buttons()}
+	function run(){timer=null;cards();if(on){pending();composers();buttons()}}
 	run();
 	new MutationObserver(function(){if(!timer)timer=setTimeout(run,60)}).observe(document.documentElement,{childList:true,subtree:true});
 })();`;

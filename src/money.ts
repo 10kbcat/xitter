@@ -371,8 +371,10 @@ export function requestCard(q: Request, viewerId: string) {
 	const r = q.requester;
 	const payable = r.id !== viewerId && (!q.payer || q.payer.id === viewerId);
 	const to = payable ? `/account/money/send?request=${q.id}` : `/account/money/r/${q.id}`;
-	const button =
-		q.status === "open"
+	// with Money switched off the card stays, without a way to pay
+	const button = !feature("money")
+		? ""
+		: q.status === "open"
 			? `<a class="xm-pay" href="${to}" data-xm-go="${to}">Pay</a>`
 			: `<span class="xm-state">${q.status === "paid" ? "Paid" : q.status === "declined" ? "Declined" : "Closed"}</span>`;
 	const who = r.merchant ? esc(r.merchant.name) : `@${esc(r.screen_name)}`;

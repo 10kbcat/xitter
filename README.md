@@ -114,8 +114,10 @@ copy during setup, and it stays on that machine.
     received, requests and declined requests come as notifications and pushes
   - The first time Money opens, each account accepts a disclaimer: the money
     is virtual, has no real-world value and can't be exchanged
-  - Admin > Settings, feature switches turns it off. `bun scripts/test-money.ts`
-    checks it
+  - Off by default: Admin > Settings, feature switches turns it on. Switched
+    off, the Money tab, its pages, the composer's $ button, Pay buttons, like
+    earnings and its notifications go away, but cards already in posts still
+    show. `bun scripts/test-money.ts` checks it
 - Polls with a photo on each choice
 - YouTube links (videos, Shorts, live, youtu.be, with `t=` start times) become
   player cards: the thumbnail comes through `EMBED_PROXY`, and pressing play

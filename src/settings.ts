@@ -51,7 +51,7 @@ const DEFAULTS = {
 		notes_everyone: true,
 		link_previews: true,
 		archive_import: false,
-		money: true,
+		money: false,
 	} as Record<Feature, boolean>,
 	limits: { image_mb: 5, video_mb: Number(process.env.MAX_VIDEO_MB ?? 200), video_seconds: Number(process.env.MAX_VIDEO_SECONDS ?? 600) },
 	// per account per 15 minutes (ratelimit.ts); sign-in and mail limits are fixed
