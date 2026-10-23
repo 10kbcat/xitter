@@ -51,7 +51,7 @@ main{padding:0;gap:0}
 .pill.small{min-height:32px;padding:0 16px;font-size:14px}
 .pill.wide{width:100%;min-height:52px;font-size:17px}
 .pill svg{width:18px;height:18px;fill:currentColor}
-@media (hover:hover){.pill:hover{background:var(--hover);text-decoration:none}.pill.primary:hover{background:var(--text);opacity:.88}}
+@media (hover:hover){.pill:hover,button.pill:hover:not(:disabled){background:var(--hover);text-decoration:none}.pill.primary:hover,button.pill.primary:hover:not(:disabled){background:var(--text);opacity:.88}}
 .notice{margin:12px 16px 0;padding:12px 16px;border-radius:12px;background:rgb(0 186 124 / .12);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .notice.error{background:rgb(244 33 46 / .12)}
 .month{padding:20px 16px 8px;color:var(--muted);font-size:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase}
@@ -75,6 +75,11 @@ a.tx:hover{text-decoration:none}
 .pick{flex:none;width:60px;display:grid;justify-items:center;gap:6px;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0;min-height:0}
 .pick>img{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--border);outline:2px solid transparent;outline-offset:2px;transition:outline-color .15s}
 .pick>img.xm-sq{border-radius:10px}
+/* buttons, not the page's blue pills: no fill on hover or press */
+.pick:hover:not(:disabled),.pick:active:not(:disabled){background:none;scale:none}
+.pick:focus-visible{outline:0}
+@media (hover:hover){.pick:hover>img{outline-color:var(--outline)}.pick:hover{color:var(--text)}}
+.pick:focus-visible>img{outline-color:var(--accent)}
 .pick[aria-pressed="true"]{color:var(--text)}
 .pick[aria-pressed="true"]>img{outline-color:var(--text)}
 .pick span{max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
