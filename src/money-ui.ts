@@ -13,7 +13,7 @@ export const CARD_CSS = `.xm-card{display:block;position:relative;overflow:hidde
 .xm-card b{font-weight:700}
 .xm-dim{color:color-mix(in srgb,currentColor 55%,transparent)}
 .xm-badge{width:18px;height:18px;vertical-align:-3px;margin-left:2px;flex:none}
-.xm-org{width:16px;height:16px;border-radius:3px;object-fit:cover;vertical-align:-2px;margin-left:3px;flex:none;box-shadow:0 0 0 1px color-mix(in srgb,currentColor 20%,transparent)}
+img.xm-org{width:16px!important;height:16px!important;border-radius:3px!important;outline:0!important;object-fit:cover;vertical-align:-2px;margin-left:3px;flex:none;box-shadow:0 0 0 1px color-mix(in srgb,currentColor 20%,transparent)}
 .xm-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
 .xm-who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 img.xm-sq{border-radius:8px!important}
@@ -24,7 +24,7 @@ img.xm-sq{border-radius:8px!important}
 .xm-p2p .xm-line{font-size:17px;margin:2px 0 4px}
 .xm-note{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .xm-faces{display:flex;flex:none}
-.xm-faces img{width:32px;height:32px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,currentColor 15%,transparent)}
+.xm-faces>img{width:32px;height:32px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,currentColor 15%,transparent)}
 .xm-faces img+img{margin-left:-8px;box-shadow:0 0 0 2px var(--xm-bg,#000)}
 .xm-buy{display:flex;align-items:center;gap:12px;padding:12px 16px}
 .xm-buy .xm-logo{width:48px;height:48px;border-radius:10px;object-fit:cover;flex:none}
@@ -61,7 +61,7 @@ export const MONEY_UI_CSS = `${CARD_CSS}
 #xitter-pay .xp-list{overflow-y:auto}
 #xitter-pay .xp-item{display:flex;align-items:center;gap:12px;width:100%;padding:10px 16px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 #xitter-pay .xp-item:hover,#xitter-pay .xp-item:focus-visible{background:color-mix(in srgb,currentColor 6%,transparent);outline:0}
-#xitter-pay .xp-item img{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none}
+#xitter-pay .xp-item>img{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none}
 #xitter-pay .xp-text{flex:1;min-width:0}
 #xitter-pay .xp-text div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #xitter-pay .xp-dim{color:color-mix(in srgb,currentColor 55%,transparent);font-size:14px}
