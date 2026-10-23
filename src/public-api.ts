@@ -14,7 +14,7 @@ import { callOperation } from "./graphql";
 import { isId, newId } from "./ids";
 import { absolute, mediaUpload, mediaUrl, posterUrl } from "./media";
 import { type PostRow, badgeList, isOrganization, isVerified, verifiedSince } from "./model";
-import { PostError, feed, getPost, postsByIds, replies, type FeedItem } from "./posts";
+import { PostError, feed, getPost, likerIds, postsByIds, replies, type FeedItem } from "./posts";
 import { type Bucket, limitHeaders, limitedResponse, noteRefusal, take } from "./ratelimit";
 import { searchPosts, searchUsers } from "./search";
 import { feature, settings } from "./settings";
@@ -456,7 +456,9 @@ const ROUTES: Route[] = [
 		run: async (v, m, _r, url) => {
 			const u = await userOr404(v, m[1]);
 			const limit = limitOf(url);
-			return page(await feed({ viewerId: v.id, authors: { user: u.id }, replies: url.searchParams.get("replies") === "true", kinds: "both", limit, before: cursorOf(url) }), limit);
+			// replies=true mixes replies in, replies=only is a profile's Replies tab
+			const r = url.searchParams.get("replies");
+			return page(await feed({ viewerId: v.id, authors: { user: u.id }, replies: r === "true" || r === "only", onlyReplies: r === "only", kinds: "both", limit, before: cursorOf(url) }), limit);
 		},
 	},
 	{
@@ -479,6 +481,15 @@ const ROUTES: Route[] = [
 		run: async (v, m, _r, url) => {
 			await postOr404(v, m[1]);
 			return { data: (await replies(v.id, m[1], limitOf(url))).map((p) => postJson(p)) };
+		},
+	},
+	{
+		method: "GET", pattern: /^\/posts\/(\d{1,19})\/likes$/, scope: "read",
+		run: async (v, m, _r, url) => {
+			await postOr404(v, m[1]);
+			const ids = await likerIds(v.id, m[1], limitOf(url, 200));
+			const users = await usersByIds(v.id, ids);
+			return { data: ids.flatMap((id) => (users.has(id) ? [userJson(users.get(id)!)] : [])) };
 		},
 	},
 	{

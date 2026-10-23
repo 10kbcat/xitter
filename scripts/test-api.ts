@@ -74,6 +74,8 @@ check(quote.status === 201 && quote.json.data?.quote_of === pid, "B quotes");
 // engagement
 const liked = await b("POST", `/posts/${pid}/like`);
 check(liked.json.data?.viewer?.liked === true && liked.json.data?.counts?.likes === 1, "like");
+const likers = await a("GET", `/posts/${pid}/likes`);
+check(likers.status === 200 && likers.json.data?.length === 1 && likers.json.data[0]?.screen_name?.toLowerCase() === nameB.toLowerCase(), "GET /posts/{id}/likes lists B", likers.json);
 check((await b("POST", `/posts/${pid}/repost`)).json.data?.viewer?.reposted === true, "repost");
 check((await b("POST", `/posts/${pid}/bookmark`)).json.data?.viewer?.bookmarked === true, "bookmark");
 check((await b("DELETE", `/posts/${pid}/like`)).json.data?.viewer?.liked === false, "unlike");
@@ -85,6 +87,8 @@ const one = await b("GET", `/posts/${pid}`);
 check(one.status === 200 && one.json.data?.author?.screen_name?.toLowerCase() === nameA.toLowerCase(), "GET /posts/{id}");
 const replies = await a("GET", `/posts/${pid}/replies`);
 check(replies.json.data?.some((p: any) => p.id === reply.json.data?.id), "GET /posts/{id}/replies");
+const onlyReplies = await a("GET", `/users/${nameB}/posts?replies=only&limit=20`);
+check(onlyReplies.json.data?.some((p: any) => p.id === reply.json.data?.id) && !onlyReplies.json.data?.some((p: any) => p.id === quote.json.data?.id), "GET /users/{name}/posts?replies=only has the reply, not the quote");
 const posts = await b("GET", `/users/${nameA}/posts?limit=5`);
 check(posts.json.data?.[0]?.id === pid, "GET /users/{name}/posts, newest first");
 const paged = await b("GET", `/users/${nameA}/posts?limit=1`);
