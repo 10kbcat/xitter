@@ -16,6 +16,7 @@ import {
 	balanceOf,
 	closeRequest,
 	disclaimerAccepted,
+	disclaimerText,
 	date,
 	face,
 	formatCents,
@@ -400,7 +401,7 @@ function disclaimer(req: Request, viewer: Viewer, back: string) {
 		"Money",
 		`<section class="settings" style="padding:32px 16px">${tile}
 <h1>Welcome to ${name}</h1>
-<p><b>Disclaimer:</b> ${name} is a virtual currency used solely within the ${esc(settings().instance_name)} platform. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. ${name} is for entertainment and platform use only.</p>
+<p><b>Disclaimer:</b> ${esc(disclaimerText())}</p>
 <form method="post" action="/account/money" class="send" style="padding:8px 0 0"><input type="hidden" name="action" value="accept"><input type="hidden" name="back" value="${esc(back)}">
 <button type="submit" class="pill primary wide">I understand</button></form></section>`,
 		200,

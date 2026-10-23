@@ -54,6 +54,12 @@ export async function balanceOf(userId: string): Promise<number> {
 	return Number(w.balance_cents);
 }
 
+// what an account accepts before Money opens, on the page and through the API
+export const disclaimerText = () => {
+	const instance = settings().instance_name, name = `${instance} Money`;
+	return `${name} is a virtual currency used solely within the ${instance} platform. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. ${name} is for entertainment and platform use only.`;
+};
+
 // the disclaimer, accepted once per account before Money opens (money-page.ts)
 export async function disclaimerAccepted(userId: string): Promise<boolean> {
 	await ensureWallet(userId);
