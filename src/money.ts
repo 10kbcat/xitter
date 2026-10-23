@@ -54,6 +54,17 @@ export async function balanceOf(userId: string): Promise<number> {
 	return Number(w.balance_cents);
 }
 
+// the disclaimer, accepted once per account before Money opens (money-page.ts)
+export async function disclaimerAccepted(userId: string): Promise<boolean> {
+	await ensureWallet(userId);
+	const [w] = await sql`select disclaimer_at is not null as ok from money_wallets where user_id = ${userId}::bigint`;
+	return !!w?.ok;
+}
+export async function acceptDisclaimer(userId: string) {
+	await ensureWallet(userId);
+	await sql`update money_wallets set disclaimer_at = coalesce(disclaimer_at, now()) where user_id = ${userId}::bigint`;
+}
+
 // local, usable accounts only: money stays on this instance
 export async function accountFor(handle: string) {
 	const name = handle.trim().replace(/^@/, "");

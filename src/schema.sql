@@ -1637,3 +1637,5 @@ create table if not exists money_like_rewards (
 	primary key (post_id, liker_id)
 );
 create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);
+-- when the account accepted X Money's disclaimer (money-page.ts), shown the first time Money opens
+alter table money_wallets add column if not exists disclaimer_at timestamptz;

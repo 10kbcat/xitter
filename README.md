@@ -110,6 +110,8 @@ copy during setup, and it stays on that machine.
     banner if they like
   - Payments show checkmarks and an affiliate's organisation badge; money
     received, requests and declined requests come as notifications and pushes
+  - The first time Money opens, each account accepts a disclaimer: the money
+    is virtual, has no real-world value and can't be exchanged
   - Admin > Settings, feature switches turns it off. `bun scripts/test-money.ts`
     checks it
 - Polls with a photo on each choice

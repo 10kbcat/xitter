@@ -13,8 +13,10 @@ import {
 	type Party,
 	adjust,
 	badges,
+	acceptDisclaimer,
 	balanceOf,
 	closeRequest,
+	disclaimerAccepted,
 	date,
 	face,
 	formatCents,
@@ -396,11 +398,38 @@ ${
 	});
 }
 
+// The first time Money opens, before anything else: what its money is. The
+// page asked for comes back once it's accepted.
+function disclaimer(req: Request, viewer: Viewer, back: string) {
+	const name = esc(`${settings().instance_name} Money`);
+	return page(
+		req,
+		viewer,
+		"Money",
+		`<section class="settings" style="padding:32px 16px">${tile}
+<h1>Welcome to ${name}</h1>
+<p><b>Disclaimer:</b> ${name} is a virtual currency used solely within the ${esc(settings().instance_name)} platform. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. ${name} is for entertainment and platform use only.</p>
+<form method="post" action="/account/money" class="send" style="padding:8px 0 0"><input type="hidden" name="action" value="accept"><input type="hidden" name="back" value="${esc(back)}">
+<button type="submit" class="pill primary wide">I understand</button></form></section>`,
+		200,
+		{ href: "/home", label: "Back to home" },
+	);
+}
+
 export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response> {
 	if (!feature("money") || viewer.instance)
 		return accountPage({ req, viewer, status: 404, title: "Money", body: `<h1>Money</h1><p>X Money isn't available on ${esc(settings().instance_name)}.</p>` });
 	const url = new URL(req.url);
 	const p = url.pathname;
+	if (!(await disclaimerAccepted(viewer.id))) {
+		if (req.method !== "POST") return disclaimer(req, viewer, p + url.search);
+		const form = await req.formData();
+		if (form.get("action") !== "accept" || (viewer.actor && viewer.actor.role !== "Admin")) return disclaimer(req, viewer, "/account/money");
+		await acceptDisclaimer(viewer.id);
+		// only back to one of Money's own pages
+		const back = String(form.get("back") ?? "");
+		return new Response(null, { status: 303, headers: { location: /^\/account\/money(\/[\w/]*)?(\?[\w=&%.-]*)?$/.test(back) ? back : "/account/money" } });
+	}
 	const payment = /^\/account\/money\/p\/(\d{1,19})$/.exec(p);
 	if (payment) return paymentPage(req, viewer, payment[1]);
 	const asked = /^\/account\/money\/r\/(\d{1,19})$/.exec(p);

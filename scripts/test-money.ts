@@ -49,6 +49,16 @@ const ids = [await createUser(a, "Money A", "testpass123"), await createUser(b, 
 try {
 	const sa = await signIn(a);
 	const sb = await signIn(b);
+	const gate = await sa.page("/send");
+	check("Money opens with the disclaimer first", gate.includes("Disclaimer:") && gate.includes("no real-world monetary value") && !gate.includes('name="amount"'));
+	check("nothing can be sent before it's accepted", (await sa.send({ to: b, amount: "1" })).status === 200 && (await balance(a)) === 10000);
+	const accepted = await sa.form("/account/money", { action: "accept", back: "/account/money/send" });
+	check("accepting it goes back to the page asked for", accepted.status === 303 && accepted.headers.get("location") === "/account/money/send");
+	check("and it isn't shown again", !(await sa.page()).includes("Disclaimer:"));
+	const sc0 = await signIn(c);
+	await sb.form("/account/money", { action: "accept", back: "/account/money" });
+	const offsite = await sc0.form("/account/money", { action: "accept", back: "https://evil.example/" });
+	check("accepting never leads off Money", offsite.headers.get("location") === "/account/money", offsite.headers.get("location"));
 	const first = await sa.page();
 	check("the page shows the starting balance", first.includes("$100.00"));
 	const form = await sa.page("/send");
