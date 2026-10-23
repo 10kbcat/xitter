@@ -1581,3 +1581,24 @@ alter table migration_objects add column if not exists created_at timestamptz no
 -- where an account went, as handle@instance; set by the new instance when the import finished
 alter table users add column if not exists moved_to text;
 alter table users add column if not exists moved_at timestamptz;
+-- X Money (money.ts): each account's balance in cents, made on first use with
+-- the instance's starting balance, and every transfer between accounts
+create table if not exists money_wallets (
+	user_id bigint primary key references users (id) on delete cascade,
+	balance_cents bigint not null check (balance_cents >= 0),
+	created_at timestamptz not null default now()
+);
+create table if not exists money_transfers (
+	id bigint primary key,
+	sender_id bigint not null references users (id) on delete cascade,
+	recipient_id bigint not null references users (id) on delete cascade,
+	amount_cents bigint not null check (amount_cents > 0),
+	note text not null default '',
+	-- the form's one-time key, so a double-pressed Send moves the money once
+	idem text not null,
+	created_at timestamptz not null default now(),
+	check (sender_id <> recipient_id)
+);
+create unique index if not exists money_transfers_idem_idx on money_transfers (sender_id, idem);
+create index if not exists money_transfers_sender_idx on money_transfers (sender_id, id desc);
+create index if not exists money_transfers_recipient_idx on money_transfers (recipient_id, id desc);
