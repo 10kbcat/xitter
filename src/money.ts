@@ -263,52 +263,58 @@ async function quickPicks(userId: string) {
 
 const CSS = `
 main{padding:0;gap:0}
-.hero{padding:28px 16px 20px;display:grid;gap:4px;border-bottom:1px solid var(--border)}
-.hero .label{color:var(--muted);font-size:15px;display:flex;align-items:center;gap:6px}
-.hero .label svg{width:18px;height:18px;fill:var(--text)}
-.hero .amount{font-size:56px;line-height:64px;font-weight:800;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
-.hero .actions{display:flex;gap:12px;margin-top:12px}
-.pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:0 20px;border-radius:9999px;font-weight:700;font-size:15px;text-decoration:none;border:1px solid var(--outline);color:var(--text);background:transparent;cursor:pointer}
+.hero{padding:24px 16px 20px;display:grid;justify-items:start;gap:2px;border-bottom:1px solid var(--border)}
+.tile{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:#000;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .12);margin-bottom:14px}
+.tile svg{width:28px;height:28px;fill:#fff}
+.hero .label{color:var(--muted)}
+.hero .amount{font-size:52px;line-height:60px;font-weight:800;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+.hero .pill{margin-top:16px}
+.pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:0 24px;border-radius:9999px;font-weight:700;font-size:15px;text-decoration:none;border:1px solid var(--outline);color:var(--text);background:transparent;cursor:pointer}
 .pill.primary{background:var(--text);color:var(--bg);border-color:var(--text)}
+.pill.wide{width:100%;min-height:52px;font-size:17px}
 .pill svg{width:18px;height:18px;fill:currentColor}
-@media (hover:hover){.pill:hover{background:var(--hover);text-decoration:none}.pill.primary:hover{background:var(--text);opacity:.9}}
-section.block{padding:16px;border-bottom:1px solid var(--border);display:grid;gap:12px}
-h2{margin:0;font-size:20px}
-.notice{margin:12px 16px 0;padding:12px 16px;border-radius:12px;background:rgb(0 186 124 / .12);color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+@media (hover:hover){.pill:hover{background:var(--hover);text-decoration:none}.pill.primary:hover{background:var(--text);opacity:.88}}
+.notice{margin:12px 16px 0;padding:12px 16px;border-radius:12px;background:rgb(0 186 124 / .12);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .notice.error{background:rgb(244 33 46 / .12)}
-.picks{display:flex;gap:14px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
-.pick{flex:none;width:64px;display:grid;justify-items:center;gap:6px;border:0;background:none;color:var(--text);font:inherit;font-size:13px;cursor:pointer;padding:0;min-height:0}
-.pick img{width:52px;height:52px;border-radius:50%;object-fit:cover;background:var(--border);outline:2px solid transparent;outline-offset:2px;transition:outline-color .15s}
-.pick[aria-pressed="true"] img{outline-color:var(--accent)}
-.pick span{max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.send{display:grid;gap:14px;justify-items:stretch}
+.month{padding:20px 16px 8px;color:var(--muted);font-size:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase}
+.tx{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:0 12px;padding:10px 16px;color:var(--text);text-decoration:none}
+@media (hover:hover){.tx:hover{background:color-mix(in srgb,var(--text) 4%,transparent);text-decoration:none}}
+.tx img{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--border)}
+.tx .who{display:flex;gap:4px;align-items:center;min-width:0;font-weight:700;white-space:nowrap}
+.tx .who span{overflow:hidden;text-overflow:ellipsis}
+.tx .sub{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx .amt{font-weight:700;font-variant-numeric:tabular-nums}
+.tx .amt.in{color:var(--success)}
+.empty{color:var(--muted);text-align:center;padding:48px 16px}
+.send{padding:8px 16px 24px;display:grid;gap:16px;justify-items:stretch}
+.picks{display:flex;gap:16px;overflow-x:auto;padding:4px 2px;scrollbar-width:none}
+.pick{flex:none;width:60px;display:grid;justify-items:center;gap:6px;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0;min-height:0}
+.pick img{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--border);outline:2px solid transparent;outline-offset:2px;transition:outline-color .15s}
+.pick[aria-pressed="true"]{color:var(--text)}
+.pick[aria-pressed="true"] img{outline-color:var(--text)}
+.pick span{max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.big{display:flex;justify-content:center;align-items:flex-start;padding:28px 0 20px}
+.big span{font-size:36px;line-height:48px;font-weight:800;color:var(--muted)}
+.big input{all:unset;width:1.2ch;min-width:1.2ch;font-size:72px;line-height:80px;font-weight:800;letter-spacing:-2px;font-variant-numeric:tabular-nums;caret-color:var(--accent)}
+.big input::placeholder{color:var(--muted)}
+.balance{text-align:center;color:var(--muted);font-size:14px;margin-top:-12px}
 .field{position:relative;display:grid}
 .field input{padding-top:22px;padding-bottom:6px;min-height:56px}
 .field label{position:absolute;left:13px;top:7px;margin:0;font-size:13px;color:var(--muted);pointer-events:none}
-.field input:focus-visible+label,.field:focus-within label{color:var(--accent)}
-.big{display:flex;justify-content:center;align-items:baseline;padding:8px 0 4px;color:var(--text)}
-.big span{font-size:40px;font-weight:800;color:var(--muted)}
-.big input{all:unset;width:1ch;min-width:1ch;font-size:56px;line-height:64px;font-weight:800;letter-spacing:-1.5px;font-variant-numeric:tabular-nums;caret-color:var(--accent)}
-.big input::placeholder{color:var(--muted)}
-.check{display:flex;align-items:center;gap:10px;color:var(--text);font-size:15px;margin:0}
-.check input{width:20px;height:20px;min-height:0;accent-color:var(--accent)}
-.send .pill{min-height:52px;font-size:17px}
+.field:focus-within label{color:var(--accent)}
+.check{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--text);font-size:15px;margin:0}
+.check input{appearance:none;width:40px;height:24px;min-height:0;padding:0;border:0;border-radius:9999px;background:var(--field);position:relative;cursor:pointer;transition:background .15s;flex:none}
+.check input::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:translate .15s}
+.check input:checked{background:var(--accent)}
+.check input:checked::after{translate:16px 0}
 .fine{color:var(--muted);font-size:13px;text-align:center}
-.tx{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:0 12px;padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text);text-decoration:none}
-@media (hover:hover){.tx:hover{background:color-mix(in srgb,var(--text) 3%,transparent);text-decoration:none}}
-.tx img{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--border)}
-.tx .top{display:flex;gap:4px;align-items:center;min-width:0;white-space:nowrap}
-.tx .top b{overflow:hidden;text-overflow:ellipsis}
-.tx .sub{color:var(--muted);font-size:15px}
-.tx .note{font-size:15px;margin-top:2px;overflow-wrap:anywhere}
-.tx .amt{font-weight:700;font-size:17px;text-align:right;font-variant-numeric:tabular-nums}
-.tx .amt.in{color:var(--success)}
-.empty{color:var(--muted);text-align:center;padding:40px 16px}
-.receipt{padding:16px;display:grid;gap:16px;border-bottom:1px solid var(--border)}
-dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:12px 16px}
+.receipt{padding:16px;display:grid;gap:16px}
+dl{margin:0;padding:4px 16px 16px;display:grid;grid-template-columns:auto 1fr;gap:14px 16px;border-top:1px solid var(--border);padding-top:16px}
 dt{color:var(--muted)}
 dd{margin:0;text-align:right;overflow-wrap:anywhere}
-.admin{padding:16px;display:grid;gap:12px}
+details.admin{padding:16px;border-top:1px solid var(--border);color:var(--muted)}
+details.admin summary{cursor:pointer;font-size:14px}
+details.admin form{margin-top:12px}
 .xm-badge{width:18px;height:18px;flex:none}
 .xm-card{margin:0;--xm-bg:var(--bg)}
 ${CARD_CSS}`;
@@ -317,93 +323,107 @@ ${CARD_CSS}`;
 // (money-ui.ts takes it from there); outside the client it opens the composer page
 const COMPOSE = `document.addEventListener("click",function(e){var b=e.target.closest("[data-compose]");if(!b)return;e.preventDefault();var t=b.getAttribute("data-compose");try{parent.__xitterCompose(t)}catch(x){sessionStorage.setItem("xitter-compose",t);top.location.href="/compose/post"}});
 document.querySelectorAll(".pick").forEach(function(p){p.addEventListener("click",function(){var to=document.getElementById("to");to.value="@"+p.dataset.handle;document.querySelectorAll(".pick").forEach(function(q){q.setAttribute("aria-pressed",q===p?"true":"false")});document.getElementById("amount").focus()})});
-var amt=document.getElementById("amount");if(amt){var fit=function(){amt.style.width=Math.max(1,amt.value.length)+0.2+"ch"};amt.addEventListener("input",fit);fit()}
+var amt=document.getElementById("amount");if(amt){var fit=function(){amt.style.width=Math.max(1,amt.value.length)*0.62+0.4+"em"};amt.addEventListener("input",fit);fit();if(!amt.value)amt.focus()}
 var auto=document.querySelector("[data-compose][data-auto]");if(auto)auto.click();`;
 const POST_ICON = "M23 3c-6.62-.1-10.38 2.421-13.05 6.03C7.29 12.61 6 17.331 6 22h2c0-1.007.07-2.012.19-3H12c4.1 0 7.48-3.082 7.94-7.054C22.79 10.147 23.17 6.359 23 3zm-7 8h-1.5v2H16c.63-.016 1.2-.08 1.72-.188C16.95 15.24 14.68 17 12 17H8.55c.57-2.512 1.57-4.851 3-6.78 2.16-2.912 5.29-4.911 9.45-5.187C20.95 8.079 19.9 11 16 11zM4 9V6H1V4h3V1h2v3h3v2H6v3H4z";
+const tile = `<span class="tile" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${MONEY_ICON}"/></svg></span>`;
+const page = (req: Request, viewer: Viewer, title: string, body: string, status = 200, back = { href: "/home", label: "Back to home" }) =>
+	accountPage({ req, viewer, status, title, back, css: CSS, head: `<script>addEventListener("DOMContentLoaded",function(){${COMPOSE}})</script>`, body });
 
-async function view(req: Request, viewer: Viewer, status = 200, form: { to?: string; amount?: string; note?: string } = {}, notice = "", error = "") {
-	const [balance, rows, picks] = await Promise.all([balanceOf(viewer.id), activity(viewer.id), quickPicks(viewer.id)]);
-	const url = new URL(req.url);
-	const to = form.to ?? url.searchParams.get("to") ?? "";
+// the balance and what came and went, by month
+async function view(req: Request, viewer: Viewer, status = 200, notice = "", error = "") {
+	const [balance, rows] = await Promise.all([balanceOf(viewer.id), activity(viewer.id)]);
 	const isAdmin = viewer.role === "admin" && !viewer.actor;
+	let month = "";
 	const list = rows.length
 		? rows
 				.map((t: any) => {
+					const at = new Date(t.created_at);
+					const m = at.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+					const head = m !== month ? `<div class="month">${m}</div>` : "";
+					month = m;
 					const amount = Number(t.amount_cents);
-					return `<a class="tx" href="/account/money/p/${t.id}"><img src="${esc(avatarUrl(t.avatar_url))}" alt="">
-<div><div class="top"><b>${esc(t.name || t.screen_name)}</b>${badge(t.verified_type)}<span class="sub">@${esc(t.screen_name)} · ${date(t.created_at)}</span></div>
-<div class="sub">${t.sent ? "You sent" : "Sent you"}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}</div>
+					const what = t.sent ? (t.verified_type === "business" ? "Purchase" : "Sent") : "Received";
+					return `${head}<a class="tx" href="/account/money/p/${t.id}"><img src="${esc(avatarUrl(t.avatar_url))}" alt="">
+<div><div class="who"><span>${esc(t.name || t.screen_name)}</span>${badge(t.verified_type)}</div><div class="sub">${t.note ? esc(t.note) : what} · ${date(t.created_at)}</div></div>
 <div class="amt${t.sent ? "" : " in"}">${t.sent ? "−" : "+"}${shortCents(amount)}</div></a>`;
 				})
 				.join("\n")
-		: `<p class="empty">No payments yet.<br>Money you send and receive shows up here.</p>`;
-	const sendForm = viewer.actor
-		? `<p class="dim">Only @${esc(viewer.screen_name)} can send money from this account.</p>`
-		: `${
-				picks.length
-					? `<div class="picks" role="group" aria-label="People">${picks
-							.map((p: any) => `<button type="button" class="pick" data-handle="${esc(p.screen_name)}" aria-pressed="${to.replace(/^@/, "").toLowerCase() === p.screen_name.toLowerCase()}"><img src="${esc(avatarUrl(p.avatar_url))}" alt=""><span>${esc(p.name || p.screen_name)}</span></button>`)
-							.join("")}</div>`
-					: ""
-			}
-<form method="post" class="send" autocomplete="off">
-<input type="hidden" name="idem" value="${crypto.randomUUID()}">
-<div class="big"><span>$</span><input id="amount" name="amount" required inputmode="decimal" placeholder="0" aria-label="Amount" value="${esc(form.amount ?? "")}"></div>
-<div class="field"><input id="to" name="to" required placeholder=" " value="${esc(to)}" autocapitalize="off" spellcheck="false"><label for="to">To (@username)</label></div>
-<div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(form.note ?? "")}"><label for="note">Note (optional)</label></div>
-<label class="check"><input type="checkbox" name="share" value="1"> Share it in a post</label>
-<button type="submit" class="pill primary">Send</button>
-<p class="fine">Instant and free. ${esc(settings().instance_name)} Money is the instance's own and has no cash value.</p>
-</form>`;
-	return accountPage({
+		: `<p class="empty">No activity yet.<br>Money you send and receive shows up here.</p>`;
+	return page(
 		req,
 		viewer,
-		status,
-		title: "Money",
-		back: { href: "/home", label: "Back to home" },
-		css: CSS,
-		head: `<script>addEventListener("DOMContentLoaded",function(){${COMPOSE}})</script>`,
-		body: `<section class="hero" aria-label="Balance"><div class="label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${MONEY_ICON}"/></svg>Balance</div>
-<div class="amount">${formatCents(balance)}</div></section>
+		"Money",
+		`<section class="hero" aria-label="Balance">${tile}<div class="label">Balance</div><div class="amount">${formatCents(balance)}</div>
+${viewer.actor ? `<p class="dim">Only @${esc(viewer.screen_name)} can send money from this account.</p>` : `<a class="pill primary" href="/account/money/send">Send</a>`}</section>
 ${notice ? `<div class="notice" role="status">${notice}</div>` : ""}${error ? `<div class="notice error" role="alert">${esc(error)}</div>` : ""}
-<section class="block"><h2>Send money</h2>${sendForm}</section>
-<section><h2 style="padding:16px 16px 4px">Activity</h2>${list}</section>
+<section aria-label="Activity">${list}</section>
 ${
 	isAdmin
-		? `<section class="admin"><h2>Adjust a balance</h2><p class="dim">Admins only. A negative amount takes money away, never below $0.00. Recorded in the audit log.</p>
-<form method="post" class="row"><input type="hidden" name="action" value="adjust"><input name="to" required placeholder="@username" aria-label="Username"><input name="amount" required placeholder="-5.00 or 20" aria-label="Amount"><button type="submit" class="secondary">Apply</button></form></section>`
+		? `<details class="admin"><summary>Adjust a balance (admins)</summary><form method="post" action="/account/money" class="row"><input type="hidden" name="action" value="adjust"><input name="to" required placeholder="@username" aria-label="Username"><input name="amount" required placeholder="20 or -5.00" aria-label="Amount"><button type="submit" class="secondary">Apply</button></form><p class="dim">Never below $0.00. Recorded in the audit log.</p></details>`
 		: ""
 }`,
-	});
+		status,
+	);
+}
+
+// sending, on a screen of its own: who, how much, a note
+async function sendView(req: Request, viewer: Viewer, status = 200, form: { to?: string; amount?: string; note?: string } = {}, error = "") {
+	const [balance, picks] = await Promise.all([balanceOf(viewer.id), quickPicks(viewer.id)]);
+	const to = form.to ?? new URL(req.url).searchParams.get("to") ?? "";
+	const chosen = to.replace(/^@/, "").toLowerCase();
+	return page(
+		req,
+		viewer,
+		"Send",
+		`${error ? `<div class="notice error" role="alert">${esc(error)}</div>` : ""}
+<form method="post" action="/account/money/send" class="send" autocomplete="off">
+<input type="hidden" name="idem" value="${crypto.randomUUID()}">
+<div class="big"><span>$</span><input id="amount" name="amount" required inputmode="decimal" placeholder="0" aria-label="Amount" value="${esc(form.amount ?? "")}"></div>
+<div class="balance">${formatCents(balance)} available</div>
+${
+	picks.length
+		? `<div class="picks" role="group" aria-label="People">${picks
+				.map((p: any) => `<button type="button" class="pick" data-handle="${esc(p.screen_name)}" aria-pressed="${chosen === p.screen_name.toLowerCase()}"><img src="${esc(avatarUrl(p.avatar_url))}" alt=""><span>${esc(p.name || p.screen_name)}</span></button>`)
+				.join("")}</div>`
+		: ""
+}
+<div class="field"><input id="to" name="to" required placeholder=" " value="${esc(to)}" autocapitalize="off" spellcheck="false"><label for="to">To</label></div>
+<div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(form.note ?? "")}"><label for="note">What's it for?</label></div>
+<label class="check">Share it in a post<input type="checkbox" name="share" value="1"></label>
+<button type="submit" class="pill primary wide">Send</button>
+<p class="fine">Instant and free. ${esc(settings().instance_name)} Money has no cash value.</p>
+</form>`,
+		status,
+		{ href: "/account/money", label: "Back to Money" },
+	);
 }
 
 // one payment, for either side, or anyone once a side put it in a post
 async function receipt(req: Request, viewer: Viewer, id: string) {
+	const back = { href: "/account/money", label: "Back to Money" };
 	const t = (await payments([id], viewer.id)).get(id);
-	if (!t) return accountPage({ req, viewer, status: 404, title: "Payment", back: { href: "/account/money", label: "Back to Money" }, css: CSS, body: `<p class="empty">This payment doesn't exist, or isn't yours to see.</p>` });
+	if (!t) return page(req, viewer, "Payment", `<p class="empty">This payment doesn't exist, or isn't yours to see.</p>`, 404, back);
 	const mine = viewer.id === t.sender.id || viewer.id === t.recipient.id;
-	const sent = viewer.id === t.sender.id;
+	const other = viewer.id === t.sender.id ? t.recipient : t.sender;
 	const post = new URL(req.url).searchParams.has("post");
-	const who = (p: Party) => `<a href="/${esc(p.screen_name)}">${esc(p.name)}</a> <span class="dim">@${esc(p.screen_name)}</span>`;
-	return accountPage({
+	const who = (p: Party) => `<a href="/${esc(p.screen_name)}">${esc(p.name)}</a>`;
+	return page(
 		req,
 		viewer,
-		title: "Payment",
-		back: { href: "/account/money", label: "Back to Money" },
-		css: CSS,
-		head: `<script>addEventListener("DOMContentLoaded",function(){${COMPOSE}})</script>`,
-		body: `<section class="receipt">${cardHtml(t, (mine ? viewer.screen_name : t.sender.screen_name).toLowerCase())}
-${mine ? `<button type="button" class="pill primary" data-compose="${esc(paymentUrl(t.id))}"${post ? " data-auto" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${POST_ICON}"/></svg>Share in a post</button>` : ""}</section>
-<section class="receipt"><dl>
-<dt>Amount</dt><dd><b>${formatCents(t.amount)}</b></dd>
+		"Payment",
+		`<section class="receipt">${cardHtml(t, (mine ? viewer.screen_name : t.sender.screen_name).toLowerCase())}
+${mine ? `<div class="row"><button type="button" class="pill primary" data-compose="${esc(paymentUrl(t.id))}"${post ? " data-auto" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${POST_ICON}"/></svg>Post</button><a class="pill" href="/account/money/send?to=${encodeURIComponent(other.screen_name)}">${viewer.id === t.sender.id ? "Pay again" : "Pay back"}</a></div>` : ""}</section>
+<dl>
 <dt>From</dt><dd>${who(t.sender)}</dd>
 <dt>To</dt><dd>${who(t.recipient)}</dd>
-${t.note ? `<dt>Note</dt><dd>${esc(t.note)}</dd>` : ""}
+<dt>Amount</dt><dd>${formatCents(t.amount)}</dd>
 <dt>Date</dt><dd>${t.at.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</dd>
 <dt>Status</dt><dd style="color:var(--success)">Completed</dd>
-<dt>Payment ID</dt><dd class="code">${esc(t.id)}</dd>
-</dl>${mine && sent ? `<a class="pill" href="/account/money?to=${encodeURIComponent(t.recipient.screen_name)}">Pay @${esc(t.recipient.screen_name)} again</a>` : mine ? `<a class="pill" href="/account/money?to=${encodeURIComponent(t.sender.screen_name)}">Pay @${esc(t.sender.screen_name)} back</a>` : ""}</section>`,
-	});
+</dl>`,
+		200,
+		back,
+	);
 }
 
 export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response> {
@@ -412,40 +432,42 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 	const url = new URL(req.url);
 	const one = /^\/account\/money\/p\/(\d{1,19})$/.exec(url.pathname);
 	if (one) return receipt(req, viewer, one[1]);
-	if (url.pathname !== "/account/money") return new Response("not found", { status: 404 });
+	const sending = url.pathname === "/account/money/send";
+	if (!sending && url.pathname !== "/account/money") return new Response("not found", { status: 404 });
 	if (req.method !== "POST") {
+		if (sending) return viewer.actor ? view(req, viewer, 403, "", `Only @${viewer.screen_name} can send money from this account.`) : sendView(req, viewer);
 		const sent = url.searchParams.get("sent");
 		const [t] = sent && /^\d{1,19}$/.test(sent) ? await sql`select t.id, t.amount_cents, u.screen_name from money_transfers t join users u on u.id = t.recipient_id where t.id = ${sent}::bigint and t.sender_id = ${viewer.id}::bigint` : [];
-		return view(req, viewer, 200, {}, t ? `<span>Sent ${formatCents(Number(t.amount_cents))} to @${esc(t.screen_name)}.</span><button type="button" class="pill" data-compose="${esc(paymentUrl(String(t.id)))}">Share in a post</button>` : "");
+		return view(req, viewer, 200, t ? `<span>Sent ${formatCents(Number(t.amount_cents))} to @${esc(t.screen_name)}.</span><button type="button" class="pill" data-compose="${esc(paymentUrl(String(t.id)))}">Post it</button>` : "");
 	}
 	const form = await req.formData();
 	const field = (k: string) => String(form.get(k) ?? "");
 	const values = { to: field("to"), amount: field("amount"), note: field("note") };
 	if (field("action") === "adjust") {
-		if (viewer.role !== "admin" || viewer.actor) return view(req, viewer, 403, {}, "", "Only admins can adjust balances.");
+		if (viewer.role !== "admin" || viewer.actor) return view(req, viewer, 403, "", "Only admins can adjust balances.");
 		const negative = values.amount.trim().startsWith("-");
 		const cents = parseAmount(values.amount.trim().replace(/^-/, ""));
-		if (!cents) return view(req, viewer, 400, {}, "", "Enter an amount, like 20 or -5.00.");
+		if (!cents) return view(req, viewer, 400, "", "Enter an amount, like 20 or -5.00.");
 		try {
 			const r = await adjust(viewer, values.to, negative ? -cents : cents);
-			return view(req, viewer, 200, {}, `@${esc(r.to)} now has ${formatCents(r.balance)}.`);
+			return view(req, viewer, 200, `@${esc(r.to)} now has ${formatCents(r.balance)}.`);
 		} catch (e) {
-			if (e instanceof MoneyError) return view(req, viewer, 400, {}, "", e.message);
+			if (e instanceof MoneyError) return view(req, viewer, 400, "", e.message);
 			throw e;
 		}
 	}
-	if (viewer.actor) return view(req, viewer, 403, values, "", `Only @${viewer.screen_name} can send money from this account.`);
+	if (viewer.actor) return view(req, viewer, 403, "", `Only @${viewer.screen_name} can send money from this account.`);
 	const limit = hit("write", viewer.id);
-	if (!limit.ok) return view(req, viewer, 429, values, "", "You're sending too fast. Wait a few minutes and try again.");
+	if (!limit.ok) return sendView(req, viewer, 429, values, "You're sending too fast. Wait a few minutes and try again.");
 	const cents = parseAmount(values.amount);
-	if (cents === null) return view(req, viewer, 400, values, "", "Enter an amount, like 5 or 12.50.");
+	if (cents === null) return sendView(req, viewer, 400, values, "Enter an amount, like 5 or 12.50.");
 	try {
 		const r = await sendMoney(viewer.id, values.to, cents, values.note, field("idem"));
 		// after a send the page reloads by GET, so going back or refreshing can't send it twice
 		const to = field("share") ? `/account/money/p/${r.id}?post=1` : `/account/money?sent=${r.id}`;
 		return new Response(null, { status: 303, headers: { location: to } });
 	} catch (e) {
-		if (e instanceof MoneyError) return view(req, viewer, 400, values, "", e.message);
+		if (e instanceof MoneyError) return sendView(req, viewer, 400, values, e.message);
 		throw e;
 	}
 }

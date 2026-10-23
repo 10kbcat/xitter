@@ -48,7 +48,8 @@ try {
 	const sb = await signIn(b);
 	const first = await sa.page();
 	check("the page shows the starting balance", first.includes("$100.00"));
-	check("with a send form", first.includes('name="amount"') && first.includes('name="idem"'));
+	const form = await sa.page("/send");
+	check("with a send screen", first.includes('href="/account/money/send"') && form.includes('name="amount"') && form.includes('name="idem"'));
 
 	let r = await sa.send({ to: `@${b}`, amount: "12.50", note: "i miss you" });
 	check("sending redirects back to the page", r.status === 303 && (r.headers.get("location") ?? "").startsWith("/account/money?sent="), r.status);
@@ -56,13 +57,13 @@ try {
 	check("the recipient is paid", (await balance(b)) === 11250);
 	const after = await sa.page(new URL(r.headers.get("location")!, origin).search);
 	check("the sender sees a confirmation", after.includes(`Sent $12.50 to @${b}`));
-	check("and the payment in Activity", after.includes("You sent") && after.includes("i miss you"));
+	check("and the payment in Activity", after.includes("−$12.50") && after.includes("i miss you"));
 	const payId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
 	const theirs = await sb.page();
 	check("the recipient sees it too", theirs.includes("+$12.50") && theirs.includes("i miss you"));
 
 	const receipt = await sa.page(`/p/${payId}`);
-	check("the payment has its own page", receipt.includes("Completed") && receipt.includes("Share in a post"));
+	check("the payment has its own page", receipt.includes("Completed") && receipt.includes("data-compose"));
 	const sc = await signIn(c);
 	check("a stranger can't see an unshared payment", (await fetch(`${origin}/account/money/p/${payId}`, { headers: sc.headers })).status === 404);
 	check("nor its card", !(payId in (await sc.json(`money/cards?ids=${payId}`))));
