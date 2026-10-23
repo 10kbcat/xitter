@@ -12,6 +12,7 @@ import { articlesByIds } from "./articles";
 import { blockedFor, federatedHiddenFor, hasMutedWord, isBlockedEitherWay, mutedFor, outOfView, protectedFor, replyLimited, suspendedFor } from "./blocks";
 import { staffViewer } from "./staff-access";
 import { fetchPreview, linkCard, linksIn, previewable, previewsFor, statusLinkOf } from "./links";
+import { paymentCards } from "./money";
 import { mediaForPosts } from "./media";
 import { communityObjects } from "./community-model";
 import { webSource } from "./platforms";
@@ -155,6 +156,12 @@ async function hydrate(viewerId: string, posts: PostRow[], quotes = true): Promi
 	for (const p of posts) {
 		const preview = previews.get(linkOf(p) ?? "");
 		if (preview) p.linkCard = linkCard(preview);
+	}
+	// a payment's link put in by one of its sides becomes its card (money.ts)
+	const payable = posts.filter((p) => !p.linkCard && !p.poll && !p.conversationCard && !p.quote_id && !p.quoted && !p.article_id && !p.media?.length && p.text.includes("/i/xmoney/p/"));
+	if (payable.length) {
+		const cards = await paymentCards(payable.map((p) => ({ authorId: p.author.id, text: p.text })));
+		for (const [i, p] of payable.entries()) if (cards[i]) p.linkCard = cards[i];
 	}
 	const editedIds = posts.filter((p) => p.edit_count).map((p) => p.id);
 	if (editedIds.length) {

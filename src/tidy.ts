@@ -235,13 +235,15 @@ export const TIDY_SCRIPT = `(function(){
 	// the side bar's own entries (where "nav") open on a path of the client's
 	// own instead, which it answers with its not-found page in the main column
 	var FULL={"/i/xmoney":"/account/money"};
-	function full(p){for(var k in FULL)if(FULL[k]===p)return k}
+	// and the pages under it (a payment: /i/xmoney/p/<id>)
+	function fullOf(p){for(var k in FULL)if(p===k||p.indexOf(k+"/")===0)return FULL[k]+p.slice(k.length)}
+	function full(p){for(var k in FULL)if(p===FULL[k]||p.indexOf(FULL[k]+"/")===0)return k+p.slice(FULL[k].length)}
 	function own(href){
 		var u=new URL(href,location.href);
 		if(full(u.pathname))return full(u.pathname)+u.search;
 		return u.pathname.indexOf("/account/")===0?OWN+u.pathname.slice(9)+u.search:u.pathname+u.search+u.hash;
 	}
-	function framed(p){return p.indexOf(OWN)===0?"/account/"+p.slice(OWN.length):FULL[p]||null}
+	function framed(p){return p.indexOf(OWN)===0?"/account/"+p.slice(OWN.length):fullOf(p)||null}
 	// the client follows the address on popstate, so this moves it without a reload
 	function go(path,replace){
 		if(location.pathname+location.search+location.hash===path)return;
@@ -267,7 +269,7 @@ export const TIDY_SCRIPT = `(function(){
 	var since=0;
 	function pane(){
 		var p=location.pathname,f=document.getElementById("xitter-pane"),base=framed(p);
-		document.documentElement.toggleAttribute("data-xitter-full",!!(base&&FULL[p]&&f&&f.hasAttribute("data-col")));
+		document.documentElement.toggleAttribute("data-xitter-full",!!(base&&fullOf(p)&&f&&f.hasAttribute("data-col")));
 		if(!base){if(f)f.remove();since=0;return}
 		var want=base+location.search;
 		var err=document.querySelector('[data-testid="error-detail"]');
@@ -276,7 +278,7 @@ export const TIDY_SCRIPT = `(function(){
 		if(f)heading(f);
 		// should the client draw no not-found page on a side bar path, the frame
 		// takes the main column itself once the client has settled
-		var col=!err&&FULL[p]&&document.querySelector('[data-testid="primaryColumn"]');
+		var col=!err&&fullOf(p)&&document.querySelector('[data-testid="primaryColumn"]');
 		if(col&&!f){
 			if(!since){since=Date.now();setTimeout(pane,1000)}
 			if(Date.now()-since<1000)return;
@@ -405,7 +407,7 @@ export const TIDY_SCRIPT = `(function(){
 			}
 			// bold while its page is open, as the client marks its own (and not
 			// because the Profile link was copied while the profile was open)
-			var on=location.pathname===own(l.href).split("?")[0];
+			var at=own(l.href).split("?")[0],on=location.pathname===at||location.pathname.indexOf(at+"/")===0;
 			if(on)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");
 			[].forEach.call(a.querySelectorAll("span"),function(n){var w=on?"700":"400";if(n.style.fontWeight!==w)n.style.fontWeight=w});
 		});

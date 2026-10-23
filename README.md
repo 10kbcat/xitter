@@ -95,8 +95,13 @@ copy during setup, and it stays on that machine.
   is the instance's own play money, not real currency: a wallet starts with
   `money.starting_cents` (default $100), one payment moves up to
   `money.max_transfer_cents` (default $1,000), and admins add or take money on
-  the same page (recorded in the audit log). Admin > Settings, feature
-  switches turns it off. `bun scripts/test-money.ts` checks it
+  the same page (recorded in the audit log). Each payment has a page
+  (`/i/xmoney/p/<id>`); its link in a post by either side shows as a payment
+  card, as on X ("$100 sent to liza", or "$3.52 at Taco Bell" for a gold
+  business account), added from the composer's $ button, "Share it in a post"
+  when sending, or the payment's page. The recipient gets a notification and a
+  browser push. Admin > Settings, feature switches turns it off.
+  `bun scripts/test-money.ts` checks it
 - Polls with a photo on each choice
 - YouTube links (videos, Shorts, live, youtu.be, with `t=` start times) become
   player cards: the thumbnail comes through `EMBED_PROXY`, and pressing play

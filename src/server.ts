@@ -68,7 +68,7 @@ import { failInterrupted } from "./migration-import";
 import { migrateRoute } from "./migration-page";
 import { acceptedEncoding, compressResponse, compressedFile } from "./compress";
 import { forgetRanking } from "./ranking";
-import { moneyRoute } from "./money";
+import { cardsApi, moneyRoute, recentApi } from "./money";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -244,6 +244,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/theme") return themeApi(req, viewer);
 	if (path === "/xitter/gif") return gifProxy(url);
 	if (path === "/xitter/stickers") return Response.json(await stickerPacks());
+	if (path === "/xitter/money/cards") return cardsApi(viewer, url);
+	if (path === "/xitter/money/recent") return recentApi(viewer);
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
 	if (viewer.status === "restricted" && bucketsFor(req.method, path, operation, url).some((b) => b === "post" || b === "dm"))
 		return apiError(403, 326, "Your account can't post or send messages right now.");
@@ -441,7 +443,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (viewer && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document" && SETTINGS_PAGES.has(p))
 		return Response.redirect(`/settings/xitter/${p.slice("/account/".length)}${url.search}`, 302);
 	// and the side bar's pages fill the main column instead (tidy.ts FULL)
-	if (viewer && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document" && p === "/account/money") return Response.redirect(`/i/xmoney${url.search}`, 302);
+	if (viewer && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document" && (p === "/account/money" || p.startsWith("/account/money/"))) return Response.redirect(`/i/xmoney${p.slice("/account/money".length)}${url.search}`, 302);
 	if (p === "/oauth/authorize") return oauthAuthorize(req, url, viewer);
 	if (p === "/account/apps" && viewer) return connectedAppsRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);
@@ -473,7 +475,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/account/decor" && viewer) return decorRoute(req, viewer);
 	if (p === "/account/theme" && viewer) return themeRoute(req, viewer);
 	if (p === "/account/migrate" && viewer) return migrateRoute(req, viewer);
-	if (p === "/account/money" && viewer) return moneyRoute(req, viewer);
+	if ((p === "/account/money" || p.startsWith("/account/money/")) && viewer) return moneyRoute(req, viewer);
 	if (p.startsWith("/i/ton/data/xchat_media/")) return chatMediaRoute(req, viewer, url);
 	// pictures and oEmbed for previews of public posts in other apps (embeds.ts)
 	if (p.startsWith("/embed/")) return embedImage(p);
