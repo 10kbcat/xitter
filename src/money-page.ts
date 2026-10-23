@@ -97,6 +97,18 @@ a.tx:hover{text-decoration:none}
 .field input{padding-top:22px;padding-bottom:6px;min-height:56px}
 .field label{position:absolute;left:13px;top:7px;margin:0;font-size:13px;color:var(--muted);pointer-events:none}
 .field:focus-within label{color:var(--accent)}
+/* the To and From fields' list of accounts, as X's typeahead */
+.people{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;max-height:320px;overflow-y:auto;background:var(--bg);border-radius:8px;box-shadow:0 0 15px rgb(255 255 255 / .2),0 0 3px 1px rgb(255 255 255 / .15)}
+:root[data-theme="light"] .people,:root:not([data-theme]) .people{box-shadow:0 0 15px rgb(101 119 134 / .2),0 0 3px 1px rgb(101 119 134 / .15)}
+.people[hidden]{display:none}
+.person{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer}
+.person[aria-selected="true"]{background:var(--surface)}
+.person>img{width:40px;height:40px;border-radius:50%;object-fit:cover;flex:none;background:var(--border)}
+.person>img.xm-sq{border-radius:8px}
+.person .name{display:flex;align-items:center;gap:2px;font-weight:700;min-width:0}
+.person .name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person .handle{color:var(--muted);font-size:15px}
+.people .none{padding:16px;color:var(--muted)}
 .check{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--text);font-size:15px;margin:0}
 .check small{display:block;color:var(--muted);font-size:13px}
 .check input{appearance:none;width:40px;height:24px;min-height:0;padding:0;border:0;border-radius:9999px;background:var(--field);position:relative;cursor:pointer;transition:background .15s;flex:none}
@@ -126,7 +138,61 @@ const SCRIPT = `document.addEventListener("click",function(e){
 });
 document.querySelectorAll(".pick").forEach(function(p){p.addEventListener("click",function(){var to=document.getElementById("to");to.value="@"+p.dataset.handle;document.querySelectorAll(".pick").forEach(function(q){q.setAttribute("aria-pressed",q===p?"true":"false")});document.getElementById("amount").focus()})});
 var amt=document.getElementById("amount");if(amt){var fit=function(){amt.style.width=Math.max(1,amt.value.length)*0.62+0.4+"em"};amt.addEventListener("input",fit);fit();if(!amt.value)amt.focus()}
-var auto=document.querySelector("[data-compose][data-auto]");if(auto)auto.click();`;
+var auto=document.querySelector("[data-compose][data-auto]");if(auto)auto.click();
+document.querySelectorAll("input[data-people]").forEach(function(input){
+	var box=document.createElement("div");
+	box.className="people";box.id="people";box.setAttribute("role","listbox");box.hidden=true;
+	input.parentNode.appendChild(box);
+	var items=[],at=-1,timer=null,asked="";
+	function show(open){box.hidden=!open;input.setAttribute("aria-expanded",open?"true":"false")}
+	function mark(i){at=i;[].forEach.call(box.children,function(c,j){c.setAttribute("aria-selected",j===i?"true":"false");if(j===i)c.scrollIntoView({block:"nearest"})})}
+	function pick(p){
+		input.value="@"+p.screen_name;show(false);
+		document.querySelectorAll(".pick").forEach(function(q){q.setAttribute("aria-pressed",q.dataset.handle.toLowerCase()===p.screen_name.toLowerCase()?"true":"false")});
+		var next=document.getElementById("amount");
+		if(!next||next.value)next=document.getElementById("note");
+		if(next)next.focus();
+	}
+	function draw(list){
+		items=list;box.innerHTML="";at=-1;
+		if(!list.length){var n=document.createElement("div");n.className="none";n.textContent="No accounts match";box.appendChild(n);show(true);return}
+		list.forEach(function(p,i){
+			var row=document.createElement("div");
+			row.className="person";row.setAttribute("role","option");row.setAttribute("aria-selected","false");
+			var img=document.createElement("img");img.src=p.avatar;img.alt="";if(p.square)img.className="xm-sq";row.appendChild(img);
+			var text=document.createElement("div");text.style.minWidth="0";
+			var name=document.createElement("div");name.className="name";
+			var nm=document.createElement("span");nm.textContent=p.name;name.appendChild(nm);
+			name.insertAdjacentHTML("beforeend",p.badges);
+			var handle=document.createElement("div");handle.className="handle";handle.textContent="@"+p.screen_name;
+			text.appendChild(name);text.appendChild(handle);row.appendChild(text);
+			row.addEventListener("mousedown",function(e){e.preventDefault();pick(p)});
+			row.addEventListener("mousemove",function(){if(at!==i)mark(i)});
+			box.appendChild(row);
+		});
+		show(true);mark(0);
+	}
+	function look(){
+		var q=input.value.trim().replace(/^@/,"");
+		if(!q){show(false);return}
+		if(q===asked&&items.length){show(true);return}
+		asked=q;
+		fetch("/account/money/people?q="+encodeURIComponent(q),{credentials:"same-origin"}).then(function(r){return r.ok?r.json():[]}).then(function(list){
+			if(asked===q&&document.activeElement===input)draw(list);
+		},function(){});
+	}
+	input.addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(look,120)});
+	input.addEventListener("focus",function(){if(input.value.trim())look()});
+	input.addEventListener("blur",function(){setTimeout(function(){show(false)},100)});
+	input.addEventListener("keydown",function(e){
+		if(box.hidden||!items.length)return;
+		if(e.key==="ArrowDown"){e.preventDefault();mark((at+1)%items.length)}
+		else if(e.key==="ArrowUp"){e.preventDefault();mark((at-1+items.length)%items.length)}
+		else if(e.key==="Enter"&&at>=0){e.preventDefault();pick(items[at])}
+		else if(e.key==="Tab"&&at>=0){pick(items[at])}
+		else if(e.key==="Escape"){show(false)}
+	});
+});`;
 const POST_ICON = "M23 3c-6.62-.1-10.38 2.421-13.05 6.03C7.29 12.61 6 17.331 6 22h2c0-1.007.07-2.012.19-3H12c4.1 0 7.48-3.082 7.94-7.054C22.79 10.147 23.17 6.359 23 3zm-7 8h-1.5v2H16c.63-.016 1.2-.08 1.72-.188C16.95 15.24 14.68 17 12 17H8.55c.57-2.512 1.57-4.851 3-6.78 2.16-2.912 5.29-4.911 9.45-5.187C20.95 8.079 19.9 11 16 11zM4 9V6H1V4h3V1h2v3h3v2H6v3H4z";
 const HEART = "M16.697 5.5c-1.222-.06-2.679.51-3.89 2.16l-.805 1.09-.806-1.09C9.984 6.01 8.526 5.44 7.304 5.5c-1.243.07-2.349.78-2.91 1.91-.552 1.12-.633 2.78.479 4.82 1.074 1.97 3.257 4.27 7.129 6.61 3.87-2.34 6.052-4.64 7.126-6.61 1.111-2.04 1.03-3.7.477-4.82-.561-1.13-1.666-1.84-2.908-1.91z";
 const tile = `<span class="tile" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${MONEY_ICON}"/></svg></span>`;
@@ -229,6 +295,31 @@ async function quickPicks(userId: string) {
 	return rows.map((r: any) => found.get(r.id)).filter((p: Party | undefined): p is Party => !!p);
 }
 
+// GET /account/money/people?q=: accounts for the To and From fields' list,
+// matched by handle or name; people the viewer follows and has paid first
+async function peopleApi(viewer: Viewer, query: string): Promise<Response> {
+	const q = query.trim().replace(/^@/, "").toLowerCase().slice(0, 50);
+	if (!q) return Response.json([]);
+	const like = `${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+	const rows = await sql`select u.id::text from users u
+		where u.instance is null and u.status <> 'suspended' and u.deactivated_at is null and u.id <> ${viewer.id}::bigint
+			and (lower(u.screen_name) like ${like} or lower(u.name) like ${like} or lower(u.name) like ${`% ${like}`})
+			and not exists (select 1 from blocks b where (b.blocker_id = u.id and b.blocked_id = ${viewer.id}::bigint) or (b.blocker_id = ${viewer.id}::bigint and b.blocked_id = u.id))
+		order by lower(u.screen_name) = ${q} desc,
+			exists (select 1 from money_transfers t where t.sender_id = ${viewer.id}::bigint and t.recipient_id = u.id) desc,
+			exists (select 1 from follows f where f.follower_id = ${viewer.id}::bigint and f.followee_id = u.id) desc,
+			lower(u.screen_name) like ${like} desc, length(u.screen_name), u.id
+		limit 8`;
+	const found = await parties(rows.map((r: any) => r.id));
+	return Response.json(
+		rows
+			.map((r: any) => found.get(r.id))
+			.filter((x: Party | undefined): x is Party => !!x)
+			.map((x: Party) => ({ screen_name: x.screen_name, name: x.merchant?.name ?? x.name, avatar: x.avatar, square: x.square, badges: badges(x) })),
+		{ headers: { "cache-control": "private, no-store" } },
+	);
+}
+
 // sending, on a screen of its own: who, how much, a note; or paying a request
 async function sendView(req: Request, viewer: Viewer, status = 200, form: { to?: string; amount?: string; note?: string; request?: string } = {}, error = "") {
 	const url = new URL(req.url);
@@ -260,7 +351,7 @@ ${
 							.join("")}</div>`
 					: ""
 			}
-<div class="field"><input id="to" name="to" required placeholder=" " value="${esc(to)}" autocapitalize="off" spellcheck="false"><label for="to">To</label></div>`
+<div class="field"><input id="to" name="to" required placeholder=" " value="${esc(to)}" autocapitalize="off" autocomplete="off" spellcheck="false" data-people role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="people"><label for="to">To</label></div>`
 }
 <div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(note)}"><label for="note">What's it for?</label></div>
 <label class="check">Share it in a post<input type="checkbox" name="share" value="1"></label>
@@ -282,7 +373,7 @@ async function requestView(req: Request, viewer: Viewer, status = 200, form: { f
 <form method="post" action="/account/money/request" class="send" autocomplete="off">
 <div class="big"><span>$</span><input id="amount" name="amount" inputmode="decimal" placeholder="0" aria-label="Amount" value="${esc(form.amount ?? "")}"></div>
 <div class="balance">Leave it at 0 to let people choose</div>
-<div class="field"><input id="from" name="from" placeholder=" " value="${esc(from)}" autocapitalize="off" spellcheck="false"><label for="from">From (@username, or empty for anyone)</label></div>
+<div class="field"><input id="from" name="from" placeholder=" " value="${esc(from)}" autocapitalize="off" autocomplete="off" spellcheck="false" data-people role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="people"><label for="from">From (@username, or empty for anyone)</label></div>
 <div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(form.note ?? "")}"><label for="note">What's it for?</label></div>
 <label class="check"><span>Share it in a post<small>A Pay button anyone who sees the post can use</small></span><input type="checkbox" name="share" value="1" checked></label>
 <button type="submit" class="pill primary wide">Request</button>
@@ -454,6 +545,7 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 			throw e;
 		}
 	}
+	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "");
 	const sending = p === "/account/money/send";
 	if (!sending && p !== "/account/money") return new Response("not found", { status: 404 });
 	if (req.method !== "POST") {
