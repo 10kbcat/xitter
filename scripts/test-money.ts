@@ -156,7 +156,9 @@ try {
 	check("a post with it gets a Pay card", JSON.stringify(payPost.card ?? {}).includes(`Pay @${b}`));
 	const payCard = (await sc.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string;
 	check("the card has a Pay button for others", payCard.includes(`Pay @${b}`) && payCard.includes(`send?request=${openId}`));
-	check("but not for its owner", !((await sb.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string).includes("xm-pay"));
+	const ownCard = (await sb.json(`money/cards?ids=r${openId}&by=${b}`))[`r${openId}`] as string;
+	check("its owner's Pay button opens the request instead", ownCard.includes("xm-pay") && ownCard.includes(`/account/money/r/${openId}`) && !ownCard.includes("send?request="));
+	check("the card leads to the account to pay", payCard.includes(`data-xm-go="/${b}"`));
 	r = await sc.form("/account/money/send", { to: b, amount: "2.25", request: openId, idem: crypto.randomUUID() });
 	r = await sa.form("/account/money/send", { to: b, amount: "1", request: openId, idem: crypto.randomUUID() });
 	check("anyone pays it, as often as they like", (await sb.page(`/r/${openId}`)).includes("2 times"));
@@ -175,6 +177,7 @@ try {
 	const shopCard = (await sb.json(`money/cards?ids=p${shopId}&by=${b}`))[`p${shopId}`] as string;
 	check("payments to it read as purchases", shopCard.includes("$3.52") && shopCard.includes("Taco Bell") && shopCard.includes(">at<"));
 	check("with its gold checkmark", shopCard.includes("#e2b719"));
+	check("and leads to the account paid", shopCard.includes(`data-xm-go="/${c}"`));
 	await sql`insert into affiliations (org_id, user_id) values (${ids[2]}::bigint, ${ids[1]}::bigint) on conflict do nothing`;
 	r = await sa.send({ to: b, amount: "1", note: "" });
 	const affId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;

@@ -119,7 +119,7 @@ const SCRIPT = `document.addEventListener("click",function(e){
 	var b=e.target.closest("[data-compose]");
 	if(b){e.preventDefault();var t=b.getAttribute("data-compose");try{parent.__xitterCompose(t)}catch(x){sessionStorage.setItem("xitter-compose",t);top.location.href="/compose/post"}return}
 	var g=e.target.closest("[data-xm-go]");
-	if(g){e.preventDefault();location.href=g.getAttribute("data-xm-go")}
+	if(g){e.preventDefault();var to=g.getAttribute("data-xm-go");if(to.indexOf("/account/")===0)location.href=to;else try{parent.__xitterGo(to)}catch(x){top.location.href=to}}
 });
 document.querySelectorAll(".pick").forEach(function(p){p.addEventListener("click",function(){var to=document.getElementById("to");to.value="@"+p.dataset.handle;document.querySelectorAll(".pick").forEach(function(q){q.setAttribute("aria-pressed",q===p?"true":"false")});document.getElementById("amount").focus()})});
 var amt=document.getElementById("amount");if(amt){var fit=function(){amt.style.width=Math.max(1,amt.value.length)*0.62+0.4+"em"};amt.addEventListener("input",fit);fit();if(!amt.value)amt.focus()}

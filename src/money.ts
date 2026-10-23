@@ -330,8 +330,9 @@ export function moneyKeyOf(url: string): string | undefined {
 // The card as X draws a payment in a post: a person paid shows the amount, both
 // faces and the note; a merchant is a purchase, with its banner and logo when
 // it shows a banner. `by` is the handle of the account the card speaks for.
+// The card leads to the account that was paid.
 export function paymentCard(t: Payment, by: string) {
-	const go = `data-xm-go="/account/money/p/${t.id}"`;
+	const go = `data-xm-go="/${esc(t.recipient.screen_name)}"`;
 	const r = t.recipient;
 	if (r.merchant) {
 		const name = `<span class="xm-who"><b>${esc(r.merchant.name)}</b>${badges(r)}</span>`;
@@ -351,21 +352,23 @@ export function paymentCard(t: Payment, by: string) {
 }
 
 // A request in a post, as X's "Pay @name" card: who to pay, with Money, and a
-// Pay button for whoever may pay it. A request of one account names both.
+// Pay button while it's open. A request of one account names both. The Pay
+// button pays it, for whoever may; for anyone else (its own requester, say)
+// it opens the request. The card leads to the account to pay.
 export function requestCard(q: Request, viewerId: string) {
 	const r = q.requester;
-	const payable = q.status === "open" && r.id !== viewerId && (!q.payer || q.payer.id === viewerId);
-	const button = payable
-		? `<a class="xm-pay" href="/account/money/send?request=${q.id}" data-xm-go="/account/money/send?request=${q.id}">Pay</a>`
-		: q.status !== "open"
-			? `<span class="xm-state">${q.status === "paid" ? "Paid" : q.status === "declined" ? "Declined" : "Closed"}</span>`
-			: "";
+	const payable = r.id !== viewerId && (!q.payer || q.payer.id === viewerId);
+	const to = payable ? `/account/money/send?request=${q.id}` : `/account/money/r/${q.id}`;
+	const button =
+		q.status === "open"
+			? `<a class="xm-pay" href="${to}" data-xm-go="${to}">Pay</a>`
+			: `<span class="xm-state">${q.status === "paid" ? "Paid" : q.status === "declined" ? "Declined" : "Closed"}</span>`;
 	const who = r.merchant ? esc(r.merchant.name) : `@${esc(r.screen_name)}`;
 	const line = q.payer
 		? `<b>${who}</b>${badges(r)} <span class="xm-dim">requested</span> <b>${q.amount ? shortCents(q.amount) : ""}</b>`
 		: `<b>Pay ${who}</b>${badges(r)}${q.amount ? ` <span class="xm-dim">·</span> <b>${shortCents(q.amount)}</b>` : ""}`;
 	const sub = q.payer ? `from @${esc(q.payer.screen_name)}${q.note ? ` · ${esc(q.note)}` : ""}` : q.note ? esc(q.note) : `with ${MONEY_WORDMARK}`;
-	return `<div class="xm-card xm-req" role="link" tabindex="0" data-xm-go="/account/money/r/${q.id}">${r.merchant ? face(r, "xm-logo") : ""}
+	return `<div class="xm-card xm-req" role="link" tabindex="0" data-xm-go="/${esc(r.screen_name)}">${r.merchant ? face(r, "xm-logo") : ""}
 <div class="xm-grow"><div class="xm-line">${line}</div><div class="xm-dim xm-sub">${sub}</div></div>${button}</div>`;
 }
 
