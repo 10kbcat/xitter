@@ -234,6 +234,25 @@ try {
 	const affCard = (await sa.json(`money/cards?ids=p${affId}&by=${a}`))[`p${affId}`] as string;
 	check("an affiliate wears a blue check and its organisation", affCard.includes("#1d9bf0") && affCard.includes('class="xm-org"'));
 
+	// ---- release checks
+	await sql`update money_wallets set balance_cents = 10000 where user_id = any(${sql.array(ids.slice(0, 3), "INT8")})`;
+	const twice = crypto.randomUUID();
+	const both = await Promise.all([sa.send({ to: b, amount: "1", idem: twice }), sa.send({ to: b, amount: "1", idem: twice })]);
+	check("two presses of Send at once move the money once", both.every((x) => x.status === 303) && (await balance(a)) === 9900, both.map((x) => x.status));
+	await sql`update users set status = 'restricted' where id = ${ids[2]}::bigint`;
+	const refused = await sc.form("/account/money/request", { from: a, amount: "1", note: "" });
+	check("a restricted account can't ask for money", refused.status === 400 && (await refused.text()).includes("can't ask for money"));
+	await sql`update users set status = 'active' where id = ${ids[2]}::bigint`;
+	await sql`update users set role = 'moderator' where id = ${ids[1]}::bigint`;
+	const modView = await (await admin(sb, "money")).json();
+	check("moderators see payments but not their notes", modView.notes === false && modView.recent.length > 0 && modView.recent.every((r: any) => r.note === ""));
+	check("and can't change anything", (await admin(sb, "adjustMoney", { handle: a, amount: "5" })).status === 403);
+	await sql`update users set role = null where id = ${ids[1]}::bigint`;
+	await sql`update users set banner_url = ${'/media/x.png") , url(https://evil.example/'} where id = ${ids[2]}::bigint`;
+	const oddBanner = (await sb.json(`money/cards?ids=p${shopId}&by=${b}`))[`p${shopId}`] as string;
+	check("a banner address that could break out of the card's style is left out", !oddBanner.includes("evil.example"));
+	await sql`update users set banner_url = null where id = ${ids[2]}::bigint`;
+
 	// ---- switched off: posts keep their cards, everything else goes
 	await admin(sa, "saveSettings", { features: { ...featuresBefore, money: false } });
 	try {

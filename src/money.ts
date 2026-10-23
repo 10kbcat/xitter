@@ -109,6 +109,9 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 		await ensureWallet(to.id, tx);
 		const wallets = await tx`select user_id::text, balance_cents from money_wallets
 			where user_id in (${senderId}::bigint, ${to.id}::bigint) order by user_id for update`;
+		// a second press of Send waited here for the first: it finds what that made
+		const [made] = await tx`select id from money_transfers where sender_id = ${senderId}::bigint and idem = ${idem}`;
+		if (made) return { id: String(made.id), to: to.screen_name, repeated: true };
 		const mine = wallets.find((w: any) => w.user_id === senderId);
 		if (Number(mine.balance_cents) < amountCents) throw new MoneyError("You don't have enough money for that.");
 		const id = newId();
@@ -124,6 +127,8 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 // declines), or of anyone when `from` is empty (a "Pay @name" card, with or
 // without an amount).
 export async function requestMoney(requesterId: string, from: string, amountText: string, note: string): Promise<string> {
+	const [me] = await sql`select status from users where id = ${requesterId}::bigint`;
+	if (me?.status === "restricted") throw new MoneyError("Your account can't ask for money right now.");
 	note = checkNote(note);
 	const amount = amountText.trim() ? parseAmount(amountText) : null;
 	if (amountText.trim() && !amount) throw new MoneyError("Enter an amount, like 5 or 12.50.");
@@ -223,6 +228,9 @@ export type Party = {
 	merchant: { name: string; banner: string | null } | null;
 };
 
+// an address that can sit inside a style's url("...") as it is
+const plainUrl = (u: string | null) => (u && /^(https?:\/\/|\/)[^\s"'()\\<>]+$/.test(u) ? u : null);
+
 export async function parties(ids: string[]): Promise<Map<string, Party>> {
 	if (!ids.length) return new Map();
 	const rows = await sql`select u.id::text, u.screen_name, u.name, u.avatar_url, u.banner_url, u.verified_type,
@@ -241,7 +249,7 @@ export async function parties(ids: string[]): Promise<Map<string, Party>> {
 				badge: r.verified_type ?? (r.org ? "blue" : null),
 				org: r.org ? { name: r.org.name, screen_name: r.org.screen_name, avatar: avatarUrl(r.org.avatar) } : null,
 				square: r.verified_type === "business" || r.verified_type === "government",
-				merchant: r.merchant ? { name: r.m_name || r.name || r.screen_name, banner: r.show_banner && r.banner_url ? absolute(r.banner_url) : null } : null,
+				merchant: r.merchant ? { name: r.m_name || r.name || r.screen_name, banner: r.show_banner && r.banner_url ? plainUrl(absolute(r.banner_url)) : null } : null,
 			} satisfies Party,
 		]),
 	);

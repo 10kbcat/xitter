@@ -251,7 +251,7 @@ ${
 		: `${
 				picks.length
 					? `<div class="picks" role="group" aria-label="People">${picks
-							.map((p) => `<button type="button" class="pick" data-handle="${esc(p.screen_name)}" aria-pressed="${chosen === p.screen_name.toLowerCase()}">${face(p)}<span>${esc(p.merchant?.name ?? p.name)}</span></button>`)
+							.map((p: Party) => `<button type="button" class="pick" data-handle="${esc(p.screen_name)}" aria-pressed="${chosen === p.screen_name.toLowerCase()}">${face(p)}<span>${esc(p.merchant?.name ?? p.name)}</span></button>`)
 							.join("")}</div>`
 					: ""
 			}
@@ -365,7 +365,8 @@ export async function merchantRoute(req: Request, viewer: Viewer): Promise<Respo
 	const me = (await parties([viewer.id])).get(viewer.id)!;
 	const [{ banner_url }] = await sql`select banner_url from users where id = ${viewer.id}::bigint`;
 	const sample = { id: "0", amount: 352, note: "", at: new Date(), sender: me, recipient: me };
-	const asMerchant = { ...me, merchant: { name: m.name || me.name, banner: m.showBanner && banner_url ? absolute(banner_url) : null } };
+	const banner = m.showBanner && banner_url ? absolute(banner_url) : null;
+	const asMerchant = { ...me, merchant: { name: m.name || me.name, banner: banner && /^(https?:\/\/|\/)[^\s"'()\\<>]+$/.test(banner) ? banner : null } };
 	return accountPage({
 		req,
 		viewer,

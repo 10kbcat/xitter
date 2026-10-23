@@ -617,8 +617,8 @@ const RENDER = {
 			"</div>" +
 			'<h2>Payments</h2><div class="row" style="margin-bottom:12px"><input id="mq" placeholder="Payments to or from @username" value="' + esc(q) + '" style="flex:1;min-width:200px"><button class="btn" id="mqs">Search</button></div>' +
 			'<div class="scroll">' + (m.recent.length
-				? '<table class="table"><tr><th>When</th><th>From</th><th>To</th><th>Amount</th><th>Note</th><th></th></tr>' +
-					m.recent.map((r) => '<tr><td class="small">' + esc(when(r.created_at)) + '</td><td><a target="_blank" href="/' + esc(r.sender) + '">@' + esc(r.sender) + '</a></td><td><a target="_blank" href="/' + esc(r.recipient) + '">@' + esc(r.recipient) + "</a></td><td><b>" + usd(r.amount) + '</b></td><td class="small">' + esc(r.note) + "</td><td>" +
+				? '<table class="table"><tr><th>When</th><th>From</th><th>To</th><th>Amount</th>' + (m.notes ? "<th>Note</th>" : "") + "<th></th></tr>" +
+					m.recent.map((r) => '<tr><td class="small">' + esc(when(r.created_at)) + '</td><td><a target="_blank" href="/' + esc(r.sender) + '">@' + esc(r.sender) + '</a></td><td><a target="_blank" href="/' + esc(r.recipient) + '">@' + esc(r.recipient) + "</a></td><td><b>" + usd(r.amount) + "</b></td>" + (m.notes ? '<td class="small">' + esc(r.note) + "</td>" : "") + "<td>" +
 						(r.reversed_at ? '<span class="pill suspended">reversed</span>' : admin ? '<button class="btn danger" data-rev="' + esc(r.id) + '">Reverse</button>' : "") + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No payments' + (q ? " for @" + esc(q) : "") + ".</div>") + "</div>";
 		const again = () => this.money(main, $("#mq").value);

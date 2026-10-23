@@ -6,6 +6,7 @@ import { AdminError, type Action, audit, idOf } from "./admin";
 import { sql } from "./db";
 import { MoneyError, adjust, formatCents, parseAmount } from "./money";
 import { feature, setSetting, settings } from "./settings";
+import { allows } from "./staff-permissions";
 
 // dollars typed in the panel ("100", "0.50") as cents, within limits
 function cents(v: unknown, what: string, min: number, max: number) {
@@ -19,7 +20,7 @@ const handleOf = (u: string) => `@${u}`;
 export const moneyActions: Record<string, Action> = {
 	money: {
 		role: "moderator",
-		run: async (_a, b) => {
+		run: async (a, b) => {
 			const q = typeof b.q === "string" ? b.q.trim().replace(/^@/, "") : "";
 			const [totals] = await sql`select
 					(select coalesce(sum(balance_cents), 0)::bigint from money_wallets) as circulation,
@@ -43,7 +44,9 @@ export const moneyActions: Record<string, Action> = {
 				settings: settings().money,
 				totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, n(v)])),
 				top: top.map((r: any) => ({ ...r, balance: n(r.balance) })),
-				recent: recent.map((r: any) => ({ ...r, amount: n(r.amount) })),
+				// what people wrote on their payments is theirs: only staff who may put payments right see it
+				recent: recent.map((r: any) => ({ ...r, amount: n(r.amount), note: allows(a.role, "money") ? r.note : "" })),
+				notes: allows(a.role, "money"),
 			};
 		},
 	},
