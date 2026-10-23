@@ -47,6 +47,12 @@ check("bad amounts don't", parseAmount("abc") === null && parseAmount("1.234") =
 check("cents format", formatCents(352) === "$3.52" && formatCents(123456) === "$1,234.56");
 
 const ids = [await createUser(a, "Money A", "testpass123"), await createUser(b, "Money B", "testpass123"), await createUser(c, "Money C", "testpass123")];
+// a new wallet gets the instance's starting balance; these start at $100 so the sums below hold
+const [saved] = await sql`select value from settings where key = 'money'`;
+const starting = Number(saved?.value?.starting_cents ?? 500);
+const fresh = await createUser(`m${stamp}d`, "Money D", "testpass123");
+ids.push(fresh);
+await sql`insert into money_wallets (user_id, balance_cents) select unnest(${sql.array(ids.slice(0, 3), "INT8")}::bigint[]), 10000`;
 try {
 	const sa = await signIn(a);
 	const sb = await signIn(b);
@@ -61,7 +67,10 @@ try {
 	const offsite = await sc0.form("/account/money", { action: "accept", back: "https://evil.example/" });
 	check("accepting never leads off Money", offsite.headers.get("location") === "/account/money", offsite.headers.get("location"));
 	const first = await sa.page();
-	check("the page shows the starting balance", first.includes("$100.00"));
+	check("the page shows the balance", first.includes("$100.00"));
+	const sd = await signIn(`m${stamp}d`);
+	await sd.form("/account/money", { action: "accept", back: "/account/money" });
+	check("a new wallet gets the starting balance", (await sd.page()).includes(formatCents(starting)), formatCents(starting));
 	const form = await sa.page("/send");
 	check("with a send screen", first.includes('href="/account/money/send"') && form.includes('name="amount"') && form.includes('name="idem"'));
 

@@ -93,7 +93,7 @@ copy during setup, and it stays on that machine.
 - X Money (Money in the side bar): every account has a wallet and sends money
   to other accounts here, with a note. It is the instance's own play money,
   not real currency: a wallet starts with `money.starting_cents` (default
-  $100), one payment moves up to `money.max_transfer_cents` (default $1,000),
+  $5), one payment moves up to `money.max_transfer_cents` (default $1,000),
   each like on your posts earns you `money.like_cents` (default 50¢, once per
   post and account). Admin > Money sets those three, shows the money in
   circulation, the biggest balances and every payment, and has staff adjust a
