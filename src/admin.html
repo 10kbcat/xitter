@@ -235,7 +235,7 @@ const GROUPS = [
 	["Moderation", ["reports", "appeals", "automod", "posts", "articles", "media"]],
 	["People", ["users", "orgs", "invites", "badges"]],
 	["Content", ["stickers", "hashflags", "topics", "cards"]],
-	["Instance", ["settings", "switches", "email", "apps", "oauth", "federation", "hosting"]],
+	["Instance", ["settings", "switches", "email", "apps", "oauth", "federation"]],
 	["Staff and system", ["permissions", "security", "audit", "errors", "backups", "client"]],
 ];
 function openGroup(g, on) {
@@ -1485,7 +1485,7 @@ async function renderUser(main, id) {
 	}
 	const item = (k) => '<button data-page="' + k + '"><span class="icon">' + PAGES[k].icon + "</span>" + esc(PAGES[k].title) + "</button>";
 	$("#nav").insertAdjacentHTML("beforeend", GROUPS.map(([title, keys]) => {
-		const shown = keys.filter((k) => !PAGES[k].needs || can(PAGES[k].needs));
+		const shown = keys.filter((k) => PAGES[k] && (!PAGES[k].needs || can(PAGES[k].needs)));
 		if (!shown.length) return "";
 		return '<div class="group' + (title ? "" : " solo") + '">' +
 			(title ? '<button class="ghead" aria-expanded="false"><span>' + esc(title) + '</span><span class="icon">expand_more</span></button>' : "") +
